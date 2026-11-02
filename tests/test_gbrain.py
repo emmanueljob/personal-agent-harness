@@ -97,6 +97,24 @@ def test_store_provider_selection_preserves_file_operations(tmp_path, monkeypatc
         Store(tmp_path)
 
 
+def test_external_sources_are_private_and_updates_remove_stale_chunks(tmp_path):
+    from harness.ingestion import normalize,upsert_batch,withdraw_sources
+    brain=IndexedBrain(tmp_path/'brain')
+    row={'source_id':'example:1','source_url':'https://example.org/source','title':'Example reference','text':'orchard '*3000+' late violet'}
+    record=normalize(row,'examples')
+    upsert_batch(brain,[record],'examples',apply=True)
+    assert brain.search('orchard','public')==[]
+    assert any('external_reference' in hit['text'] for hit in brain.search('violet','private'))
+    old_count=len(brain.pages['private'])
+    upsert_batch(brain,[normalize({**row,'text':'replacement plum'},'examples')],'examples',apply=True)
+    brain.search('plum','private')
+    assert len(brain.pages['private'])<old_count
+    assert all('late violet' not in value for value in brain.pages['private'].values())
+    withdraw_sources(brain,['example:1'],'examples',apply=True)
+    brain.search('plum','private')
+    assert not brain.pages['private']
+
+
 @pytest.mark.skipif(not os.getenv('GBRAIN_TEST_BINARY'), reason='Opt-in real local GBrain integration')
 def test_real_gbrain_index_and_visibility(tmp_path):
     import subprocess
@@ -118,3 +136,9 @@ def test_real_gbrain_index_and_visibility(tmp_path):
     assert b.search('plum', 'public')
     (b.scope('public')/'profile.md').unlink()
     assert b.search('plum', 'public') == []
+    from harness.ingestion import normalize,upsert_batch
+    record=normalize({'source_id':'example:long','title':'Synthetic long reference','source_kind':'document','source_url':'https://example.org/source','text':'Early synthetic reference. '*3000+'\n\nquartzplatypus appears only at the end.'},'examples')
+    upsert_batch(b,[record],'examples',apply=True)
+    hits=b.search('quartzplatypus','private')
+    assert hits and 'quartzplatypus' in hits[0]['text'] and 'external_reference' in hits[0]['text']
+    assert b.search('quartzplatypus','public')==[]

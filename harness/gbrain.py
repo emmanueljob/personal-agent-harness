@@ -62,6 +62,8 @@ class GBrain(FileBrain):
         for book in shelf["books"]:
             source = visibility + "/bookshelf.json#" + book["id"]
             docs[source] = "# Book: " + book.get("title", "Untitled") + "\n\n" + json.dumps(book, ensure_ascii=False)
+        from .ingestion import external_documents
+        docs.update(external_documents(self, visibility))
         return docs
 
     @staticmethod

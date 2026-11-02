@@ -95,4 +95,10 @@ class FileBrain:
                 score = len(tokens & set(re.findall(r"\w+", text.lower())))
                 if score:
                     results.append({"source": visibility + "/bookshelf.json#" + book["id"], "text": text, "score": score})
+        from .ingestion import external_documents
+        for visibility in (["public"] if mode == "public" else ["public", "private"]):
+            for source, body in external_documents(self, visibility).items():
+                score = len(tokens & set(re.findall(r"\w+", body.lower())))
+                if score:
+                    results.append({"source":source,"text":body,"score":score,"knowledge_role":"external_reference"})
         return sorted(results, key=lambda x: x["score"], reverse=True)[:5]
