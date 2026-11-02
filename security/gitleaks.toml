@@ -1,0 +1,3 @@
+title = "Default credential rules; no project-wide suppressions"
+[extend]
+useDefault = true
