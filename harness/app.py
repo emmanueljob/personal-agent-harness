@@ -217,6 +217,49 @@ def add_note(body: NoteInput):
     return store.brain.add_note(body.title, body.body, body.scope)
 
 
+# All write/review routes use the local owner boundary, including when a caller
+# knows a valid token for the separately deployed public-only edition.
+from .learning import Learning, Annotation, Revision, Conflict
+
+
+def learning_call(operation):
+    try:
+        return operation()
+    except Conflict as error:
+        raise HTTPException(409, str(error))
+    except KeyError:
+        raise HTTPException(404, "Note, source or reply not found.")
+    except ValueError as error:
+        raise HTTPException(422, str(error))
+
+
+@app.get("/api/owner/learning", dependencies=[Depends(owner)])
+def learning_inventory():
+    return Learning(store.brain).inventory()
+
+
+@app.post("/api/owner/learning", dependencies=[Depends(owner)])
+def save_learning(body: Annotation):
+    return learning_call(lambda: Learning(store.brain).save(body,store))
+
+
+@app.post("/api/owner/learning/{ident}/publish", dependencies=[Depends(owner)])
+def publish_learning(ident: str, body: Revision):
+    return learning_call(lambda: Learning(store.brain).publish(ident,body.revision))
+
+
+@app.delete("/api/owner/learning/{ident}/publication", dependencies=[Depends(owner)])
+def withdraw_learning(ident: str):
+    Learning(store.brain).remove(ident,public_only=True)
+    return {"withdrawn": True}
+
+
+@app.delete("/api/owner/learning/{ident}", dependencies=[Depends(owner)])
+def forget_learning(ident: str):
+    Learning(store.brain).remove(ident)
+    return {"forgotten": True}
+
+
 @app.post("/api/threads/{ident}/routines", dependencies=[Depends(owner)])
 def routine(ident: str, body: RoutineInput):
     rows = store.query("SELECT mode FROM threads WHERE id=?", (ident,))

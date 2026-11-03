@@ -83,8 +83,10 @@ class FileBrain:
 
     def search(self, query, mode):
         self.scope(mode)  # Validate before selecting directories.
-        hits=self.perspectives(query,mode)+self._search_scopes(query, ["public"] if mode == "public" else ["public", "private"])
-        return sorted(hits,key=lambda hit:hit['score'],reverse=True)[:5]
+        from .learning import learning_hits
+        from .retrieval import rank_knowledge
+        hits=learning_hits(self,query,mode)+self.perspectives(query,mode)+self._search_scopes(query, ["public"] if mode == "public" else ["public", "private"])
+        return rank_knowledge(hits)
 
     def _search_scopes(self, query, visibilities):
         for visibility in visibilities:
@@ -106,7 +108,11 @@ class FileBrain:
                 scored = [(len(tokens & set(re.findall(r"\w+", part.lower()))), part) for part in paragraphs]
                 matching = sorted((x for x in scored if x[0]), key=lambda x: x[0], reverse=True)[:3]
                 if matching:
-                    results.append({"source": visibility + "/" + p.relative_to(scope).as_posix(), "text": "\n\n".join(x[1] for x in matching)[:3500], "score": sum(x[0] for x in matching)})
+                    excerpts = [x[1] for x in matching]
+                    if p.parent.name == 'influences':
+                        # Preserve the work's identity and provenance beside its ideas.
+                        excerpts = list(dict.fromkeys(paragraphs[:2] + excerpts))
+                    results.append({"source": visibility + "/" + p.relative_to(scope).as_posix(), "text": "\n\n".join(excerpts)[:3500], "score": sum(x[0] for x in matching)})
         # Only the curated public snapshot is available to visitor retrieval.
         for visibility in visibilities:
             shelf = json.loads(self.read(visibility, "bookshelf.json") or '{"books":[]}')
@@ -121,4 +127,5 @@ class FileBrain:
                 score = external_score(body,tokens,query)
                 if score:
                     results.append({"source":source,"text":body,"score":score,"knowledge_role":"external_reference"})
-        return sorted(results, key=lambda x: x["score"], reverse=True)[:5]
+        from .retrieval import rank_knowledge
+        return rank_knowledge(results, limit=12)
