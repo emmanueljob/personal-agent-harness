@@ -1,6 +1,6 @@
 # Personal agent harness
 
-Local career and creative assistant with separate public/private modes. LangChain/LangGraph runs the model/tool loop, Temporal owns durable execution and routine timers, and SQLite holds profiles, turns, checkpoints and artifacts.
+Local career and creative assistant with separate public/private modes. Deep Agents runs the LangChain/LangGraph model/tool loop inside Temporal workflows. Model calls and application tools run as individual Activities. SQLite holds profiles, turns, retry transcripts and artifacts outside the checkout.
 
 ## Start locally
 
@@ -28,11 +28,11 @@ Set OLLAMA_MODEL to the desired installed model in .env and restart the web/work
 
 1. The API commits a queued turn in SQLite before acknowledging it. Clients can supply request_id for idempotent submissions within a thread. Reusing it with different text returns 409.
 2. The dispatcher submits one turn at a time with a deterministic Temporal workflow ID. If it crashes after submitting but before observing success, it attaches to that workflow after restart. Completed workflow IDs cannot accidentally be reused.
-3. Temporal runs a heartbeating activity with bounded retries. Worker death causes heartbeat timeout and reassignment. A per-database OS lock prevents overlapping Python executions after timeouts; death releases the lock.
-4. LangGraph persists model/tool steps. Profile, conversation input and provider/model are snapshotted for each turn. Completed turns short-circuit retries.
-5. Artifact writes are upserts keyed by turn/title. Explicitly retrying a failed turn creates a new workflow attempt and reuses graph checkpoints.
+3. New turns select `AGENT_RUNTIME=deepagents` at enqueue time. Their versioned workflow uses the official `temporalio-deepagents` integration: every model and application tool call is an Activity with bounded retries. Temporal replays completed Activity results after worker recovery.
+4. Profile, voice, retrieved context, conversation input and model configuration are snapshotted per turn. Before model/tool calls, the workflow also saves a transcript through an Activity for explicit retries after a workflow exhausts retries. Completed turns short-circuit execution.
+5. Artifact writes are upserts keyed by turn/title; web evidence is cached per turn/arguments. Explicit retry creates a new workflow generation and resumes its saved transcript. A pending tool call can repeat on explicit retry, so external writes require idempotency.
 
-This is **at-least-once execution**, not exactly-once model calls. A crash between a model response and its checkpoint can repeat inference. Future plugins that write externally must provide their own idempotency keys. One shared local data directory and one managed worker are the supported deployment; this is not a distributed SQLite service. The OS lock is macOS/Unix-specific.
+This is **at-least-once execution**, not exactly-once model calls. A crash between a model response and its checkpoint can repeat inference. Future plugins that write externally must provide their own idempotency keys. One shared local data directory and one managed worker are the supported deployment; this is not a distributed SQLite service. Legacy turns retain their existing SQLite graph checkpoints and whole-turn Activity/OS lock. That lock is macOS/Unix-specific. New Deep Agents turns use Temporal history rather than a LangGraph SQLite checkpointer.
 
 ## Routines
 
@@ -55,7 +55,7 @@ Public thread UUIDs are capability links; anyone with one can read that conversa
 TEMPORAL_TEST_ADDRESS=localhost:7233 .venv/bin/python -m pytest -q
 ```
 
-The Temporal integration test kills a worker mid-activity, starts a replacement, verifies recovery and one artifact row, then creates/triggers/disables a real schedule. Its worker and task queue are isolated from the app. It uses a fake agent so it makes no paid or local model calls.
+The Temporal integration test kills a worker mid-activity, starts a replacement, verifies recovery and one artifact row, then creates/triggers/disables a real schedule. The Deep Agents recovery test kills a worker after an artifact tool completes, recovers the interrupted model Activity and verifies the tool Activity ran once. Test workers and task queues are isolated from the app. It uses a fake agent so it makes no paid or local model calls.
 
 ## Interface development
 
@@ -139,4 +139,4 @@ Run `python3 scripts/setup_git_safety.py` after cloning to activate the pre-comm
 
 ## Deep Agents comparison
 
-An opt-in, isolated [Deep Agents + Temporal comparison](docs/deepagents-comparison.md) uses the same local model, frozen initial context, brain and application tools. It has its own dependency environment, queues, state and private reports. The serving application continues to use the existing runtime.
+An opt-in, isolated [Deep Agents + Temporal comparison](docs/deepagents-comparison.md) uses the same local model, frozen initial context, brain and application tools. It has its own dependency environment, queues, state and private reports. The serving application now defaults to Deep Agents when configured with the example environment. See [runtime migration and rollback](docs/deepagents-runtime.md).

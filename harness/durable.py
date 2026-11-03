@@ -45,9 +45,14 @@ async def dispatch_once(client, store):
         return
     turn = turns[0]
     wid = store.workflow_id(turn["id"])
+    runtime=store.runtime_for(turn['id'])
+    name='DeepAgentTurnV1' if runtime=='deepagents' else 'AgentTurn'
+    queue=os.getenv('TEMPORAL_TASK_QUEUE','personal-agent')+('-deepagents-v1' if runtime=='deepagents' else '')
+    with store.connect() as db:
+        db.execute('INSERT OR IGNORE INTO workflow_turns VALUES (?,?,?)',(wid,turn['id'],runtime))
     try:
         handle = await client.start_workflow(
-            "AgentTurn", turn["id"], id=wid, task_queue=os.getenv("TEMPORAL_TASK_QUEUE", "personal-agent"),
+            name, turn["id"], id=wid, task_queue=queue,
             id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE,
         )
     except WorkflowAlreadyStartedError:

@@ -1,4 +1,4 @@
-"""Temporal owns retries/timers; LangGraph owns agent step checkpoints."""
+"""Serve legacy turns and versioned per-call Deep Agents workflows."""
 import asyncio
 import contextlib
 import os
@@ -45,6 +45,8 @@ async def enqueue_routine(data: dict) -> str:
         if not r:
             return "disabled"
         db.execute("INSERT OR IGNORE INTO turns VALUES (?,?,?,'queued',NULL,NULL,?)", (ident, r["thread_id"], r["prompt"], time.time()))
+        from .models import agent_runtime
+        db.execute('INSERT OR IGNORE INTO turn_runtime VALUES (?,?)',(ident,agent_runtime()))
     return ident
 
 
@@ -79,7 +81,11 @@ async def main():
         activities=[execute_turn, enqueue_routine], max_concurrent_activities=1,
         max_heartbeat_throttle_interval=timedelta(seconds=2),
     )
-    await worker.run()
+    # Keep the legacy worker available for old queued turns and rollback, while
+    # new per-call workflows use their own versioned queue/data converter.
+    from .deep_runtime import make_worker
+    modern=await make_worker(os.getenv('TEMPORAL_ADDRESS','localhost:7233'),os.getenv('TEMPORAL_TASK_QUEUE','personal-agent')+'-deepagents-v1')
+    await asyncio.gather(worker.run(),modern.run())
 
 
 if __name__ == "__main__":

@@ -27,6 +27,8 @@ async def lifespan(app):
     executor = os.getenv("EXECUTOR", "local")
     if executor not in ("local", "temporal"):
         raise RuntimeError("EXECUTOR must be local or temporal")
+    if settings()['agent_runtime']=='deepagents' and executor!='temporal':
+        raise RuntimeError('Deep Agents runtime requires EXECUTOR=temporal.')
     task = asyncio.create_task(temporal_dispatcher(store) if executor == "temporal" else local_worker(store))
     yield
     task.cancel()
@@ -80,7 +82,7 @@ def index():
 @app.get("/api/status")
 def status():
     config = settings()
-    return {"model_configured": config["configured"], "model": config["model"], "provider": config["provider"], "executor": os.getenv("EXECUTOR", "local"), "knowledge_backend": store.brain.backend, "knowledge_fallback_policy":"same-scope-canonical-files-when-index-busy" if store.brain.backend == 'gbrain' else None, "web_search_provider": web_provider(), "profile_configured": not store.profile("public").startswith("Profile not configured")}
+    return {"model_configured": config["configured"], "model": config["model"], "provider": config["provider"], "agent_runtime":config['agent_runtime'], "executor": os.getenv("EXECUTOR", "local"), "knowledge_backend": store.brain.backend, "knowledge_fallback_policy":"same-scope-canonical-files-when-index-busy" if store.brain.backend == 'gbrain' else None, "web_search_provider": web_provider(), "profile_configured": not store.profile("public").startswith("Profile not configured")}
 
 
 @app.get("/api/tools")

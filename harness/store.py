@@ -5,6 +5,7 @@ import uuid
 from pathlib import Path
 from .paths import data_directory, brain_directory
 from .brain import FileBrain
+from .models import agent_runtime
 
 
 class Store:
@@ -31,10 +32,16 @@ class Store:
             CREATE TABLE IF NOT EXISTS execution_context(turn_id TEXT PRIMARY KEY, body TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, turn_id TEXT NOT NULL, kind TEXT NOT NULL, label TEXT NOT NULL, created REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS tool_results(turn_id TEXT NOT NULL, tool TEXT NOT NULL, arguments TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY(turn_id, tool, arguments));
+            CREATE TABLE IF NOT EXISTS turn_runtime(turn_id TEXT PRIMARY KEY, runtime TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS workflow_turns(workflow_id TEXT PRIMARY KEY,turn_id TEXT NOT NULL,runtime TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS deep_transcripts(turn_id TEXT PRIMARY KEY,body TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS routines(id TEXT PRIMARY KEY, thread_id TEXT NOT NULL,
               prompt TEXT NOT NULL, interval_seconds INTEGER NOT NULL, next_run REAL NOT NULL,
               enabled INTEGER NOT NULL DEFAULT 1);
             """)
+            # Existing turns keep their legacy execution semantics. New queue
+            # entries write their route in the same transaction as the turn.
+            db.execute("INSERT OR IGNORE INTO turn_runtime SELECT id,'legacy' FROM turns")
             for mode in ("public", "private"):
                 db.execute("INSERT OR IGNORE INTO profiles VALUES (?,?)", (mode, "Profile not configured yet. Ask the owner to add verified information."))
 
@@ -57,6 +64,7 @@ class Store:
         ident = ident or str(uuid.uuid4())
         with self.connect() as db:
             db.execute("INSERT OR IGNORE INTO turns VALUES (?,?,?,'queued',NULL,NULL,?)", (ident, thread_id, prompt, time.time()))
+            db.execute("INSERT OR IGNORE INTO turn_runtime VALUES (?,?)",(ident,agent_runtime()))
         return ident
 
     def artifact(self, thread_id, turn_id, title, body):
@@ -72,6 +80,7 @@ class Store:
             for r in db.execute("SELECT * FROM routines WHERE enabled=1 AND next_run<=?", (now,)).fetchall():
                 ident = str(uuid.uuid5(uuid.NAMESPACE_URL, f"routine:{r['id']}:{r['next_run']}"))
                 db.execute("INSERT OR IGNORE INTO turns VALUES (?,?,?,'queued',NULL,NULL,?)", (ident, r["thread_id"], r["prompt"], now))
+                db.execute("INSERT OR IGNORE INTO turn_runtime VALUES (?,?)",(ident,agent_runtime()))
                 db.execute("UPDATE routines SET next_run=? WHERE id=?", (now + r["interval_seconds"], r["id"]))
 
     def profile(self, mode):
@@ -90,6 +99,10 @@ class Store:
     def workflow_id(self, ident):
         rows = self.query("SELECT generation FROM dispatch_attempts WHERE turn_id=?", (ident,))
         return f"turn-{ident}-{rows[0]['generation'] if rows else 0}"
+
+    def runtime_for(self, ident):
+        rows=self.query('SELECT runtime FROM turn_runtime WHERE turn_id=?',(ident,))
+        return rows[0]['runtime'] if rows else 'legacy'
 
     def retry(self, ident):
         with self.connect() as db:

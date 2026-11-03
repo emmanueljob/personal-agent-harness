@@ -10,10 +10,12 @@ dependencies = [
     "langchain>=1.0,<2",
     "langchain-openai>=1.0,<2",
     "langgraph-checkpoint-sqlite>=3,<4",
-    "temporalio>=1.9,<2",
+    "temporalio>=1.35,<2",
     "langchain-ollama>=1,<2",
     "ddgs>=9.16,<10",
     "lxml>=6,<7",
+    "deepagents==0.7.32",
+    "temporalio-deepagents==0.0.3",
 ]
 
 [dependency-groups]
