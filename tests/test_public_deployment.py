@@ -75,6 +75,7 @@ def test_public_export_includes_only_selected_public_sources_and_assets(tmp_path
     (root/'bookshelf-assets').mkdir();(root/'bookshelf-assets'/'selected.jpg').write_bytes(b'fixture')
     (root/'bookshelf-assets'/'unselected.jpg').write_bytes(b'not published')
     (root/'wiki').mkdir();(root/'wiki'/'topic.md').write_text('Published knowledge')
+    (root/'perspectives.json').write_text(json.dumps({'version':1,'entries':[]}))
     (root/'secret.txt').write_text('Unapproved file')
     (brain/'private').mkdir();(brain/'private'/'profile.md').write_text('Private fixture')
     bundle=tmp_path/'export.tgz'
@@ -83,6 +84,7 @@ def test_public_export_includes_only_selected_public_sources_and_assets(tmp_path
         names=archive.getnames()
         assert 'brain/public/bookshelf-assets/selected.jpg' in names
         assert 'brain/public/wiki/topic.md' in names
+        assert 'brain/public/perspectives.json' in names
         assert not any('private' in n or 'unselected' in n or 'secret' in n for n in names)
         assert result['files']==len(names)-1
     (root/'wiki'/'escape.md').symlink_to(brain/'private'/'profile.md')
