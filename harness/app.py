@@ -7,7 +7,7 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -15,6 +15,7 @@ from .store import Store
 from .runner import local_worker
 from .durable import temporal_dispatcher
 from .models import settings
+from .public_access import PublicAccess, public_only, admit_turn, consume
 from .portfolio import Portfolio
 from .bookshelf import Shelf, ImportInput, Selection, BookEdit
 from .web_tools import provider as web_provider
@@ -24,6 +25,7 @@ store = Store()
 
 @asynccontextmanager
 async def lifespan(app):
+    app.state.public_store = store
     executor = os.getenv("EXECUTOR", "local")
     if executor not in ("local", "temporal"):
         raise RuntimeError("EXECUTOR must be local or temporal")
@@ -37,12 +39,15 @@ async def lifespan(app):
 
 
 app = FastAPI(title="Personal Agent Harness", lifespan=lifespan)
+app.add_middleware(PublicAccess)
 frontend_dist = Path(__file__).resolve().parents[1] / "frontend" / "dist"
 if (frontend_dist / "assets").exists():
     app.mount("/assets", StaticFiles(directory=frontend_dist / "assets"), name="frontend-assets")
 
 
 def owner(authorization: str = Header(default="")):
+    if public_only():
+        raise HTTPException(404, "Owner workspace is available only in the local edition.")
     token = os.getenv("OWNER_TOKEN", "")
     if not token or not secrets.compare_digest(authorization, "Bearer " + token):
         raise HTTPException(401, "Private workspace requires OWNER_TOKEN.")
@@ -79,10 +84,24 @@ def index():
     return FileResponse(frontend_dist / "index.html" if (frontend_dist / "index.html").exists() else Path(__file__).parent / "index.html")
 
 
+@app.get("/healthz")
+def health():
+    import socket
+    store.query('SELECT 1')
+    if os.getenv('EXECUTOR') == 'temporal':
+        try:
+            host, port = os.getenv('TEMPORAL_ADDRESS', 'localhost:7233').rsplit(':', 1)
+            with socket.create_connection((host, int(port)), timeout=1):
+                pass
+        except OSError:
+            raise HTTPException(503, 'Worker services are starting.')
+    return {'status':'ok'}
+
+
 @app.get("/api/status")
 def status():
     config = settings()
-    return {"model_configured": config["configured"], "model": config["model"], "provider": config["provider"], "agent_runtime":config['agent_runtime'], "executor": os.getenv("EXECUTOR", "local"), "knowledge_backend": store.brain.backend, "knowledge_fallback_policy":"same-scope-canonical-files-when-index-busy" if store.brain.backend == 'gbrain' else None, "web_search_provider": web_provider(), "profile_configured": not store.profile("public").startswith("Profile not configured")}
+    return {"public_only": public_only(), "model_configured": config["configured"], "model": config["model"], "provider": config["provider"], "agent_runtime":config['agent_runtime'], "executor": os.getenv("EXECUTOR", "local"), "knowledge_backend": store.brain.backend, "knowledge_fallback_policy":"same-scope-canonical-files-when-index-busy" if store.brain.backend == 'gbrain' else None, "web_search_provider": web_provider(), "profile_configured": not store.profile("public").startswith("Profile not configured")}
 
 
 @app.get("/api/tools")
@@ -97,12 +116,18 @@ def portfolio():
 
 
 @app.post("/api/threads")
-def create_thread(body: ThreadInput, authorization: str = Header(default="")):
+def create_thread(body: ThreadInput, request: Request, authorization: str = Header(default="")):
     if body.mode not in ("public", "private"):
         raise HTTPException(422, "Choose public or private")
     if body.mode == "private":
         owner(authorization)
-    return store.thread(body.mode)
+    if public_only():
+        consume(store, [('day:threads:'+request.state.visitor_hash, 86400, 10)])
+    thread = store.thread(body.mode)
+    if public_only():
+        with store.connect() as db:
+            db.execute('INSERT INTO visitor_threads VALUES (?,?)', (thread['id'], request.state.visitor_hash))
+    return thread
 
 
 @app.get("/api/threads/{ident}")
@@ -131,7 +156,7 @@ def read_profile(mode: str):
 
 
 @app.post("/api/threads/{ident}/turns", status_code=202)
-def enqueue(ident: str, body: TurnInput, authorization: str = Header(default="")):
+def enqueue(ident: str, body: TurnInput, request: Request, authorization: str = Header(default="")):
     access(ident, authorization)
     if not settings()["configured"]:
         raise HTTPException(503, "Add OPENAI_API_KEY to .env and restart to enable chat.")
@@ -140,16 +165,21 @@ def enqueue(ident: str, body: TurnInput, authorization: str = Header(default="")
         existing = store.query("SELECT prompt FROM turns WHERE id=?", (turn_id,))
         if existing and existing[0]["prompt"] != body.prompt:
             raise HTTPException(409, "request_id was already used for another prompt")
+    if public_only() and len(body.prompt) > 2000:
+        raise HTTPException(422, 'Please keep demo questions under 2,000 characters.')
+    if not turn_id or not store.query('SELECT id FROM turns WHERE id=?', (turn_id,)):
+        admit_turn(store, request)
     turn_id = store.enqueue(ident, body.prompt, turn_id)
     return {"id": turn_id, "status": store.query("SELECT status FROM turns WHERE id=?", (turn_id,))[0]["status"], "workflow_id": store.workflow_id(turn_id)}
 
 
 @app.post("/api/turns/{ident}/retry", status_code=202)
-def retry(ident: str, authorization: str = Header(default="")):
+def retry(ident: str, request: Request, authorization: str = Header(default="")):
     rows = store.query("SELECT * FROM turns WHERE id=?", (ident,))
     if not rows:
         raise HTTPException(404)
     access(rows[0]["thread_id"], authorization)
+    admit_turn(store, request)
     changed = store.retry(ident)
     if not changed:
         raise HTTPException(409, "Only failed turns can be retried")

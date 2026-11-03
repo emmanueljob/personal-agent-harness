@@ -22,6 +22,8 @@ class Store:
             db.executescript("""
             PRAGMA journal_mode=WAL;
             CREATE TABLE IF NOT EXISTS threads(id TEXT PRIMARY KEY, mode TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS visitor_threads(thread_id TEXT PRIMARY KEY, visitor_hash TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS public_usage(bucket TEXT NOT NULL, window INTEGER NOT NULL, count INTEGER NOT NULL, PRIMARY KEY(bucket,window));
             CREATE TABLE IF NOT EXISTS turns(id TEXT PRIMARY KEY, thread_id TEXT NOT NULL,
               prompt TEXT NOT NULL, status TEXT NOT NULL, result TEXT, error TEXT, created REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS artifacts(id TEXT PRIMARY KEY, thread_id TEXT NOT NULL,

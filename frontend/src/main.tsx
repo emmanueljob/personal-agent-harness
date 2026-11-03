@@ -17,7 +17,7 @@ type Event={id:number;turn_id:string;kind:string;label:string;created:number};
 type ToolRun={turn_id:string;name:string;sources:{title:string;url:string}[];fetched_at?:string;ui_action?:{type:string;book_ids:string[]};books?:{id:string;title:string}[]};
 type Thread={id:string;mode:Mode;tool_calls?:ToolRun[];turns:Turn[];artifacts:Artifact[];events:Event[]};
 type Routine={id:string;thread_id:string;prompt:string;interval_seconds:number;enabled:number};
-type Status={knowledge_backend?:string;provider:string;model:string;executor:string;model_configured:boolean};
+type Status={public_only?:boolean;knowledge_backend?:string;provider:string;model:string;executor:string;model_configured:boolean};
 const Arrow=()=> <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>;
 function ThemeIcon({light}:{light:boolean}){return <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">{light?<><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></>:<path d="M20 15.2A8.8 8.8 0 0 1 8.8 4a8.8 8.8 0 1 0 11.2 11.2Z"/>}</svg>}
 function Orb({busy}:{busy:boolean}){return <div className={'orb '+(busy?'orb-active':'')} aria-hidden="true"><div className="orb-aura"/><div className="orb-ring ring-back"/><div className="orb-sphere"/><div className="orb-texture"/><div className="orb-ring ring-front"/><span className="orb-light"/></div>}
@@ -84,7 +84,7 @@ function App(){
    const r=await fetch('/api'+path,{method,headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:body===undefined?undefined:JSON.stringify(body)});
    const d=await r.json();if(!r.ok)throw Error(typeof d.detail==='string'?d.detail:JSON.stringify(d.detail));return d;
  },[token]);
- useEffect(()=>{api('/status').then(setStatus).catch(()=>setNotice('The local server is unavailable.'));api('/tools').then(setAvailableTools).catch(()=>{});api('/portfolio').then(setPortfolio).catch(()=>setNotice('Portfolio data is unavailable.'))},[api]);
+ useEffect(()=>{api('/status').then(setStatus).catch(()=>setNotice('The server is unavailable.'));api('/tools').then(setAvailableTools).catch(()=>{});api('/portfolio').then(setPortfolio).catch(()=>setNotice('Portfolio data is unavailable.'))},[api]);
  useEffect(()=>{document.title=portfolio.name==='Your name'?'Portfolio':portfolio.name+' — Portfolio'},[portfolio.name]);
  useEffect(()=>{
    if(!threadId)return;
@@ -134,7 +134,7 @@ function App(){
  </div>
  <div className="portfolio-panel" id="panel-bookshelf" role="tabpanel" aria-labelledby="tab-bookshelf" tabIndex={0} hidden={activeTab!=='bookshelf'}><Bookshelf books={books} ask={ask} enabled={activeTab==='bookshelf'} selection={shelfSelection} clearSelection={()=>setShelfSelection(null)}/></div>
  <div className="portfolio-panel" id="panel-behind-the-curtain" role="tabpanel" aria-labelledby="tab-behind-the-curtain" tabIndex={0} hidden={activeTab!=='behind-the-curtain'}><Architecture ask={ask}/></div>
- <footer className="footer"><span className="footer-signature">{portfolio.footer}</span><div><span className="footer-meta">AI GUIDE · {portfolio.resumeLabel}</span><button onClick={()=>setOwnerOpen(true)} className="owner-link">Owner studio ↗</button></div></footer>
+ <footer className="footer"><span className="footer-signature">{portfolio.footer}</span><div><span className="footer-meta">AI GUIDE · {portfolio.resumeLabel}</span>{status&&!status.public_only&&<button onClick={()=>setOwnerOpen(true)} className="owner-link">Owner studio ↗</button>}</div></footer>
  <AnimatePresence>{notice&&<motion.div className="notice" initial={{opacity:0,y:5}} animate={{opacity:1,y:0}} exit={{opacity:0}} role="status"><span>{notice}</span><button aria-label="Dismiss notification" onClick={()=>setNotice('')}>×</button></motion.div>}</AnimatePresence>
  <dialog ref={dialogRef} className="owner-dialog" onCancel={()=>setOwnerOpen(false)} onClose={()=>setOwnerOpen(false)}><div className="dialog-heading"><div><span className="eyebrow">Behind the scenes</span><h2>The notebook.</h2></div><button className="close-button" onClick={()=>setOwnerOpen(false)} aria-label="Close owner panel">×</button></div><div className="owner-access"><label htmlFor="owner-token">Owner access</label><input id="owner-token" type="password" value={token} onChange={e=>setToken(e.target.value)} placeholder="Enter your owner token" autoComplete="off"/><small>Kept in memory for this session. Find it in your local .env file.</small></div><div className="owner-tabs" role="tablist">{(['workspace','profile','routines','brain','bookshelf'] as const).map(t=><button key={t} role="tab" aria-selected={ownerTab===t} className={ownerTab===t?'selected':''} onClick={()=>setOwnerTab(t)}>{t}</button>)}</div><div className="owner-content">
  {ownerTab==='bookshelf'&&<ShelfStudio api={api} onPublished={()=>void reloadBooks()}/>}

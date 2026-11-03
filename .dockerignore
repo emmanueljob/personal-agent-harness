@@ -1,0 +1,25 @@
+# Build-context allowlist: personal/runtime data never reaches the builder.
+**
+!Dockerfile
+!pyproject.toml
+!uv.lock
+!harness/
+!harness/**
+!scripts/
+scripts/*
+!scripts/serve_poc.py
+!frontend/
+frontend/*
+!frontend/package.json
+!frontend/package-lock.json
+!frontend/index.html
+!frontend/tsconfig.json
+!frontend/vite.config.ts
+!frontend/src/
+!frontend/src/**
+**/__pycache__/**
+**/*.sqlite*
+**/.env*
+
+frontend/node_modules/
+frontend/dist/

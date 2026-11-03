@@ -19,3 +19,15 @@ def local_model(config=None):
     from langchain_ollama import ChatOllama
     config=config or settings()
     return ChatOllama(model=config["model"], base_url=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434"), temperature=0.3, num_ctx=int(config.get('context_window',os.getenv("OLLAMA_CONTEXT", "8192"))), num_predict=2048, reasoning=False, client_kwargs={"timeout": 300})
+
+
+def openai_options(config=None):
+    config = config or settings()
+    options = dict(model=config['model'], timeout=90, max_retries=0 if config.get('public_deployment') else 2)
+    limit = config.get('max_output_tokens')
+    if limit is not None:
+        options['max_completion_tokens'] = int(limit)
+    effort = config.get('reasoning_effort')
+    if effort:
+        options['reasoning_effort'] = effort
+    return options

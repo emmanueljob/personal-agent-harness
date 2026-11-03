@@ -21,7 +21,7 @@ MAX_SCAN = 64_000_000
 BLOCKED_DIRS = {'.runtime','.venv','node_modules','dist','data','brain','state','private','raw','artifacts','previews','downloads','.ssh','.aws','__pycache__','.pytest_cache'}
 BLOCKED_NAMES = {'profile.md','voice.md','portfolio.json','bookshelf.json','library.json','.ds_store','.gitconfig','.netrc','.npmrc'}
 TEXT_TYPES = {'.py','.ts','.tsx','.js','.mjs','.css','.html','.json','.toml','.md','.txt','.yaml','.yml','.sh','.lock'}
-SPECIAL = {'.gitignore','.env.example','.gitleaks.toml','.githooks/pre-commit','.githooks/pre-push'}
+SPECIAL = {'Dockerfile','.dockerignore','.gitignore','.env.example','.gitleaks.toml','.githooks/pre-commit','.githooks/pre-push'}
 
 
 class Blocked(Exception):

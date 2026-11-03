@@ -16,7 +16,7 @@ from temporalio.exceptions import ApplicationError
 from temporalio.worker import Worker
 
 from .agent import ActivityEvents, build_system_prompt, plugins, prepare_turn
-from .models import local_model
+from .models import local_model, openai_options
 from .store import Store
 
 ROUTED = {}
@@ -80,13 +80,15 @@ async def complete(answer: str) -> None:
 def provide_model(name):
     store, turn, _ = binding()
     config = saved_config(store, turn)
+    from .public_access import reserve_model_call
+    reserve_model_call(store)
     if name != config['provider']+':'+config['model']:
         raise ApplicationError('Unexpected model configuration.', non_retryable=True)
     if config['provider'] == 'ollama':
         model = local_model(config)
     elif config['provider'] == 'openai':
         from langchain_openai import ChatOpenAI
-        model = ChatOpenAI(model=config['model'], timeout=90, max_retries=2)
+        model = ChatOpenAI(**openai_options(config))
     else:
         raise ApplicationError('Unsupported model provider.', non_retryable=True)
     model.callbacks = [ActivityEvents(store, turn['id'])]

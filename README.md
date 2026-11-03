@@ -2,6 +2,8 @@
 
 Local career and creative assistant with separate public/private modes. Deep Agents runs the LangChain/LangGraph model/tool loop inside Temporal workflows. Model calls and application tools run as individual Activities. SQLite holds profiles, turns, retry transcripts and artifacts outside the checkout.
 
+For a public single-Machine deployment, see the [Fly PoC guide](docs/fly-poc.md). It keeps Temporal on the same persistent Machine, uses OpenAI inference, and deploys only published knowledge.
+
 ## Start locally
 
 Prerequisites: Python 3.12+, Node.js, Ollama and Temporal CLI. Install Python dependencies with `uv sync`, and frontend dependencies with `npm --prefix frontend ci`. Copy `.env.example` to `.env` and keep credentials local.
