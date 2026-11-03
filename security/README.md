@@ -10,9 +10,9 @@ On the owner's computer, the guard also compares content with local credential v
 
 The owner's checkout sets `git config --local privacy.requireLocalKnowledge true`, so missing private references block publication instead of silently skipping that comparison. Set this on other owner checkouts that should require the private brain. It is not enabled in CI or clean source-only clones.
 
-Gitleaks uses its default credential rules through the explicit `security/gitleaks.toml` configuration. Inline `gitleaks:allow` comments and project ignore files cannot suppress this invocation. A pinned, read-only GitHub Actions workflow repeats path/credential checks against Git history. CI has no copy of the private brain and cannot perform the owner's local fingerprint comparison.
+Gitleaks uses its default credential rules through the explicit `security/gitleaks.toml` configuration. Inline `gitleaks:allow` comments and project ignore files cannot suppress this invocation. The separate owner-operated local CI controller repeats full-history checks with a trusted copy of the scanner and the owner's local private references; only its pass/fail status is published to GitHub. See [contributions and releases](../docs/contributing-and-releases.md).
 
-No scanner proves the absence of all sensitive or proprietary information. Review the source and documentation before publishing. Git hooks can be bypassed by `--no-verify`, changed local configuration or altered scripts; they are an accidental-leak guard, not a security boundary against a malicious committer. Hooks are not automatically enabled on other clones. CI runs after upload, so it is a backstop rather than a substitute for pre-push checks.
+No scanner proves the absence of all sensitive or proprietary information. Review the source and documentation before publishing. Git hooks can be bypassed by `--no-verify`, changed local configuration or altered scripts; they are an accidental-leak guard, not a security boundary against a malicious committer. Hooks are not automatically enabled on other clones. Local PR checks run after upload, so they are a backstop rather than a substitute for pre-push checks.
 
 Manual commands:
 

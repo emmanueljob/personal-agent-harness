@@ -4,6 +4,8 @@ Local career and creative assistant with separate public/private modes. Deep Age
 
 For a public single-Machine deployment, see the [Fly PoC guide](docs/fly-poc.md). It keeps Temporal on the same persistent Machine, uses OpenAI inference, and deploys only published knowledge.
 
+Contributions use separate worktrees and PRs. CI/CD runs in a private local controller outside this public source repository; see [contributions and releases](docs/contributing-and-releases.md) and [agent instructions](AGENTS.md).
+
 ## Start locally
 
 Prerequisites: Python 3.12+, Node.js, Ollama and Temporal CLI. Install Python dependencies with `uv sync`, and frontend dependencies with `npm --prefix frontend ci`. Copy `.env.example` to `.env` and keep credentials local.
