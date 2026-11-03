@@ -147,7 +147,7 @@ An opt-in, isolated [Deep Agents + Temporal comparison](docs/deepagents-comparis
 
 ## Public agent interfaces
 
-`/agents` is the human-readable entry point; `/agents.md` and `/llms.txt` provide machine-readable instructions. The homepage includes HTML links and HTTP discovery headers. `/.well-known/api-catalog` links to a deliberately public-only `/api/public/openapi.json` schema; public-only deployments also filter the default OpenAPI schema.
+`/agents` is the human-readable entry point; `/agents.md` and `/llms.txt` provide machine-readable instructions. The homepage includes a visible, server-rendered “Start here: /agents.md” notice as well as HTML links and HTTP discovery headers. Clients requesting `Accept: text/markdown` receive a Markdown introduction, with `Vary: Accept`. `/robots.txt` and `/sitemap.xml` point to the agent instructions; `/.well-known/agent-interface.json` is an explicitly site-specific manifest, not an A2A Agent Card. `/.well-known/api-catalog` links to a deliberately public-only `/api/public/openapi.json` schema; public-only deployments also filter the default OpenAPI schema.
 
 HTTP and anonymous Streamable HTTP MCP (`/mcp`) share `harness/public_agent.py`: published profile, scoped knowledge search, paginated bookshelf reads, durable public questions, and token-protected answer polling. Reads do not invoke a model. Questions join the normal SQLite queue with a frozen runtime; the existing worker/Temporal path executes them. Result tokens are random, stored hashed, and expire after seven days. They are returned only at submission and must be supplied in `X-Result-Token` for HTTP polling or as a `get_answer` MCP argument. Neither interface exposes visitor chat histories, owner mutations, private retrieval, raw imports, or unrestricted web/filesystem tools. See `/agents.md` for request and inference quotas.
 
@@ -158,7 +158,7 @@ The homepage progressively registers WebMCP tools through the current `document.
 To run a real black-box discovery check with local Ollama, give the test only the site URL:
 
 ```sh
-PYTHONPATH=. .venv/bin/python scripts/check_agent_discovery.py http://localhost:8000/ --report /absolute/path/outside-the-repo/discovery.json
+PYTHONPATH=. .venv/bin/python scripts/check_agent_discovery.py http://localhost:8001/ --text-only --report /absolute/path/outside-the-repo/discovery.json
 ```
 
-The test agent has one same-origin HTTP GET tool and no preconfigured endpoint names. It must follow discovery links, search published leadership notes, retrieve a real bookshelf ID, and cite evidence. Reports can contain public personal data and are kept outside Git. This is a bounded compatibility check, not a guarantee that every external agent host discovers the conventions.
+With `--text-only`, the test removes response headers, HTML head metadata, scripts, and noscript content before returning page text to the model. The test agent has one same-origin HTTP GET tool and no preconfigured endpoint names. It must follow discovery links, search published leadership notes, retrieve a real bookshelf ID, and cite evidence. Reports can contain public personal data and are kept outside Git. This is a bounded compatibility check, not a guarantee that every external agent host discovers the conventions.
