@@ -82,6 +82,44 @@ def test_keyless_environment_and_failure_have_no_private_output(tmp_path, monkey
     assert 'private' not in str(err.value)
 
 
+def test_busy_index_uses_current_same_scope_files_without_waiting(tmp_path):
+    import fcntl,time
+    from harness.ingestion import normalize,upsert_batch
+    b=IndexedBrain(tmp_path/'brain')
+    b.add_note('Owner knowledge','orchard public fact','public')
+    record=normalize({'source_id':'example:1','title':'Example external source','source_url':'https://example.org/source','text':'Private violet orchard reference.'},'examples')
+    upsert_batch(b,[record],'examples',apply=True)
+    with (b.index_root/'private/adapter.lock').open('a') as held:
+        fcntl.flock(held,fcntl.LOCK_EX)
+        start=time.monotonic();hits=b.search('violet','private')
+        assert time.monotonic()-start<2
+        assert hits and all(h['source'].startswith('private/') and h['backend']=='files' and h['fallback_reason']=='index_busy' for h in hits)
+        assert 'external_reference' in hits[0]['text']
+        assert b.search('violet','public')==[]
+    with (b.index_root/'public/adapter.lock').open('a') as held:
+        fcntl.flock(held,fcntl.LOCK_EX)
+        hits=b.search('orchard','public')
+        assert hits and all(h['source'].startswith('public/') and h['backend']=='files' for h in hits)
+
+
+def test_busy_fallback_discards_concurrently_withdrawn_references(tmp_path,monkeypatch):
+    import fcntl
+    from harness.brain import FileBrain
+    from harness.ingestion import normalize,upsert_batch,withdraw_sources
+    b=IndexedBrain(tmp_path/'brain')
+    upsert_batch(b,[normalize({'source_id':'example:1','title':'Example','source_url':'https://example.org/source','text':'violet reference'},'examples')],'examples',apply=True)
+    original=FileBrain._search_scopes;calls=[]
+    def revoke(brain,query,scopes):
+        calls.append(scopes)
+        if len(calls)==2:withdraw_sources(brain,['example:1'],'examples',apply=True)
+        return original(brain,query,scopes)
+    monkeypatch.setattr(FileBrain,'_search_scopes',revoke)
+    with (b.index_root/'private/adapter.lock').open('a') as held:
+        fcntl.flock(held,fcntl.LOCK_EX)
+        assert b.search('violet','private')==[]
+    assert calls==[['private'],['private']]
+
+
 def test_store_provider_selection_preserves_file_operations(tmp_path, monkeypatch):
     from harness.store import Store
     monkeypatch.setenv('BRAIN_BACKEND', 'gbrain')

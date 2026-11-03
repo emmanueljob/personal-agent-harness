@@ -12,7 +12,7 @@ import subprocess
 import uuid
 from pathlib import Path
 
-from .brain import FileBrain
+from .brain import FileBrain, external_score
 
 
 class GBrainError(RuntimeError):
@@ -125,7 +125,17 @@ class GBrain(FileBrain):
         for visibility in (["public"] if mode == "public" else ["public", "private"]):
             home = self._home(visibility)
             with (home / "adapter.lock").open("a") as lock:
-                fcntl.flock(lock, fcntl.LOCK_EX)
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    # Bulk indexing must not make retrieval wait. Re-read the
+                    # same canonical scope to discard concurrently withdrawn or
+                    # changed excerpts; never query another scope or stale index.
+                    first = FileBrain._search_scopes(self, query, [visibility])
+                    current = {hit['source']: hit['text'] for hit in FileBrain._search_scopes(self, query, [visibility])}
+                    results.extend({**hit, 'backend':'files', 'fallback_reason':'index_busy'}
+                                   for hit in first if current.get(hit['source']) == hit['text'])
+                    continue
                 docs, records = self._sync_locked(visibility)
                 hits = self._run(visibility, ["search", keywords, "--match", "keyword", "--json", "--limit", "20"])
                 if not isinstance(hits, list):
@@ -144,6 +154,10 @@ class GBrain(FileBrain):
                     paragraphs = body.split("\n\n")
                     ranked = sorted(paragraphs, key=lambda p: len(set(tokens) & set(re.findall(r"\w+", p.lower()))), reverse=True)
                     score = len(set(tokens) & set(re.findall(r"\w+", body.lower())))
+                    if '/references/' in record['source']:
+                        score = external_score(body,tokens,query)
+                    if not score:
+                        continue
                     # Keep identity/author/provenance near excerpts, so a matching
                     # opinion paragraph does not lose which work it describes.
                     evidence = list(dict.fromkeys(paragraphs[:3] + ranked[:4]))

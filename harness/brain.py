@@ -8,6 +8,16 @@ from pathlib import Path
 from typing import Protocol
 
 
+def external_score(body, tokens, query):
+    title = body.split('\n',1)[0].removeprefix('# External reference: ').lower()
+    words = set(re.findall(r'\w+',title))
+    phrase = ' '.join(re.findall(r'\w+',query.lower()))
+    normalized_title = ' '.join(re.findall(r'\w+',title))
+    exact = ((len(phrase.split()) >= 2 and phrase in normalized_title)
+             or (len(normalized_title.split()) >= 2 and normalized_title in phrase))
+    return len(set(tokens) & set(re.findall(r'\w+',body.lower()))) + 5*len(set(tokens)&words) + (60 if exact else 0)
+
+
 class KnowledgeProvider(Protocol):
     def profile(self, mode: str) -> str | None: ...
     def search(self, query: str, mode: str) -> list[dict]: ...
@@ -69,12 +79,17 @@ class FileBrain:
 
     def search(self, query, mode):
         self.scope(mode)  # Validate before selecting directories.
+        return self._search_scopes(query, ["public"] if mode == "public" else ["public", "private"])
+
+    def _search_scopes(self, query, visibilities):
+        for visibility in visibilities:
+            self.scope(visibility)
         tokens = set(re.findall(r"\w+", query.lower()))
         tokens -= {"the", "a", "an", "about", "what", "how", "is", "and", "does", "he", "his", "my"}
         if not tokens:
             return []
         results = []
-        for visibility in (["public"] if mode == "public" else ["public", "private"]):
+        for visibility in visibilities:
             scope = self.scope(visibility)
             if not scope.exists():
                 continue
@@ -88,7 +103,7 @@ class FileBrain:
                 if matching:
                     results.append({"source": visibility + "/" + p.relative_to(scope).as_posix(), "text": "\n\n".join(x[1] for x in matching)[:3500], "score": sum(x[0] for x in matching)})
         # Only the curated public snapshot is available to visitor retrieval.
-        for visibility in (["public"] if mode == "public" else ["public", "private"]):
+        for visibility in visibilities:
             shelf = json.loads(self.read(visibility, "bookshelf.json") or '{"books":[]}')
             for book in shelf["books"]:
                 text = json.dumps(book, ensure_ascii=False)
@@ -96,9 +111,9 @@ class FileBrain:
                 if score:
                     results.append({"source": visibility + "/bookshelf.json#" + book["id"], "text": text, "score": score})
         from .ingestion import external_documents
-        for visibility in (["public"] if mode == "public" else ["public", "private"]):
+        for visibility in visibilities:
             for source, body in external_documents(self, visibility).items():
-                score = len(tokens & set(re.findall(r"\w+", body.lower())))
+                score = external_score(body,tokens,query)
                 if score:
                     results.append({"source":source,"text":body,"score":score,"knowledge_role":"external_reference"})
         return sorted(results, key=lambda x: x["score"], reverse=True)[:5]

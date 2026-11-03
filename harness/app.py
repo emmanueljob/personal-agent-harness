@@ -80,7 +80,7 @@ def index():
 @app.get("/api/status")
 def status():
     config = settings()
-    return {"model_configured": config["configured"], "model": config["model"], "provider": config["provider"], "executor": os.getenv("EXECUTOR", "local"), "knowledge_backend": store.brain.backend, "web_search_provider": web_provider(), "profile_configured": not store.profile("public").startswith("Profile not configured")}
+    return {"model_configured": config["configured"], "model": config["model"], "provider": config["provider"], "executor": os.getenv("EXECUTOR", "local"), "knowledge_backend": store.brain.backend, "knowledge_fallback_policy":"same-scope-canonical-files-when-index-busy" if store.brain.backend == 'gbrain' else None, "web_search_provider": web_provider(), "profile_configured": not store.profile("public").startswith("Profile not configured")}
 
 
 @app.get("/api/tools")

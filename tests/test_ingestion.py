@@ -80,3 +80,22 @@ def test_cli_preview_and_invalid_batch_do_not_write_sources(tmp_path):
     source.write_text(source.read_text()+'{"text":"do not expose this private fixture"}\n')
     result=subprocess.run(command+['--apply'],capture_output=True,text=True)
     assert result.returncode!=0 and 'private fixture' not in result.stderr and not brain.exists()
+
+
+def test_external_exact_title_beats_generic_keyword_matches(tmp_path):
+    brain=FileBrain(tmp_path/'brain')
+    for i in range(8):brain.add_note(f'Generic topic {i}','one prompt coding discussion\n\nOne prompt coding examples\n\nMore one prompt coding words','private')
+    source={**row('A discussion with a different body vocabulary.'),'title':'One Prompt Coding: Example Episode'}
+    upsert_batch(brain,[normalize(source,'podcasts')],'podcasts',apply=True)
+    hit=brain.search('One Prompt Coding','private')[0]
+    assert '/references/' in hit['source'] and 'One Prompt Coding' in hit['text']
+
+
+def test_external_title_inside_a_full_visitor_question_is_recognized(tmp_path):
+    brain=FileBrain(tmp_path/'brain')
+    query='One Prompt Coding: summarize two ideas from this Claude Code Cast podcast episode using your published podcast knowledge. Attribute them to the show and include a clickable source link. Do not search the web.'
+    for i in range(8):brain.add_note(f'Generic match {i}',query.replace('One Prompt Coding:','Other episode:'),'public')
+    source={**row('An external source discussing a different set of terms.'),'title':'One Prompt Coding'}
+    upsert_batch(brain,[normalize(source,'podcasts','public')],'podcasts','public',apply=True,allow_public=True)
+    hit=brain.search(query,'public')[0]
+    assert '/references/' in hit['source'] and '# External reference: One Prompt Coding' in hit['text']
