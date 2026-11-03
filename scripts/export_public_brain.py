@@ -38,6 +38,7 @@ def export_public(brain_root, destination):
     for name in ('profile.md', 'voice.md', 'portfolio.json', 'bookshelf.json'):
         add(Path(name), required=True)
     add(Path('perspectives.json'))
+    add(Path('learning.json'))
     for source in sorted((root/'wiki').rglob('*.md')):
         relative = source.relative_to(root)
         if any(part.startswith('.') or part in ('raw','private') for part in relative.parts):
