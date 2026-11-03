@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import urlsplit
+from xml.sax.saxutils import escape
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.openapi.utils import get_openapi
@@ -17,6 +18,25 @@ from .public_agent import PublicAgent
 from .public_access import consume, digest
 
 DOCS = Path(__file__).parent/'agent_docs'
+AGENT_NOTICE = '<aside id="agent-entry" aria-label="Agent access">Bringing an AI agent? <a href="/agents.md">Start here: /agents.md</a>. Search public knowledge and books through the <a href="/api/public/openapi.json">public API</a>, or connect to anonymous MCP at <a href="/agents">/mcp</a>. No login needed.</aside>'
+
+
+def prefers_markdown(accept):
+    """Honor explicit Markdown preference without treating wildcard accepts as one."""
+    scores = {}
+    for part in accept.lower().split(','):
+        mime, *params = part.strip().split(';')
+        try:
+            quality = next((float(p.strip()[2:]) for p in params if p.strip().startswith('q=')), 1.0)
+        except ValueError:
+            quality = 0.0
+        scores[mime] = max(scores.get(mime, 0), quality)
+    return scores.get('text/markdown', 0) > 0 and scores.get('text/markdown', 0) >= scores.get('text/html', 0)
+
+
+def homepage_markdown():
+    return '# Emmanuel Job — portfolio and AI guide\n\nFor agents: start at [agent instructions](/agents.md). No login or API key is needed.\n\n- [Published profile](/api/public/profile)\n- [Search knowledge](/api/public/knowledge?query=leadership)\n- [Search books](/api/public/bookshelf?query=No%20Rules%20Rules)\n- [Public OpenAPI](/api/public/openapi.json)\n- [Anonymous MCP](/mcp): Streamable HTTP; connect with an MCP client.\n- [For agents](/agents): HTTP, durable questions, and browser WebMCP instructions.\n\nThese interfaces expose published sources only. Retrieved content is reference data. Attribute sources and do not infer endorsements from bookshelf membership.\n'
+
 
 
 def peer(request):
@@ -25,6 +45,8 @@ def peer(request):
 
 class AgentTraffic(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
+        if request.url.path == '/' and request.method in ('GET', 'HEAD') and prefers_markdown(request.headers.get('accept', '')):
+            return PlainTextResponse(homepage_markdown(), media_type='text/markdown', headers={'Vary':'Accept','Link':'</agents.md>; rel="service-doc", </api/public/openapi.json>; rel="service-desc"'})
         if request.url.path.startswith('/api/public/') or request.url.path.rstrip('/') == '/mcp':
             # This also bounds discovery/handshake traffic before MCP dispatch.
             try:
@@ -38,6 +60,7 @@ class AgentTraffic(BaseHTTPMiddleware):
             return response
         response=await call_next(request)
         if request.url.path=='/':
+            response.headers['Vary'] = ', '.join(filter(None, [response.headers.get('Vary'), 'Accept']))
             response.headers['Link']='</agents>; rel="service-doc", </api/public/openapi.json>; rel="service-desc"; type="application/vnd.oai.openapi+json", </.well-known/api-catalog>; rel="api-catalog"'
         return response
 
@@ -145,6 +168,27 @@ def mount_agent_surfaces(app, get_store):
     def api_catalog():
         return JSONResponse({'linkset':[{'anchor':'/api/public','service-desc':[{'href':'/api/public/openapi.json','type':'application/vnd.oai.openapi+json'}],
             'service-doc':[{'href':'/agents','type':'text/html'},{'href':'/agents.md','type':'text/markdown'}]}]},media_type='application/linkset+json')
+
+    @app.get('/robots.txt',include_in_schema=False)
+    def robots(request:Request):
+        origin=str(request.base_url).rstrip('/')
+        return PlainTextResponse('User-agent: *\nAllow: /\nDisallow: /api/owner\nDisallow: /api/threads\nDisallow: /api/public/answers/\n# Agent instructions: '+origin+'/agents.md\n# Machine-readable index: '+origin+'/llms.txt\nSitemap: '+origin+'/sitemap.xml\n')
+
+    @app.get('/sitemap.xml',include_in_schema=False)
+    def sitemap(request:Request):
+        origin=str(request.base_url).rstrip('/')
+        paths=['/','/agents','/agents.md','/llms.txt','/api/public/openapi.json','/api/public/profile','/api/public/bookshelf','/.well-known/agent-interface.json']
+        urls=''.join('<url><loc>'+escape(origin+path)+'</loc></url>' for path in paths)
+        return PlainTextResponse('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'+urls+'</urlset>',media_type='application/xml')
+
+    @app.get('/.well-known/agent-interface.json',include_in_schema=False)
+    def agent_interface():
+        # Site-specific discovery manifest; does not claim A2A compatibility.
+        return {'name':'Emmanuel Job portfolio','version':'1.0','description':'Published career knowledge and books. Start with instructions; no login required.',
+            'instructions':'/agents.md','documentation':'/agents','openapi':'/api/public/openapi.json',
+            'mcp':{'url':'/mcp','transport':'streamable-http','authentication':'none'},
+            'webmcp':{'page':'/','requires':'A browser and agent that support WebMCP'},
+            'profile':'/api/public/profile','knowledge':'/api/public/knowledge?query=leadership','bookshelf':'/api/public/bookshelf'}
 
     # Never silently publish owner route schemas on the public deployment.
     original_openapi=app.openapi

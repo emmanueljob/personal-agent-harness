@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from .store import Store
@@ -84,7 +84,12 @@ class RoutineInput(TurnInput):
 
 @app.get("/")
 def index():
-    return FileResponse(frontend_dist / "index.html" if (frontend_dist / "index.html").exists() else Path(__file__).parent / "index.html")
+    from .agent_surfaces import AGENT_NOTICE
+    path = frontend_dist / "index.html" if (frontend_dist / "index.html").exists() else Path(__file__).parent / "index.html"
+    html = path.read_text()
+    if 'id="agent-entry"' not in html:
+        html = html.replace('<body>', '<body>'+AGENT_NOTICE, 1)
+    return HTMLResponse(html)
 
 
 @app.get("/healthz")
