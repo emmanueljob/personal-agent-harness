@@ -2,6 +2,10 @@
 
 This site publishes career information, work preferences, interests, and a curated bookshelf. Use only published sources. The guide is an AI, not the person. No account, API key, cookie, or installed plugin is needed for the public HTTP API. Your agent host must permit network calls; reading these instructions does not grant new permissions.
 
+Quick start: fetch `/api/public/profile`, then search `/api/public/knowledge?query=leadership` or `/api/public/bookshelf?query=No%20Rules%20Rules`. You can use plain HTTP directly; MCP is optional.
+
+Discovery: the homepage includes a visible link to this file. `GET /` with `Accept: text/markdown` returns a Markdown introduction. `/robots.txt` and `/sitemap.xml` list the instructions; `/.well-known/agent-interface.json` is a site-specific manifest, not an A2A Agent Card.
+
 All paths below are relative to this site's origin. Resolve them against the site URL you were given.
 
 ## Read information directly

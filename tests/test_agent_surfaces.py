@@ -33,6 +33,30 @@ def test_discovery_contracts_public_reads_and_no_private_exposure(tmp_path,monke
     with TestClient(module.app) as c:
         home=c.get('/')
         assert '/agents' in home.text and 'service-desc' in home.headers['link']
+        # A body-only extractor must see a usable path without JS or head metadata.
+        from html.parser import HTMLParser
+        class BodyText(HTMLParser):
+            def __init__(self):super().__init__();self.body=False;self.skip=0;self.text=[]
+            def handle_starttag(self,tag,attrs):
+                if tag=='body':self.body=True
+                if tag in ('script','style','noscript'):self.skip+=1
+            def handle_endtag(self,tag):
+                if tag=='body':self.body=False
+                if tag in ('script','style','noscript'):self.skip-=1
+            def handle_data(self,data):
+                if self.body and not self.skip:self.text.append(data)
+        text=BodyText();text.feed(home.text)
+        assert 'Start here: /agents.md' in ''.join(text.text)
+        md=c.get('/',headers={'Accept':'text/markdown'})
+        assert md.headers['content-type'].startswith('text/markdown') and '/api/public/profile' in md.text
+        assert 'Accept' in md.headers['vary'] and 'Accept' in home.headers['vary']
+        assert c.get('/',headers={'Accept':'text/html, text/markdown;q=0.5'}).headers['content-type'].startswith('text/html')
+        assert c.get('/',headers={'Accept':'text/markdown;q=0'}).headers['content-type'].startswith('text/html')
+        assert '/sitemap.xml' in c.get('/robots.txt').text and '/agents.md' in c.get('/robots.txt').text
+        import xml.etree.ElementTree as ET
+        sitemap=ET.fromstring(c.get('/sitemap.xml').text)
+        assert any(n.text=='http://testserver/agents.md' for n in sitemap.iter('{http://www.sitemaps.org/schemas/sitemap/0.9}loc'))
+        assert c.get('/.well-known/agent-interface.json').json()['mcp']['url']=='/mcp'
         for path in ['/agents','/agents.md','/llms.txt','/.well-known/api-catalog','/api/public/openapi.json','/api/public/tools','/api/public/profile','/api/public/knowledge?query=leadership','/api/public/bookshelf']:
             r=c.get(path);assert r.status_code==200,(path,r.text)
             assert 'PRIVATE' not in r.text,path
