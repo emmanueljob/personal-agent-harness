@@ -42,6 +42,8 @@ async def lifespan(app):
 
 
 app = FastAPI(title="Personal Agent Harness", lifespan=lifespan)
+from .model_bridge import install as install_model_bridge
+install_model_bridge(app)
 app.add_middleware(PublicAccess)
 frontend_dist = Path(__file__).resolve().parents[1] / "frontend" / "dist"
 if (frontend_dist / "assets").exists():

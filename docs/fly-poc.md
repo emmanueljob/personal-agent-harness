@@ -6,7 +6,7 @@ The Docker build uses a source allowlist. It excludes Git, `.env`, runtime tools
 
 `PUBLIC_ONLY=true` disables owner routes even if an owner token is accidentally configured. Browser conversations are bound to a random Secure/HttpOnly/SameSite cookie; a thread ID alone does not grant access. Queue admission has visitor/IP/global limits, a bounded prompt length and pending queue. Model Activities have a separate global daily call counter, and public OpenAI calls have no SDK retries and a bounded output token budget. These are demo usage limits, not a guaranteed dollar spending cap. Provider billing controls still apply.
 
-The cloud PoC reads the same approved canonical public knowledge through the file provider. The local GBrain configuration and indexes are untouched. The cloud starts with fresh chat state. Private brain, raw source material, local chats and the local owner token are never deployed. Hosted inference uses the explicitly selected OpenAI provider. The optional Mac Qwen bridge/fallback remains future work.
+The cloud PoC reads the same approved canonical public knowledge through the file provider. The local GBrain configuration and indexes are untouched. The cloud starts with fresh chat state. Private brain, raw source material, local chats and the local owner token are never deployed. Hybrid inference uses the authenticated outbound Mac worker when its heartbeat is current and OpenAI for new turns while the Mac is offline. See [Mac model bridge](mac-model-bridge.md).
 
 ## Prepare
 
