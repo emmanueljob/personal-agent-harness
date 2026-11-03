@@ -6,6 +6,7 @@ import {emptyPortfolio, type Portfolio} from './portfolio';
 import './style.css';
 import {Bookshelf,ShelfStudio,type Book} from './bookshelf';
 import Architecture from './architecture';
+import {registerPortfolioTools} from './webmcp';
 
 type Mode='public'|'private';
 const sections=[['conversation','Conversation'],['work','The work'],['person','The person'],['bookshelf','The bookshelf'],['behind-the-curtain','The machinery']] as const;
@@ -43,6 +44,12 @@ function App(){
  const [books,setBooks]=useState<Book[]>([]);
  const [shelfSelection,setShelfSelection]=useState<string[]|null>(null);
  const showShelf=(ids:string[])=>{setShelfSelection(ids);navigate('bookshelf');requestAnimationFrame(()=>document.getElementById('tab-bookshelf')?.focus())};
+ const browserState=useRef({section:activeTab,selected_book_ids:shelfSelection});browserState.current={section:activeTab,selected_book_ids:shelfSelection};
+ const bookCatalog=useRef(books);bookCatalog.current=books;
+ const webActions=useRef({showBooks:showShelf,openBook:async(id:string)=>{if(!bookCatalog.current.some(b=>b.id===id))throw new Error('Book is not currently published.');showShelf([id]);await new Promise<void>((resolve,reject)=>{const onReady=(event:globalThis.Event)=>{const detail=(event as CustomEvent).detail;if(detail?.book_id!==id)return;window.removeEventListener('portfolio:book-opened',onReady);clearTimeout(timeout);detail.error?reject(new Error(detail.error)):resolve()};const timeout=setTimeout(()=>{window.removeEventListener('portfolio:book-opened',onReady);reject(new Error('Book inspector did not open.'))},5000);window.addEventListener('portfolio:book-opened',onReady);requestAnimationFrame(()=>requestAnimationFrame(()=>window.dispatchEvent(new CustomEvent('portfolio:open-book',{detail:{book_id:id}}))))})},state:()=>browserState.current});
+ webActions.current.showBooks=showShelf;
+ useEffect(()=>{let stopped=false;let cleanup:(()=>void)|undefined;void registerPortfolioTools({showBooks:ids=>webActions.current.showBooks(ids),openBook:id=>webActions.current.openBook(id),state:()=>browserState.current}).then(dispose=>{if(stopped)dispose();else cleanup=dispose}).catch(()=>{});return()=>{stopped=true;cleanup?.()}},[]);
+ useEffect(()=>{const id=new URLSearchParams(location.search).get('book');if(id&&books.some(b=>b.id===id))showShelf([id])},[books]);
  const [availableTools,setAvailableTools]=useState<{name:string;description:string}[]>([]);
  const reloadBooks=()=>fetch('/api/bookshelf').then(r=>r.json()).then(d=>setBooks(d.books)).catch(()=>{});
  useEffect(()=>{void reloadBooks()},[]);
@@ -134,7 +141,7 @@ function App(){
  </div>
  <div className="portfolio-panel" id="panel-bookshelf" role="tabpanel" aria-labelledby="tab-bookshelf" tabIndex={0} hidden={activeTab!=='bookshelf'}><Bookshelf books={books} ask={ask} enabled={activeTab==='bookshelf'} selection={shelfSelection} clearSelection={()=>setShelfSelection(null)}/></div>
  <div className="portfolio-panel" id="panel-behind-the-curtain" role="tabpanel" aria-labelledby="tab-behind-the-curtain" tabIndex={0} hidden={activeTab!=='behind-the-curtain'}><Architecture ask={ask}/></div>
- <footer className="footer"><span className="footer-signature">{portfolio.footer}</span><div><span className="footer-meta">AI GUIDE · {portfolio.resumeLabel}</span>{status&&!status.public_only&&<button onClick={()=>setOwnerOpen(true)} className="owner-link">Owner studio ↗</button>}</div></footer>
+ <footer className="footer"><span className="footer-signature">{portfolio.footer}</span><div><a className="owner-link" href="/agents">For agents ↗</a><span className="footer-meta">AI GUIDE · {portfolio.resumeLabel}</span>{status&&!status.public_only&&<button onClick={()=>setOwnerOpen(true)} className="owner-link">Owner studio ↗</button>}</div></footer>
  <AnimatePresence>{notice&&<motion.div className="notice" initial={{opacity:0,y:5}} animate={{opacity:1,y:0}} exit={{opacity:0}} role="status"><span>{notice}</span><button aria-label="Dismiss notification" onClick={()=>setNotice('')}>×</button></motion.div>}</AnimatePresence>
  <dialog ref={dialogRef} className="owner-dialog" onCancel={()=>setOwnerOpen(false)} onClose={()=>setOwnerOpen(false)}><div className="dialog-heading"><div><span className="eyebrow">Behind the scenes</span><h2>The notebook.</h2></div><button className="close-button" onClick={()=>setOwnerOpen(false)} aria-label="Close owner panel">×</button></div><div className="owner-access"><label htmlFor="owner-token">Owner access</label><input id="owner-token" type="password" value={token} onChange={e=>setToken(e.target.value)} placeholder="Enter your owner token" autoComplete="off"/><small>Kept in memory for this session. Find it in your local .env file.</small></div><div className="owner-tabs" role="tablist">{(['workspace','profile','routines','brain','bookshelf'] as const).map(t=><button key={t} role="tab" aria-selected={ownerTab===t} className={ownerTab===t?'selected':''} onClick={()=>setOwnerTab(t)}>{t}</button>)}</div><div className="owner-content">
  {ownerTab==='bookshelf'&&<ShelfStudio api={api} onPublished={()=>void reloadBooks()}/>}

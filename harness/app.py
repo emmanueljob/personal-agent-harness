@@ -32,10 +32,13 @@ async def lifespan(app):
     if settings()['agent_runtime']=='deepagents' and executor!='temporal':
         raise RuntimeError('Deep Agents runtime requires EXECUTOR=temporal.')
     task = asyncio.create_task(temporal_dispatcher(store) if executor == "temporal" else local_worker(store))
-    yield
-    task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await task
+    try:
+        async with app.state.agent_mcp_manager().run():
+            yield
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
 
 app = FastAPI(title="Personal Agent Harness", lifespan=lifespan)
@@ -334,3 +337,7 @@ def cover_asset(ident: str):
         except (httpx.HTTPError, ValueError):
             raise HTTPException(502, 'Cover image unavailable')
     return FileResponse(p, media_type='image/jpeg', headers={'Cache-Control':'private, max-age=0, must-revalidate'})
+
+
+from .agent_surfaces import mount_agent_surfaces
+mount_agent_surfaces(app, lambda: store)
