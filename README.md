@@ -109,7 +109,7 @@ Run `.venv/bin/python scripts/setup_gbrain.py`, set `BRAIN_BACKEND=gbrain` in `.
 
 The adapter uses the local CLI with a minimal environment that excludes model/API credentials and inherited GBrain routing. It creates separate public/private PGLite databases under the brain folder's sibling `gbrain/` directory. It does not register a global Codex plugin, enable automatic capture, install background jobs, expose an MCP port, or configure paid providers. Conservative keyword search is enabled; semantic embeddings, reranking, extraction and enrichment remain off.
 
-Each search synchronizes changed Markdown and individual bookshelf records, then searches only the appropriate database(s). Public queries never open the private index. File locks serialize PGLite access across the web/worker processes. Removed records are soft-deleted from the derived index. A live source/hash allowlist rejects unmanaged, changed or withdrawn hits, including changes during a query. A failed sync/search fails closed with a generic error; it does not broaden visibility or silently switch providers. The owner panel displays the configured provider.
+Each search synchronizes changed Markdown and individual bookshelf records, then searches only the appropriate database(s). Public queries never open the private index. File locks serialize PGLite access across the web/worker processes. If a same-scope index is busy, retrieval uses a twice-validated canonical-file search in that scope instead of waiting for the bulk build; returned hits explicitly report `backend=files` and `fallback_reason=index_busy`. Removed records are soft-deleted from the derived index. A live source/hash allowlist rejects unmanaged, changed or withdrawn hits, including changes during a query. A failed sync/search fails closed with a generic error; it does not broaden visibility or silently switch providers. The owner panel displays the configured provider.
 
 The first index build can take several minutes for a larger library; unchanged records are not rewritten on later queries. Raw imports, style guides and sampling manifests are excluded from indexing. Back up the canonical knowledge files and runtime databases; these indexes can be rebuilt from the source files. Soft deletion is not physical erasure of database history or backups. As with the rest of this local app, filesystem access belongs to the trusted owner/server; this is not OS sandboxing between processes.
 
@@ -136,3 +136,7 @@ Portfolio navigation uses five accessible tabs: Conversation, The work, The pers
 ## Git privacy guard
 
 Run `python3 scripts/setup_git_safety.py` after cloning to activate the pre-commit and pre-push hooks. They inspect real Git objects, credentials and sensitive data paths. The pre-push scan includes history, not just the latest files. On the owner’s machine, local private-reference fingerprints add another check. See [the policy and limitations](security/README.md). Runtime data, résumés and credentials are excluded from this repository.
+
+## Deep Agents comparison
+
+An opt-in, isolated [Deep Agents + Temporal comparison](docs/deepagents-comparison.md) uses the same local model, frozen initial context, brain and application tools. It has its own dependency environment, queues, state and private reports. The serving application continues to use the existing runtime.
