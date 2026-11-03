@@ -18,7 +18,7 @@ file contains `origin` (the app's HTTPS origin), `model`, and a random `token`. 
 this file outside Git with owner-only permissions. Install the same token as Fly's
 `MODEL_BRIDGE_TOKEN` secret. Run the worker as a per-user LaunchAgent while logged
 in. The worker checks that the configured model is installed before advertising
-availability. Stop it to test offline fallback; no model call is needed to inspect
+availability. On macOS it holds an idle-sleep assertion only while an inference request is active; it does not prevent lid closure or explicit sleep. Stop it to test offline fallback; no model call is needed to inspect
 `/api/status` and confirm selection.
 
 The bridge endpoints are excluded from the public API catalog and schemas. Every

@@ -2,6 +2,9 @@
 import argparse
 import json
 import signal
+import os
+import subprocess
+import sys
 import threading
 import time
 import urllib.request
@@ -42,7 +45,13 @@ def main():
             if not job:
                 stop.wait(2);continue
             result = None
+            awake = None
+            started = time.monotonic()
             try:
+                # Hold an idle-sleep assertion only for an active request. Lid
+                # closure and explicit sleep still disconnect the Mac normally.
+                if sys.platform=='darwin':
+                    awake=subprocess.Popen(['/usr/bin/caffeinate','-i','-w',str(os.getpid())])
                 payload = job['payload']
                 if payload.get('model')!=config['model']: raise ValueError('Unexpected model')
                 payload['stream']=False
@@ -50,6 +59,10 @@ def main():
                 with urllib.request.urlopen(req,timeout=240) as response:result=json.load(response)
                 if 'error' in result:result=None
             except Exception: pass
+            finally:
+                if awake is not None:
+                    awake.terminate();awake.wait()
+            print('Local inference '+('completed' if result is not None else 'failed')+' in '+str(round(time.monotonic()-started,1))+'s.',flush=True)
             post('/jobs/'+job['id'],dict(claim=job['claim'],result=result))
         except Exception:stop.wait(3)
     try:post('/heartbeat',dict(model=config['model'],online=False))
