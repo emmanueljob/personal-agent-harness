@@ -50,6 +50,10 @@ class FileBrain:
     def voice(self, mode):
         return self.read(mode, "voice.md") or ""
 
+    def perspectives(self, query, mode):
+        from .perspectives import perspective_hits
+        return perspective_hits(self,query,mode)
+
     def set_profile(self, mode, body):
         scope = self.scope(mode)
         scope.mkdir(parents=True, exist_ok=True, mode=0o700)
