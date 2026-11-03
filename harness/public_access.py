@@ -8,6 +8,8 @@ import time
 from fastapi import HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
+from starlette.responses import RedirectResponse
+from urllib.parse import urlsplit
 
 COOKIE = 'portfolio_visitor'
 
@@ -43,6 +45,13 @@ def reserve_model_call(store):
 
 class PublicAccess(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
+        if request.url.hostname in os.getenv('REDIRECT_HOSTS','').split(','):
+            target = os.getenv('PUBLIC_ORIGIN','').rstrip('/')
+            if urlsplit(target).scheme=='https' and urlsplit(target).hostname!=request.url.hostname:
+                if request.method not in ('GET','HEAD'):
+                    return JSONResponse({'detail':'Use the canonical hostname.'},status_code=421)
+                suffix = request.url.path + ('?'+request.url.query if request.url.query else '')
+                return RedirectResponse(target+suffix,status_code=308)
         if not public_only():
             return await call_next(request)
         path = request.url.path
@@ -60,7 +69,8 @@ class PublicAccess(BaseHTTPMiddleware):
             if (origin and origin.rstrip('/') not in expected) or request.headers.get('sec-fetch-site') == 'cross-site':
                 return JSONResponse({'detail':'Cross-site requests are not accepted.'}, status_code=403)
             try:
-                if int(request.headers.get('content-length', '0')) > 32000:
+                limit = 128000 if path.startswith('/api/model-bridge/') else 32000
+                if int(request.headers.get('content-length', '0')) > limit:
                     return JSONResponse({'detail':'Request is too large.'}, status_code=413)
             except ValueError:
                 return JSONResponse({'detail':'Invalid request length.'}, status_code=400)

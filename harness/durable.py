@@ -10,6 +10,7 @@ from temporalio.client import (
 )
 from temporalio.common import WorkflowIDReusePolicy
 from temporalio.exceptions import WorkflowAlreadyStartedError
+from .failures import public_failure, GENERIC
 
 logger = logging.getLogger(__name__)
 
@@ -60,9 +61,21 @@ async def dispatch_once(client, store):
     status = (await handle.describe()).status
     if status in (WorkflowExecutionStatus.FAILED, WorkflowExecutionStatus.TIMED_OUT,
                   WorkflowExecutionStatus.CANCELED, WorkflowExecutionStatus.TERMINATED):
+        message = GENERIC
+        if status == WorkflowExecutionStatus.FAILED:
+            try:
+                history = await handle.fetch_history()
+                for event in reversed(history.events):
+                    if event.HasField('workflow_execution_failed_event_attributes'):
+                        message = public_failure(event.workflow_execution_failed_event_attributes.failure)
+                        break
+            except Exception:
+                logger.warning('Could not classify the failed workflow; using a safe public message.')
+        elif status == WorkflowExecutionStatus.TIMED_OUT:
+            message = 'The response took too long. Please try again.'
         with store.connect() as db:
             db.execute("UPDATE turns SET status='failed',error=? WHERE id=? AND status!='completed'",
-                       ("Durable execution failed after retries. Retry to resume checkpoints.", turn["id"]))
+                       (message, turn["id"]))
 
 
 async def temporal_dispatcher(store):
