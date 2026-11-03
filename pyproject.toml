@@ -16,6 +16,7 @@ dependencies = [
     "lxml>=6,<7",
     "deepagents==0.7.32",
     "temporalio-deepagents==0.0.3",
+    "mcp==2.3.0",
 ]
 
 [dependency-groups]

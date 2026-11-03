@@ -14,7 +14,7 @@ RUN curl -fsSL https://github.com/temporalio/cli/releases/download/v1.9.1/tempor
     && echo '09a0326a51db84d02735e53542b9ebd8c4758daf47482a9ab0abce15844e60d5  /tmp/temporal.tgz' | sha256sum -c - \
     && tar -xzf /tmp/temporal.tgz -C /usr/local/bin temporal \
     && rm /tmp/temporal.tgz
-RUN pip install --no-cache-dir uv==0.10.12
+RUN pip install --no-cache-dir uv==0.13.7
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project

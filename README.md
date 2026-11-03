@@ -142,3 +142,21 @@ Run `python3 scripts/setup_git_safety.py` after cloning to activate the pre-comm
 ## Deep Agents comparison
 
 An opt-in, isolated [Deep Agents + Temporal comparison](docs/deepagents-comparison.md) uses the same local model, frozen initial context, brain and application tools. It has its own dependency environment, queues, state and private reports. The serving application now defaults to Deep Agents when configured with the example environment. See [runtime migration and rollback](docs/deepagents-runtime.md).
+
+## Public agent interfaces
+
+`/agents` is the human-readable entry point; `/agents.md` and `/llms.txt` provide machine-readable instructions. The homepage includes HTML links and HTTP discovery headers. `/.well-known/api-catalog` links to a deliberately public-only `/api/public/openapi.json` schema; public-only deployments also filter the default OpenAPI schema.
+
+HTTP and anonymous Streamable HTTP MCP (`/mcp`) share `harness/public_agent.py`: published profile, scoped knowledge search, paginated bookshelf reads, durable public questions, and token-protected answer polling. Reads do not invoke a model. Questions join the normal SQLite queue with a frozen runtime; the existing worker/Temporal path executes them. Result tokens are random, stored hashed, and expire after seven days. They are returned only at submission and must be supplied in `X-Result-Token` for HTTP polling or as a `get_answer` MCP argument. Neither interface exposes visitor chat histories, owner mutations, private retrieval, raw imports, or unrestricted web/filesystem tools. See `/agents.md` for request and inference quotas.
+
+The official Python MCP SDK is pinned to 2.3.0. Its stateless JSON transport needs no OAuth, uses an explicit host/origin allowlist, limits request bodies, and is started/stopped with the parent ASGI lifespan. Add production hostnames through `PUBLIC_ORIGIN` / `FLY_APP_NAME`. MCP clients may still require their user's approval before connecting.
+
+The homepage progressively registers WebMCP tools through the current `document.modelContext` API, with compatibility for older `navigator.modelContext` hosts. Browser tools use the same public HTTP capabilities; additional `show_books`, `open_book`, and `get_site_state` tools affect only the current page. No polyfill exposes tools in unsupported browsers. `open_book` validates a current public ID and opens the existing inspector. WebMCP support remains experimental and dependent on the consuming browser agent.
+
+To run a real black-box discovery check with local Ollama, give the test only the site URL:
+
+```sh
+PYTHONPATH=. .venv/bin/python scripts/check_agent_discovery.py http://localhost:8000/ --report /absolute/path/outside-the-repo/discovery.json
+```
+
+The test agent has one same-origin HTTP GET tool and no preconfigured endpoint names. It must follow discovery links, search published leadership notes, retrieve a real bookshelf ID, and cite evidence. Reports can contain public personal data and are kept outside Git. This is a bounded compatibility check, not a guarantee that every external agent host discovers the conventions.
