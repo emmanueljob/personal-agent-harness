@@ -34,7 +34,7 @@ def perspective_hits(brain, query, mode):
             evidence={k:entry.get(k) for k in ('id','basis','view','owner_source','limits')}
             evidence['influences']=influences
             text='# Owner perspective\n\n'+json.dumps(evidence,ensure_ascii=False)
-            if len(text)>6000:
+            if len(text)>4000:
                 raise ValueError('Perspective evidence exceeds the context budget.')
             results.append({'source':scope+'/perspectives.json#'+entry['id'],'text':text,
                             'score':100+score,'knowledge_role':'owner_perspective','basis':entry['basis']})

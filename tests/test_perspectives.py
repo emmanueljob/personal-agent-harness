@@ -59,3 +59,20 @@ def test_tool_prioritizes_owner_perspective_over_reference_library(tmp_path):
     hits=json.loads(tool.invoke({'query':'prototypes'}))
     assert hits[0]['source'].startswith('public/perspectives.json#')
     assert 'owner_confirmed' in hits[0]['text']
+
+
+def test_shared_search_preserves_complete_perspective_citations_and_budget(tmp_path,monkeypatch):
+    monkeypatch.setenv('MODEL_PROVIDER','openai');monkeypatch.setenv('OPENAI_API_KEY','test-only')
+    monkeypatch.setenv('PUBLIC_ONLY','false')
+    store=Store(tmp_path);store.set_profile('public','Approved facts')
+    write(store.brain,'public',record('I prefer prototypes. '*120))
+    for i in range(3):store.brain.add_note('Prototypes '+str(i),'prototypes '*500,'public')
+    result=store.brain.search('prototypes','public')[0]
+    assert result['knowledge_role']=='owner_perspective'
+    tool_result=json.loads(knowledge_tools({'mode':'public','store':store})[0].invoke({'query':'prototypes'}))
+    evidence=json.loads(tool_result[0]['text'].split('\n\n',1)[1])
+    assert evidence['influences'][0]['url']=='https://example.org/episode'
+    ident=store.enqueue(store.thread('public')['id'],'Your view of prototypes?')
+    _,snapshot=prepare_turn(store,store.query('SELECT * FROM turns WHERE id=?',(ident,))[0])
+    assert len(json.dumps(snapshot['perspectives']))+sum(len(h['text']) for h in snapshot['knowledge'])<=10000
+    assert all(h['source']!=result['source'] for h in snapshot['knowledge'])

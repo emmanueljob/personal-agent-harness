@@ -90,10 +90,14 @@ def knowledge_tools(ctx):
     def search_knowledge(query: str) -> str:
         """Search scoped owner perspectives, knowledge and external references. Use short topic queries. Explicit owner perspectives can connect a personal view to podcast influences; a transcript alone does not establish agreement or listening. Cite original source URLs."""
         hits, remaining = [], 4000
-        for hit in ctx["store"].brain.perspectives(query, ctx["mode"]) + ctx["store"].brain.search(query, ctx["mode"]):
+        for hit in ctx["store"].brain.search(query, ctx["mode"]):
             if remaining <= 0:
                 break
-            text = hit["text"][:min(2000, remaining)]
+            if hit.get('knowledge_role')=='owner_perspective':
+                if len(hit['text'])>remaining:continue
+                text=hit['text']
+            else:
+                text = hit["text"][:min(2000, remaining)]
             hits.append({"source": hit["source"], "text": text})
             remaining -= len(text)
         return json.dumps(hits)
@@ -155,10 +159,10 @@ def prepare_turn(store, turn):
         # Local models sometimes offer to search instead of calling the tool.
         # Supply bounded, scoped evidence up front and snapshot it for retries.
         knowledge = []
-        remaining = 10000
+        remaining = max(0,10000-len(json.dumps(perspectives)))
         store.event(turn["id"], "knowledge_start", "Searching knowledge")
         for hit in store.brain.search(turn["prompt"], mode):
-            if hit["source"].endswith("/profile.md"):
+            if hit["source"].endswith("/profile.md") or hit.get('knowledge_role')=='owner_perspective':
                 continue
             text = hit["text"][:min(4000, remaining)]
             if not text:

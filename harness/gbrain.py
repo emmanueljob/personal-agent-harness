@@ -162,4 +162,4 @@ class GBrain(FileBrain):
                     # opinion paragraph does not lose which work it describes.
                     evidence = list(dict.fromkeys(paragraphs[:3] + ranked[:4]))
                     results.append({"source": record["source"], "text": "\n\n".join(evidence)[:5000], "score": score, "backend": "gbrain"})
-        return sorted(results, key=lambda x: x["score"], reverse=True)[:5]
+        return sorted(self.perspectives(query,mode)+results, key=lambda x: x["score"], reverse=True)[:5]

@@ -83,7 +83,8 @@ class FileBrain:
 
     def search(self, query, mode):
         self.scope(mode)  # Validate before selecting directories.
-        return self._search_scopes(query, ["public"] if mode == "public" else ["public", "private"])
+        hits=self.perspectives(query,mode)+self._search_scopes(query, ["public"] if mode == "public" else ["public", "private"])
+        return sorted(hits,key=lambda hit:hit['score'],reverse=True)[:5]
 
     def _search_scopes(self, query, visibilities):
         for visibility in visibilities:
