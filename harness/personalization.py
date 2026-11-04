@@ -29,7 +29,10 @@ RIVIERA = Profile(
     system_note='Visitor is a recruiter from Riviera. Emphasize product/app engineering, Mojo, remote EM-to-VP and senior IC roles, and approximately $375K base target.',
     cta='Book 15 min', banner='Open to remote EM-to-VP and senior IC roles · ~$375K base target',
 )
-SOURCES = {'riviera': RIVIERA}
+SOURCES = {'riviera': RIVIERA, **{
+    label: RIVIERA.model_copy(update={'key':'source:'+label, 'system_note':f'Visitor arrived via {label} outreach. Emphasize product/app engineering and relevant published career experience.'})
+    for label in ('warm', 'cold')
+}}
 CONTENTS = {name: RIVIERA.model_copy(update={'key': 'content:'+name, 'headline': f"Hi {name.title()} — here's the 2-minute version"}) for name in ('amie', 'chett')}
 CAMPAIGNS = {
     slug: Profile(key='campaign:'+slug, company=company,
@@ -48,6 +51,10 @@ UTMS = ('utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term')
 def resolve(params: Mapping[str, str], saved: str = '') -> Profile:
     for field, profiles in [('utm_content', CONTENTS), ('utm_campaign', CAMPAIGNS), ('utm_source', SOURCES)]:
         value = params.get(field, '').strip().lower()
+        from .outreach import lookup
+        key = lookup(value, field)
+        if key and key != 'default' and key in PROFILES:
+            return PROFILES[key]
         if value in profiles:
             return profiles[value]
     # Explicit unknown tags reset to default; untagged navigation restores the session.

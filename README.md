@@ -191,22 +191,58 @@ only the working email action appears. The sticky contact controls and editable
 roles banner appear on every HTML page. Machine-readable Markdown, API and MCP
 responses stay unchanged.
 
-Build a link locally (no admin password or public admin endpoint required):
+Generate outreach links with **opaque random UTM codes**. Names, company names,
+email addresses and private labels never appear in generated URLs. Warm and cold
+sources have recruiter-oriented profile defaults; a recognized person profile
+still takes precedence over company, then source. Unknown person labels provide
+attribution while letting the company/source choose the experience.
+
+Set a long random `PORTFOLIO_LINKS_PASSWORD` on the server and in your local shell,
+then register a link directly on the live site:
 
 ```sh
-python3 scripts/build_campaign_link.py --person chett --company recruiter
-python3 scripts/build_campaign_link.py --company hex --source newsletter
+python3 scripts/build_campaign_link.py --server --source cold --company hex --person chett
+python3 scripts/build_campaign_link.py --server --source warm --company openai
+python3 scripts/build_campaign_link.py --server --stats
 ```
 
-The first command prints
-`https://eman.hisemailaddress.org/?utm_source=riviera&utm_campaign=recruiter&utm_content=chett`.
+The generated URL looks like
+`https://eman.hisemailaddress.org/?utm_source=t_<random>&utm_campaign=t_<random>&utm_content=t_<random>`.
+Each code is independently random (128 bits), not a name hash or encoded name.
+Private mappings are stored in `DATA_DIR/outreach.sqlite` on the existing persistent
+volume; optionally override with `PORTFOLIO_LINKS_DB`, outside the source checkout.
+The server uses these mappings to resolve the profile before rendering. Labels
+stay private; visitors can see their own personalized greeting. Codes identify a
+link, not an authenticated person: forwarded links retain the same experience.
+
+The password is sent in an HTTPS Authorization header, never in a URL. The admin
+registration and stats routes return 404 if the password is unset and 401 when
+incorrect; they are excluded from public discovery. The CLI does not follow
+redirects with the password. Do not put real labels or passwords in URL parameters.
+Legacy descriptive tags still resolve for compatibility; the generator always
+produces opaque codes. Unknown codes or a missing registry fall back safely.
+
+Without `--server`, the script registers in the runtime database on the machine
+where it runs. Use this mode on the serving machine; a laptop-only mapping cannot
+be decoded by the live site. The server mode handles registration and generation
+in one step. Back up the runtime database with the application volume; losing it
+loses existing link attribution and personalization mappings.
+
+Local **daily aggregate counts work without pixels or a Plausible account** for
+registered outreach links. The private stats command shows the token-to-label
+mapping and counts for pageviews, profile resolution, CTA clicks and submitted
+guide questions. Only registered random tags enter these counts; IPs, referrers,
+user agents and browser identifiers are not stored. These are link event counts,
+not verified recipient identities or unique visitors; forwarding, repeat visits
+and bots can affect them. Existing DNT/GPC behavior suppresses event submission.
+Reports are bounded to the latest 1,000 tags and 5,000 daily count rows.
 
 Set `PLAUSIBLE_DOMAIN` to your configured Plausible site domain to enable the
 cookieless event relay. Create the `profile_resolved`, `cta_click`, and
 `guide_question_asked` goals in Plausible; `pageview` is built in. Properties include
-profile key and the five UTM fields. Question text, arbitrary query parameters,
-visitor IPs and persistent visitor identifiers are never sent or stored by this
-analytics layer. Referrers are reduced to origin. Events are bounded globally and
+profile key and the five UTM fields. Plausible is optional and separate from local
+outreach counts. Question text, arbitrary query parameters, visitor IPs and browser
+identifiers are never sent or stored by this analytics layer. Referrers are reduced to origin. Events are bounded globally and
 network errors cannot break the guide. The relay intentionally does not forward
 visitor IPs or user agents, so Plausible unique-visitor/geographic/device reports
 are not reliable; use pageviews and event counts. Existing chat abuse controls

@@ -126,8 +126,71 @@ def test_events_private_and_optional(tmp_path,monkeypatch):
         assert client.post('/api/visit-events',json={**event,'url':'https://elsewhere.org'}).status_code == 422
 
 
-def test_link_builder():
-    url=build_link('https://eman.hisemailaddress.org','chett','recruiter')
-    assert url == 'https://eman.hisemailaddress.org/?utm_source=riviera&utm_campaign=recruiter&utm_content=chett'
-    assert parse_qs(urlsplit(build_link('https://example.org','a & b','hex')).query)['utm_content'] == ['a & b']
+def test_link_builder(tmp_path, monkeypatch):
+    monkeypatch.setenv('PORTFOLIO_LINKS_DB',str(tmp_path/'outreach.sqlite'))
+    url=build_link('https://eman.hisemailaddress.org','chett','hex','cold')
+    tags={key:value[0] for key,value in parse_qs(urlsplit(url).query).items()}
+    assert set(tags) == {'utm_source','utm_campaign','utm_content'}
+    assert all(re.fullmatch(r't_[0-9a-f]{32}',value) for value in tags.values())
+    for label in ['chett','hex','cold']:
+        assert label not in url
+    assert resolve(tags).key == 'content:chett'
+    assert resolve({k:v for k,v in tags.items() if k != 'utm_content'}).key == 'campaign:hex'
+    assert resolve({'utm_source':tags['utm_source']}).key == 'source:cold'
+    assert resolve({'utm_campaign':tags['utm_content']}).key == 'default'
+    assert resolve({'utm_content':'t_'+'0'*32}).key == 'default'
+    assert build_link('https://eman.hisemailaddress.org','chett','hex','cold') != url
+    from harness.outreach import database_path, report
+    assert database_path().stat().st_mode & 0o777 == 0o600
+    assert any(tag['label']=='chett' for tag in report()['tags'])
     with pytest.raises(ValueError):build_link('http://example.org')
+    with pytest.raises(ValueError):build_link('https://example.org/path')
+
+
+def test_opaque_unknown_labels_and_missing_registry(tmp_path, monkeypatch):
+    monkeypatch.setenv('PORTFOLIO_LINKS_DB',str(tmp_path/'outreach.sqlite'))
+    url=build_link('https://example.org','A Private Person','hex','warm')
+    tags={key:value[0] for key,value in parse_qs(urlsplit(url).query).items()}
+    assert 'Private' not in url and 'warm' not in url
+    assert resolve(tags).key == 'campaign:hex'
+    from harness.outreach import database_path
+    database_path().unlink()
+    assert resolve(tags, 'content:chett').key == 'default'
+
+
+def test_registered_links_and_pixel_free_visit_counts(tmp_path,monkeypatch):
+    module,_ = fixture_app(tmp_path,monkeypatch)
+    monkeypatch.setenv('PUBLIC_ORIGIN','https://testserver')
+    monkeypatch.setenv('PORTFOLIO_LINKS_DB',str(tmp_path/'outreach.sqlite'))
+    monkeypatch.delenv('PLAUSIBLE_DOMAIN',raising=False)
+    monkeypatch.delenv('PORTFOLIO_LINKS_PASSWORD',raising=False)
+    with TestClient(module.app,base_url='https://testserver') as client:
+        assert client.post('/api/outreach-links',json={}).status_code == 404
+        monkeypatch.setenv('PORTFOLIO_LINKS_PASSWORD','synthetic-test-password')
+        assert client.post('/api/outreach-links',json={}).status_code == 401
+        assert client.get('/api/outreach-stats').status_code == 401
+        headers={'Authorization':'Bearer synthetic-test-password'}
+        response=client.post('/api/outreach-links',headers=headers,json={'person':'chett','company':'hex','source':'cold'})
+        assert response.status_code == 200
+        url=response.json()['url']
+        assert 'chett' not in url and 'hex' not in url and 'cold' not in url
+        tags={key:value[0] for key,value in parse_qs(urlsplit(url).query).items()}
+        home=client.get(url)
+        assert "Hi Chett" in home.text
+        assert client.get('/api/personalization',params=tags).json()['key']=='content:chett'
+        assert client.get('/api/visit-config').json()=={'linkedin':'','x':''}
+        event={'name':'pageview','url':urlsplit(url).path+'?'+urlsplit(url).query,'profile_key':'content:chett','utm':tags}
+        for _ in range(2):
+            assert client.post('/api/visit-events',json=event).status_code==204
+        stats=client.get('/api/outreach-stats',headers=headers)
+        assert stats.headers['cache-control']=='no-store'
+        assert stats.json()['counts'][0]['count']==2
+        assert stats.json()['counts'][0]['content']==tags['utm_content']
+        assert 'ip' not in stats.json()['counts'][0] and 'referrer' not in stats.json()['counts'][0]
+        for name in ['profile_resolved','cta_click','guide_question_asked']:
+            assert client.post('/api/visit-events',json={**event,'name':name}).status_code==204
+        assert {row['event'] for row in client.get('/api/outreach-stats',headers=headers).json()['counts']} == {'pageview','profile_resolved','cta_click','guide_question_asked'}
+        assert 'synthetic-test-password' not in response.text
+        # Unregistered/name-bearing tags do not enter the local counts.
+        assert client.post('/api/visit-events',json={**event,'utm':{'utm_content':'Private Person'}}).status_code==204
+        assert next(row for row in client.get('/api/outreach-stats',headers=headers).json()['counts'] if row['event']=='pageview')['count']==2

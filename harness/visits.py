@@ -62,6 +62,48 @@ def visit_event(event: VisitEvent, request: Request, tasks: BackgroundTasks):
     # Global bounded admission, with no IP or persistent visitor identifiers.
     consume(request.app.state.public_store, [('hour:analytics', 3600, 5000)])
     # Bounded event payload, no freeform questions and no IP storage.
+    from .outreach import record_event
+    import sqlite3
+    try:
+        record_event(event)
+    except (OSError, sqlite3.Error):
+        pass  # Tracking failures must not break navigation.
     origin = os.getenv('PUBLIC_ORIGIN', str(request.base_url)).rstrip('/')
     tasks.add_task(deliver, event, origin)
     return Response(status_code=204)
+
+
+class OutreachInput(BaseModel):
+    person: str = Field(default='', max_length=160)
+    company: str = Field(default='', max_length=160)
+    source: str = Field(default='outreach', max_length=160)
+
+
+@router.post('/api/outreach-links', include_in_schema=False)
+def create_outreach_link(body: OutreachInput, request: Request):
+    authenticate_link_builder(request)
+    from .outreach import build_link
+    origin = os.getenv('PUBLIC_ORIGIN', '').rstrip('/')
+    try:
+        url = build_link(origin, body.person, body.company, body.source)
+    except ValueError:
+        raise HTTPException(503, 'Configure an HTTPS public origin and private outreach database')
+    return JSONResponse({'url':url}, headers={'Cache-Control':'no-store'})
+
+
+def authenticate_link_builder(request):
+    import secrets
+    password = os.getenv('PORTFOLIO_LINKS_PASSWORD', '')
+    if not password:
+        raise HTTPException(404)
+    from .public_access import consume
+    consume(request.app.state.public_store, [('hour:link-builder', 3600, 120)])
+    if not secrets.compare_digest(request.headers.get('authorization', '').encode(), ('Bearer '+password).encode()):
+        raise HTTPException(401, 'Link builder authentication required')
+
+
+@router.get('/api/outreach-stats', include_in_schema=False)
+def outreach_stats(request: Request):
+    authenticate_link_builder(request)
+    from .outreach import report
+    return JSONResponse(report(), headers={'Cache-Control':'no-store'})
