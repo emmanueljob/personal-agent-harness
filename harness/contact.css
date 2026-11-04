@@ -1,0 +1,5 @@
+.roles-banner{padding:.65rem 1rem;text-align:center;font:14px system-ui;color:inherit;background:color-mix(in srgb,currentColor 6%,transparent);border-bottom:1px solid #8884;position:relative;z-index:2}
+.contact-cta{position:fixed;bottom:18px;right:18px;z-index:40;display:flex;align-items:center;gap:14px;padding:14px 18px;border:1px solid #8886;border-radius:14px;background:#18201f;color:#fff;box-shadow:0 5px 25px #0003;font:14px system-ui}
+.contact-cta a{color:#d2f8d6;text-decoration:underline;text-underline-offset:3px}.contact-cta a:last-child{font-weight:700}
+body{padding-bottom:90px}.first90{max-width:760px;margin:24px auto;padding:24px;border:1px solid #8885;border-radius:16px}.first90 li{margin:12px 0}
+@media(max-width:600px){.contact-cta{bottom:10px;right:10px;left:10px;gap:12px;justify-content:center;flex-wrap:wrap}.contact-cta strong{font-size:13px}.roles-banner{font-size:12px}}

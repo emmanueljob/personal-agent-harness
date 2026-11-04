@@ -162,3 +162,69 @@ PYTHONPATH=. .venv/bin/python scripts/check_agent_discovery.py http://localhost:
 ```
 
 With `--text-only`, the test removes response headers, HTML head metadata, scripts, and noscript content before returning page text to the model. The test agent has one same-origin HTTP GET tool and no preconfigured endpoint names. It must follow discovery links, search published leadership notes, retrieve a real bookshelf ID, and cite evidence. Reports can contain public personal data and are kept outside Git. This is a bounded compatibility check, not a guarantee that every external agent host discovers the conventions.
+
+## Campaign personalization and contact
+
+`harness/personalization.py` is the typed source of truth. Add a `Profile` to
+`CONTENTS` (person), `CAMPAIGNS` (company/audience), or `SOURCES`. Resolution is
+`utm_content` → `utm_campaign` → `utm_source` → default. A match may override the
+headline, pitch, project ID order, exactly three suggested questions, guide-only
+system note, CTA label, roles banner, company and first-90-days placeholders.
+Use `RIVIERA.model_copy(update={...})` to inherit the recruiter profile. Include
+new profiles in the existing `PROFILES` collection automatically by adding them
+to one of those maps. All profile content is public editorial configuration;
+“hidden” notes are excluded from HTML/JSON, not a place for secrets.
+
+The server embeds the landing profile in HTML before React mounts. Untagged
+navigation restores the resolved profile from `sessionStorage`; explicit unknown
+UTM values reset to default. Tags are never removed from the address bar. The
+browser also retains campaign attribution for every pageview, including hash-tab
+navigation and the human-readable agent pages. Session storage failures do not
+block rendering. The default keeps the existing guide and suggestions, with the
+requested product/app positioning and contact improvements. DSP metrics remain
+unconfirmed and are deliberately absent from public claims. The original published
+knowledge is unchanged; the guide receives owner-approved positioning guidance.
+
+Set `PORTFOLIO_CONTACT_EMAIL` (defaults to eman@hisemailaddress.org) and
+`PORTFOLIO_BOOKING_URL` to an HTTPS booking URL. Until a booking URL is supplied,
+only the working email action appears. The sticky contact controls and editable
+roles banner appear on every HTML page. Machine-readable Markdown, API and MCP
+responses stay unchanged.
+
+Build a link locally (no admin password or public admin endpoint required):
+
+```sh
+python3 scripts/build_campaign_link.py --person chett --company recruiter
+python3 scripts/build_campaign_link.py --company hex --source newsletter
+```
+
+The first command prints
+`https://eman.hisemailaddress.org/?utm_source=riviera&utm_campaign=recruiter&utm_content=chett`.
+
+Set `PLAUSIBLE_DOMAIN` to your configured Plausible site domain to enable the
+cookieless event relay. Create the `profile_resolved`, `cta_click`, and
+`guide_question_asked` goals in Plausible; `pageview` is built in. Properties include
+profile key and the five UTM fields. Question text, arbitrary query parameters,
+visitor IPs and persistent visitor identifiers are never sent or stored by this
+analytics layer. Referrers are reduced to origin. Events are bounded globally and
+network errors cannot break the guide. The relay intentionally does not forward
+visitor IPs or user agents, so Plausible unique-visitor/geographic/device reports
+are not reliable; use pageviews and event counts. Existing chat abuse controls
+retain their separate hashed-IP rate-limit policy. No optional visit webhook is
+installed.
+
+`LINKEDIN_PARTNER_ID` and `X_PIXEL_ID` independently enable their vendor tags;
+leave them blank to keep them off. These optional advertising tags have their own
+vendor tracking behavior. Do Not Track and Global Privacy Control disable this
+layer's analytics and advertising tags. Content Security Policy allows vendor
+scripts/connections only when their IDs are configured. No inference provider is
+called for analytics. Environment changes require an application restart.
+
+Fly already enforces HTTPS; the application additionally redirects HTTP requests
+for the canonical hostname with 308, preserving the path and query. Local HTTP
+and health checks remain usable. Only Fly's protocol header is trusted, and only
+when running on Fly.
+
+Validation: `python -m pytest tests/test_personalization.py tests/test_agent_surfaces.py
+tests/test_public_deployment.py -q`, followed by `npm ci && npm run build` in
+`frontend`. These checks use synthetic published fixtures and no model API calls.
