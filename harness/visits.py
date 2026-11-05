@@ -7,7 +7,8 @@ from fastapi.responses import FileResponse, Response, JSONResponse
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import Literal
-from .personalization import PROFILES, UTMS
+from .personalization import active_profiles, UTMS
+from .site_config import settings
 
 router = APIRouter()
 
@@ -29,7 +30,8 @@ def referrer_origin(value):
 
 
 async def deliver(event, origin):
-    domain = os.getenv('PLAUSIBLE_DOMAIN', '')
+    config = settings()
+    domain = config.plausible_domain if config.tracking_enabled else ''
     if not domain:
         return
     try:
@@ -51,14 +53,17 @@ def visit_script():
 
 @router.get('/api/visit-config', include_in_schema=False)
 def visit_config():
-    return JSONResponse({'linkedin': os.getenv('LINKEDIN_PARTNER_ID',''), 'x': os.getenv('X_PIXEL_ID','')}, headers={'Cache-Control':'no-store'})
+    config = settings()
+    return JSONResponse({'linkedin':config.linkedin_partner_id, 'x':config.x_pixel_id, 'enabled':config.tracking_enabled}, headers={'Cache-Control':'no-store'})
 
 
 @router.post('/api/visit-events', status_code=204, include_in_schema=False)
 def visit_event(event: VisitEvent, request: Request, tasks: BackgroundTasks):
     if not event.url.startswith('/') or event.url.startswith('//'):
         raise HTTPException(422, 'Expected a relative page URL')
-    if event.profile_key not in PROFILES:
+    if not settings().tracking_enabled:
+        return Response(status_code=204)
+    if event.profile_key not in active_profiles():
         event.profile_key = 'default'
     if request.headers.get('dnt') == '1' or request.headers.get('sec-gpc') == '1':
         return Response(status_code=204)

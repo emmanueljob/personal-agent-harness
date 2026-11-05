@@ -91,7 +91,7 @@ def test_https_and_agent_pages(tmp_path,monkeypatch):
             response=client.get(path)
             assert response.status_code == 200 and '/visit.js' not in response.text
         assert client.get('/visit.js').status_code == 200
-        assert client.get('/api/visit-config').json() == {'linkedin':'','x':''}
+        assert client.get('/api/visit-config').json() == {'linkedin':'','x':'','enabled':True}
         csp=client.get('/').headers['content-security-policy']
         assert 'snap.licdn.com' not in csp
         monkeypatch.setenv('LINKEDIN_PARTNER_ID','123')
@@ -178,7 +178,7 @@ def test_registered_links_and_pixel_free_visit_counts(tmp_path,monkeypatch):
         home=client.get(url)
         assert "Hi Chett" in home.text
         assert client.get('/api/personalization',params=tags).json()['key']=='content:chett'
-        assert client.get('/api/visit-config').json()=={'linkedin':'','x':''}
+        assert client.get('/api/visit-config').json()=={'linkedin':'','x':'','enabled':True}
         event={'name':'pageview','url':urlsplit(url).path+'?'+urlsplit(url).query,'profile_key':'content:chett','utm':tags}
         for _ in range(2):
             assert client.post('/api/visit-events',json=event).status_code==204

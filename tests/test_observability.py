@@ -118,3 +118,16 @@ def test_metrics_retention_and_upstream_failure_do_not_break_chat(tmp_path, monk
         assert store.query('SELECT MIN(created) AS oldest FROM ui_events')[0]['oldest'] > 1
         assert client.post('/api/threads',json={'mode':'public'}).status_code == 200
         assert client.get('/healthz').status_code == 200
+
+
+def test_admin_tracking_switch_stops_local_metrics_and_posthog(tmp_path, monkeypatch):
+    module, store = setup(tmp_path, monkeypatch)
+    from harness.site_config import Settings, save
+    save('settings', Settings(tracking_enabled=False).model_dump(), 0)
+    with TestClient(module.app) as client:
+        assert client.get('/api/visit-config').json()['enabled'] is False
+        assert client.post('/api/visit-events',json={'name':'pageview','url':'/'}).status_code == 204
+        assert store.query('SELECT * FROM ui_events') == []
+        save('settings', Settings(tracking_enabled=True).model_dump(), 1)
+        assert client.post('/api/visit-events',json={'name':'pageview','url':'/'}).status_code == 204
+        assert len(store.query('SELECT * FROM ui_events')) == 1

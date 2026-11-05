@@ -14,7 +14,8 @@ is created additively at web startup and retains at most 50,000 events / 30 days
 counts therefore describe retained events, not a lifetime audit. Existing outreach
 attribution and optional Plausible delivery continue independently.
 
-Only explicit events are collected. DNT and Global Privacy Control disable client
+The admin portal’s tracking on/off switch controls this relay, including local
+metrics and PostHog delivery. Only explicit events are collected. DNT and Global Privacy Control disable client
 tracking, and their request headers are respected by the server. A random
 sessionStorage ID identifies a browser tab session, is hashed on the server, and
 is unrelated to the conversation cookie. Tracking is best effort; blocked or lost

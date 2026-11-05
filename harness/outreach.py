@@ -1,5 +1,6 @@
 """Opaque outreach tags; the mapping lives in private runtime state, never Git."""
 import os
+import json
 import re
 import secrets
 import sqlite3
@@ -25,6 +26,8 @@ def lookup(value, field):
         return None
     try:
         with sqlite3.connect(path.as_uri()+'?mode=ro', uri=True, timeout=2) as db:
+            if db.execute("SELECT 1 FROM sqlite_master WHERE name='outreach_disabled_tags'").fetchone() and db.execute('SELECT 1 FROM outreach_disabled_tags WHERE token=?',(value,)).fetchone():
+                return None
             row = db.execute('SELECT profile_key FROM outreach_tags WHERE token=? AND field=?', (value, field)).fetchone()
         return row[0] if row else None
     except sqlite3.Error:
@@ -54,6 +57,8 @@ def build_link(base, person='', company='', source='outreach'):
             # Unknown person labels are just attribution, so company/source can win.
             profile = resolve({field: values[field]})
             db.execute('INSERT INTO outreach_tags VALUES (?,?,?,?,?)', (token, field, profile.key, values[field][:160], time.time()))
+        ensure_links(db)
+        db.execute('INSERT INTO outreach_links VALUES (?,?,?,?,1)', (secrets.token_hex(16), json.dumps(aliases), json.dumps(values), time.time()))
     return base.rstrip('/')+'/?'+urlencode(aliases)
 
 
@@ -81,10 +86,49 @@ def record_event(event):
 def report():
     path = database_path()
     if not path.is_file():
-        return {'tags': [], 'counts': []}
+        return {'tags': [], 'counts': [], 'links': []}
     with sqlite3.connect(path.as_uri()+'?mode=ro', uri=True, timeout=2) as db:
         db.row_factory = sqlite3.Row
-        tags = [dict(row) for row in db.execute('SELECT token,field,label,profile_key FROM outreach_tags ORDER BY created DESC LIMIT 1000')]
+        disabled = {row[0] for row in db.execute('SELECT token FROM outreach_disabled_tags')} if db.execute("SELECT 1 FROM sqlite_master WHERE name='outreach_disabled_tags'").fetchone() else set()
+        tags = [{**dict(row),'active':row['token'] not in disabled} for row in db.execute('SELECT token,field,label,profile_key FROM outreach_tags ORDER BY created DESC LIMIT 1000')]
         exists = db.execute("SELECT 1 FROM sqlite_master WHERE name='outreach_counts'").fetchone()
         counts = [dict(row) for row in db.execute('SELECT * FROM outreach_counts ORDER BY day DESC LIMIT 5000')] if exists else []
-    return {'tags': tags, 'counts': counts}
+        exists_links = db.execute("SELECT 1 FROM sqlite_master WHERE name='outreach_links'").fetchone()
+        links = [{**dict(row),'tokens':json.loads(row['tokens']),'labels':json.loads(row['labels']), 'active':int(all(token not in disabled for token in json.loads(row['tokens']).values()))} for row in db.execute('SELECT * FROM outreach_links ORDER BY created DESC LIMIT 1000')] if exists_links else []
+    return {'tags': tags, 'counts': counts, 'links':links}
+
+
+def ensure_links(db):
+    db.execute('CREATE TABLE IF NOT EXISTS outreach_links (id TEXT PRIMARY KEY,tokens TEXT NOT NULL,labels TEXT NOT NULL,created REAL NOT NULL,active INTEGER NOT NULL)')
+    db.execute('CREATE TABLE IF NOT EXISTS outreach_disabled_tags (token TEXT PRIMARY KEY)')
+
+
+def set_link_active(ident, active):
+    target = database_path()
+    if not target.is_file():
+        raise KeyError(ident)
+    with sqlite3.connect(target, timeout=5) as db:
+        ensure_links(db)
+        row = db.execute('SELECT tokens FROM outreach_links WHERE id=?',(ident,)).fetchone()
+        if not row:
+            raise KeyError(ident)
+        for token in json.loads(row[0]).values():
+            if active:
+                db.execute('DELETE FROM outreach_disabled_tags WHERE token=?',(token,))
+            else:
+                db.execute('INSERT OR IGNORE INTO outreach_disabled_tags VALUES (?)',(token,))
+        db.execute('UPDATE outreach_links SET active=? WHERE id=?',(int(active),ident))
+
+
+def set_tag_active(token, active):
+    target = database_path()
+    if not target.is_file() or not TOKEN.fullmatch(token):
+        raise KeyError(token)
+    with sqlite3.connect(target, timeout=5) as db:
+        ensure_links(db)
+        if not db.execute('SELECT 1 FROM outreach_tags WHERE token=?',(token,)).fetchone():
+            raise KeyError(token)
+        if active:
+            db.execute('DELETE FROM outreach_disabled_tags WHERE token=?',(token,))
+        else:
+            db.execute('INSERT OR IGNORE INTO outreach_disabled_tags VALUES (?)',(token,))

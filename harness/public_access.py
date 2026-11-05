@@ -58,7 +58,7 @@ class PublicAccess(BaseHTTPMiddleware):
                 suffix = request.url.path + ('?'+request.url.query if request.url.query else '')
                 return RedirectResponse(target+suffix,status_code=308)
         if not public_only():
-            return await self.decorate(await call_next(request))
+            return await self.decorate(await call_next(request), request)
         path = request.url.path
         request.state.visitor_hash = None
         token = request.cookies.get(COOKIE, '')
@@ -103,11 +103,11 @@ class PublicAccess(BaseHTTPMiddleware):
         response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
         if path.startswith('/api/threads') or retry:
             response.headers['Cache-Control'] = 'no-store'
-        response = await self.decorate(response)
+        response = await self.decorate(response, request)
         return response
 
-    async def decorate(self, response):
-        if response.headers.get('content-type', '').startswith('text/html'):
+    async def decorate(self, response, request):
+        if response.headers.get('content-type', '').startswith('text/html') and request.url.path != '/admin':
             body = b''.join([chunk async for chunk in response.body_iterator]).decode('utf-8')
             body = body.replace('</head>', '<link rel="stylesheet" href="/contact.css"><script src="/visit.js" defer></script></head>', 1)
             from starlette.responses import Response
@@ -119,10 +119,12 @@ class PublicAccess(BaseHTTPMiddleware):
         if csp:
             scripts = []
             connections = []
-            if os.getenv('LINKEDIN_PARTNER_ID'):
+            from .site_config import settings
+            config = settings()
+            if config.tracking_enabled and config.linkedin_partner_id:
                 scripts += ['https://snap.licdn.com']
                 connections += ['https://px.ads.linkedin.com', 'https://px4.ads.linkedin.com']
-            if os.getenv('X_PIXEL_ID'):
+            if config.tracking_enabled and config.x_pixel_id:
                 scripts += ['https://static.ads-twitter.com', 'https://analytics.twitter.com']
                 connections += ['https://analytics.twitter.com', 'https://t.co', 'https://ads-api.twitter.com']
             csp = csp.replace("script-src 'self'", "script-src 'self' "+' '.join(scripts)).replace("connect-src 'self'", "connect-src 'self' "+' '.join(connections))

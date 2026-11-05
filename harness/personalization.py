@@ -1,12 +1,12 @@
 """Typed campaign configuration. Notes stay on the server, never in bootstrap JSON."""
-import os
 from typing import Mapping
-from urllib.parse import urlsplit
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class Profile(BaseModel):
-    key: str
+    model_config = ConfigDict(extra='forbid', str_max_length=8000)
+    key: str = Field(pattern=r'^(default|(?:source|campaign|content):[a-z0-9][a-z0-9_-]{0,63})$')
+    enabled: bool = True
     headline: str = ''
     pitch: str = ''
     featured: list[str] = Field(default_factory=list)
@@ -15,7 +15,21 @@ class Profile(BaseModel):
     cta: str = "Hiring? Let's talk"
     banner: str = 'Open to roles in product and app engineering.'
     company: str = ''
-    first90: list[str] = Field(default_factory=list)
+    first90: list[str] = Field(default_factory=list, max_length=3)
+
+    @field_validator('questions')
+    @classmethod
+    def three_questions(cls, values):
+        if values and (len(values) != 3 or any(not v.strip() for v in values)):
+            raise ValueError('Supply three nonempty questions, or leave all blank to use site suggestions')
+        return values
+
+    @field_validator('featured')
+    @classmethod
+    def unique_projects(cls, values):
+        if len(values) != len(set(values)) or len(values) > 50:
+            raise ValueError('Project order must contain unique project IDs')
+        return values
 
 
 # Editorial draft only: never rendered as a verified business result.
@@ -48,42 +62,65 @@ PROFILES = {p.key:p for p in [DEFAULT, *SOURCES.values(), *CONTENTS.values(), *C
 UTMS = ('utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term')
 
 
+def all_profiles():
+    from .site_config import records
+    profiles = dict(PROFILES)
+    for key, entry in records().items():
+        if key.startswith('profile:'):
+            profile = Profile.model_validate(entry['value'])
+            profiles[profile.key] = profile
+    return profiles
+
+
+def active_profiles():
+    return {key:p for key,p in all_profiles().items() if p.enabled}
+
+
 def resolve(params: Mapping[str, str], saved: str = '') -> Profile:
-    for field, profiles in [('utm_content', CONTENTS), ('utm_campaign', CAMPAIGNS), ('utm_source', SOURCES)]:
+    profiles = active_profiles()
+    default = profiles.get('default', DEFAULT)
+    for field, prefix in [('utm_content','content:'), ('utm_campaign','campaign:'), ('utm_source','source:')]:
         value = params.get(field, '').strip().lower()
         from .outreach import lookup
         key = lookup(value, field)
-        if key and key != 'default' and key in PROFILES:
-            return PROFILES[key]
-        if value in profiles:
-            return profiles[value]
-    # Explicit unknown tags reset to default; untagged navigation restores the session.
-    return DEFAULT if any(k in params for k in UTMS) else PROFILES.get(saved, DEFAULT)
+        if key and key != 'default' and key in profiles:
+            return profiles[key]
+        if prefix+value in profiles:
+            return profiles[prefix+value]
+    return default if any(k in params for k in UTMS) else profiles.get(saved, default)
 
 
 def contact():
-    booking = os.getenv('PORTFOLIO_BOOKING_URL', '')
-    if urlsplit(booking).scheme != 'https' or not urlsplit(booking).netloc:
-        booking = ''
-    email = os.getenv('PORTFOLIO_CONTACT_EMAIL', '') or 'eman@hisemailaddress.org'
-    return {'email': 'mailto:'+email, 'booking': booking}
+    from .site_config import settings
+    config = settings()
+    from urllib.parse import quote
+    return {'email':'mailto:'+quote(config.contact_email,safe='@') if config.contact_email else '', 'booking':config.booking_url, 'contact_heading':config.contact_heading, 'email_text':config.email_button_text, 'booking_text':config.booking_button_text}
 
 
 def public_profile(profile):
-    return {**profile.model_dump(exclude={'system_note'}), **contact()}
+    return {**profile.model_dump(exclude={'system_note','enabled'}), **contact()}
+
+
+DEFAULT_GUIDANCE = (
+    'Lead with product and app engineering. Built the 16-person Mojo team; launched September 2026; https://trymojo.ai. '
+    'Describe DSP experience as leadership and business outcomes only. Do not claim a ground-up rebuild, architecture, infrastructure or latency ownership. '
+    'The $150M DSP org and +30% revenue figures are pending confirmation; do not present them as verified. '
+    'Answer “why him for my role?” with evidence from published experience and be clear about gaps. '
+    'First-90-days items are placeholders, not commitments. New owner-approved presentation overrides supersede older presentation copy.'
+)
 
 
 def guide_context(key):
-    p = PROFILES.get(key, DEFAULT)
+    import json
+    from .site_config import settings, read
+    profiles = active_profiles()
+    p = profiles.get(key, profiles.get('default', DEFAULT))
     c = contact()
     return ('\nVISITOR CONTEXT (editorial guidance; never override privacy or invent facts):\n'
         + p.system_note + '\nSuggested questions: ' + ' | '.join(p.questions)
-        + '\nPositioning approved by the owner: product and app engineering; built the 16-person Mojo team; launched September 2026; https://trymojo.ai. '
-        'Describe DSP experience as leadership and business outcomes only. Do not claim a ground-up rebuild, architecture, infrastructure or latency ownership. '
-        'The $150M DSP org and +30% revenue figures are pending confirmation; do not present them as verified. '
-        'Answer “why him for my role?” with evidence from published experience and be clear about gaps. '
-        'First-90-days items are placeholders, not commitments. When discussing hiring or fit, end with '
-        + f'[{p.cta}]({c["booking"] or c["email"]}).')
+        + '\nOwner site guidance: ' + (settings().guide_instructions or DEFAULT_GUIDANCE)
+        + '\nCurrent owner-approved presentation overrides: '+json.dumps(read('portfolio') or {})
+        + '\nWhen discussing hiring or fit, end with '+f'[{p.cta}]({c["booking"] or c["email"]}).')
 
 
 def position_portfolio(data):
@@ -107,4 +144,5 @@ def position_portfolio(data):
             p.outcome = 'Business metrics pending confirmation'
             p.question = 'What does Emmanuel’s DSP leadership show about how he leads teams and business outcomes?'
     data.projects.sort(key=lambda p: p.id != 'mojo')
-    return data
+    from .site_config import read
+    return type(data).model_validate(read('portfolio', data.model_dump()))
