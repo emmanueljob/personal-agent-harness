@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from .store import Store
@@ -17,6 +17,7 @@ from .durable import temporal_dispatcher
 from .models import settings
 from .public_access import PublicAccess, public_only, admit_turn, consume
 from .portfolio import Portfolio
+from .personalization import resolve, public_profile, position_portfolio
 from .bookshelf import Shelf, ImportInput, Selection, BookEdit
 from .web_tools import provider as web_provider
 
@@ -45,6 +46,12 @@ app = FastAPI(title="Personal Agent Harness", lifespan=lifespan)
 from .model_bridge import install as install_model_bridge
 install_model_bridge(app)
 app.add_middleware(PublicAccess)
+from .visits import router as visits_router
+app.include_router(visits_router)
+
+@app.get("/contact.css", include_in_schema=False)
+def contact_styles():
+    return FileResponse(Path(__file__).with_name("contact.css"), media_type="text/css")
 frontend_dist = Path(__file__).resolve().parents[1] / "frontend" / "dist"
 if (frontend_dist / "assets").exists():
     app.mount("/assets", StaticFiles(directory=frontend_dist / "assets"), name="frontend-assets")
@@ -83,6 +90,7 @@ class ThreadInput(BaseModel):
 
 class TurnInput(BaseModel):
     prompt: str = Field(min_length=1, max_length=16000)
+    profile_key: str = Field(default='default', max_length=80)
     request_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
@@ -95,13 +103,19 @@ class RoutineInput(TurnInput):
 
 
 @app.get("/")
-def index():
+def index(request: Request):
     from .agent_surfaces import AGENT_NOTICE
     path = frontend_dist / "index.html" if (frontend_dist / "index.html").exists() else Path(__file__).parent / "index.html"
     html = path.read_text()
+    if '</head>' not in html:
+        html = html.replace('<html lang="en">', '<html lang="en"><head>', 1).replace('<main>', '</head><body><main>', 1).replace('</html>', '</body></html>')
     if 'id="agent-entry"' not in html:
         html = html.replace('<body>', '<body>'+AGENT_NOTICE, 1)
-    return HTMLResponse(html)
+    import json
+    bootstrap = public_profile(resolve(request.query_params))
+    payload = json.dumps(bootstrap).replace('<', '\\u003c')
+    html = html.replace('</head>', '<script id="personalization" type="application/json">'+payload+'</script></head>')
+    return HTMLResponse(html, headers={'Cache-Control': 'private, no-store'})
 
 
 @app.get("/healthz")
@@ -132,7 +146,13 @@ def tool_catalog():
 
 @app.get("/api/portfolio", response_model=Portfolio)
 def portfolio():
-    return Portfolio.model_validate(store.brain.public_portfolio())
+    return position_portfolio(Portfolio.model_validate(store.brain.public_portfolio()))
+
+
+@app.get('/api/personalization')
+def personalization(request: Request):
+    profile = resolve(request.query_params, request.headers.get('x-portfolio-profile', ''))
+    return JSONResponse(public_profile(profile), headers={'Cache-Control': 'private, no-store'})
 
 
 @app.post("/api/threads")
@@ -189,7 +209,7 @@ def enqueue(ident: str, body: TurnInput, request: Request, authorization: str = 
         raise HTTPException(422, 'Please keep demo questions under 2,000 characters.')
     if not turn_id or not store.query('SELECT id FROM turns WHERE id=?', (turn_id,)):
         admit_turn(store, request)
-    turn_id = store.enqueue(ident, body.prompt, turn_id)
+    turn_id = store.enqueue(ident, body.prompt, turn_id, profile_key=body.profile_key)
     return {"id": turn_id, "status": store.query("SELECT status FROM turns WHERE id=?", (turn_id,))[0]["status"], "workflow_id": store.workflow_id(turn_id)}
 
 

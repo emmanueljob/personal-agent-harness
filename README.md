@@ -162,3 +162,105 @@ PYTHONPATH=. .venv/bin/python scripts/check_agent_discovery.py http://localhost:
 ```
 
 With `--text-only`, the test removes response headers, HTML head metadata, scripts, and noscript content before returning page text to the model. The test agent has one same-origin HTTP GET tool and no preconfigured endpoint names. It must follow discovery links, search published leadership notes, retrieve a real bookshelf ID, and cite evidence. Reports can contain public personal data and are kept outside Git. This is a bounded compatibility check, not a guarantee that every external agent host discovers the conventions.
+
+## Campaign personalization and contact
+
+`harness/personalization.py` is the typed source of truth. Add a `Profile` to
+`CONTENTS` (person), `CAMPAIGNS` (company/audience), or `SOURCES`. Resolution is
+`utm_content` → `utm_campaign` → `utm_source` → default. A match may override the
+headline, pitch, project ID order, exactly three suggested questions, guide-only
+system note, CTA label, roles banner, company and first-90-days placeholders.
+Use `RIVIERA.model_copy(update={...})` to inherit the recruiter profile. Include
+new profiles in the existing `PROFILES` collection automatically by adding them
+to one of those maps. All profile content is public editorial configuration;
+“hidden” notes are excluded from HTML/JSON, not a place for secrets.
+
+The server embeds the landing profile in HTML before React mounts. Untagged
+navigation restores the resolved profile from `sessionStorage`; explicit unknown
+UTM values reset to default. Tags are never removed from the address bar. The
+browser also retains campaign attribution for every pageview, including hash-tab
+navigation and the human-readable agent pages. Session storage failures do not
+block rendering. The default keeps the existing guide and suggestions, with the
+requested product/app positioning and contact improvements. DSP metrics remain
+unconfirmed and are deliberately absent from public claims. The original published
+knowledge is unchanged; the guide receives owner-approved positioning guidance.
+
+Set `PORTFOLIO_CONTACT_EMAIL` (defaults to eman@hisemailaddress.org) and
+`PORTFOLIO_BOOKING_URL` to an HTTPS booking URL. Until a booking URL is supplied,
+only the working email action appears. The sticky contact controls and editable
+roles banner appear on every HTML page. Machine-readable Markdown, API and MCP
+responses stay unchanged.
+
+Generate outreach links with **opaque random UTM codes**. Names, company names,
+email addresses and private labels never appear in generated URLs. Warm and cold
+sources have recruiter-oriented profile defaults; a recognized person profile
+still takes precedence over company, then source. Unknown person labels provide
+attribution while letting the company/source choose the experience.
+
+Set a long random `PORTFOLIO_LINKS_PASSWORD` on the server and in your local shell,
+then register a link directly on the live site:
+
+```sh
+python3 scripts/build_campaign_link.py --server --source cold --company hex --person chett
+python3 scripts/build_campaign_link.py --server --source warm --company openai
+python3 scripts/build_campaign_link.py --server --stats
+```
+
+The generated URL looks like
+`https://eman.hisemailaddress.org/?utm_source=t_<random>&utm_campaign=t_<random>&utm_content=t_<random>`.
+Each code is independently random (128 bits), not a name hash or encoded name.
+Private mappings are stored in `DATA_DIR/outreach.sqlite` on the existing persistent
+volume; optionally override with `PORTFOLIO_LINKS_DB`, outside the source checkout.
+The server uses these mappings to resolve the profile before rendering. Labels
+stay private; visitors can see their own personalized greeting. Codes identify a
+link, not an authenticated person: forwarded links retain the same experience.
+
+The password is sent in an HTTPS Authorization header, never in a URL. The admin
+registration and stats routes return 404 if the password is unset and 401 when
+incorrect; they are excluded from public discovery. The CLI does not follow
+redirects with the password. Do not put real labels or passwords in URL parameters.
+Legacy descriptive tags still resolve for compatibility; the generator always
+produces opaque codes. Unknown codes or a missing registry fall back safely.
+
+Without `--server`, the script registers in the runtime database on the machine
+where it runs. Use this mode on the serving machine; a laptop-only mapping cannot
+be decoded by the live site. The server mode handles registration and generation
+in one step. Back up the runtime database with the application volume; losing it
+loses existing link attribution and personalization mappings.
+
+Local **daily aggregate counts work without pixels or a Plausible account** for
+registered outreach links. The private stats command shows the token-to-label
+mapping and counts for pageviews, profile resolution, CTA clicks and submitted
+guide questions. Only registered random tags enter these counts; IPs, referrers,
+user agents and browser identifiers are not stored. These are link event counts,
+not verified recipient identities or unique visitors; forwarding, repeat visits
+and bots can affect them. Existing DNT/GPC behavior suppresses event submission.
+Reports are bounded to the latest 1,000 tags and 5,000 daily count rows.
+
+Set `PLAUSIBLE_DOMAIN` to your configured Plausible site domain to enable the
+cookieless event relay. Create the `profile_resolved`, `cta_click`, and
+`guide_question_asked` goals in Plausible; `pageview` is built in. Properties include
+profile key and the five UTM fields. Plausible is optional and separate from local
+outreach counts. Question text, arbitrary query parameters, visitor IPs and browser
+identifiers are never sent or stored by this analytics layer. Referrers are reduced to origin. Events are bounded globally and
+network errors cannot break the guide. The relay intentionally does not forward
+visitor IPs or user agents, so Plausible unique-visitor/geographic/device reports
+are not reliable; use pageviews and event counts. Existing chat abuse controls
+retain their separate hashed-IP rate-limit policy. No optional visit webhook is
+installed.
+
+`LINKEDIN_PARTNER_ID` and `X_PIXEL_ID` independently enable their vendor tags;
+leave them blank to keep them off. These optional advertising tags have their own
+vendor tracking behavior. Do Not Track and Global Privacy Control disable this
+layer's analytics and advertising tags. Content Security Policy allows vendor
+scripts/connections only when their IDs are configured. No inference provider is
+called for analytics. Environment changes require an application restart.
+
+Fly already enforces HTTPS; the application additionally redirects HTTP requests
+for the canonical hostname with 308, preserving the path and query. Local HTTP
+and health checks remain usable. Only Fly's protocol header is trusted, and only
+when running on Fly.
+
+Validation: `python -m pytest tests/test_personalization.py tests/test_agent_surfaces.py
+tests/test_public_deployment.py -q`, followed by `npm ci && npm run build` in
+`frontend`. These checks use synthetic published fixtures and no model API calls.

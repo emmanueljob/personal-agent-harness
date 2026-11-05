@@ -34,6 +34,7 @@ class Store:
             CREATE TABLE IF NOT EXISTS execution_context(turn_id TEXT PRIMARY KEY, body TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, turn_id TEXT NOT NULL, kind TEXT NOT NULL, label TEXT NOT NULL, created REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS tool_results(turn_id TEXT NOT NULL, tool TEXT NOT NULL, arguments TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY(turn_id, tool, arguments));
+            CREATE TABLE IF NOT EXISTS turn_personalization(turn_id TEXT PRIMARY KEY, profile_key TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS turn_runtime(turn_id TEXT PRIMARY KEY, runtime TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS workflow_turns(workflow_id TEXT PRIMARY KEY,turn_id TEXT NOT NULL,runtime TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS deep_transcripts(turn_id TEXT PRIMARY KEY,body TEXT NOT NULL);
@@ -62,10 +63,12 @@ class Store:
             db.execute("INSERT INTO threads VALUES (?,?)", (ident, mode))
         return {"id": ident, "mode": mode}
 
-    def enqueue(self, thread_id, prompt, ident=None):
+    def enqueue(self, thread_id, prompt, ident=None, profile_key="default"):
         ident = ident or str(uuid.uuid4())
         with self.connect() as db:
             db.execute("INSERT OR IGNORE INTO turns VALUES (?,?,?,'queued',NULL,NULL,?)", (ident, thread_id, prompt, time.time()))
+            from .personalization import PROFILES
+            db.execute("INSERT OR IGNORE INTO turn_personalization VALUES (?,?)", (ident, profile_key if profile_key in PROFILES else 'default'))
             db.execute("INSERT OR IGNORE INTO turn_runtime VALUES (?,?)",(ident,agent_runtime()))
         return ident
 

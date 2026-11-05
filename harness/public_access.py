@@ -45,6 +45,11 @@ def reserve_model_call(store):
 
 class PublicAccess(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
+        canonical = urlsplit(os.getenv('PUBLIC_ORIGIN', ''))
+        # Fly terminates TLS. Only trust its protocol header in a Fly deployment.
+        scheme = request.headers.get('fly-forwarded-proto', request.url.scheme) if os.getenv('FLY_APP_NAME') else request.url.scheme
+        if canonical.scheme == 'https' and request.url.hostname == canonical.hostname and scheme == 'http':
+            return RedirectResponse(str(request.url.replace(scheme='https')), status_code=308)
         if request.url.hostname in os.getenv('REDIRECT_HOSTS','').split(','):
             target = os.getenv('PUBLIC_ORIGIN','').rstrip('/')
             if urlsplit(target).scheme=='https' and urlsplit(target).hostname!=request.url.hostname:
@@ -53,7 +58,7 @@ class PublicAccess(BaseHTTPMiddleware):
                 suffix = request.url.path + ('?'+request.url.query if request.url.query else '')
                 return RedirectResponse(target+suffix,status_code=308)
         if not public_only():
-            return await call_next(request)
+            return await self.decorate(await call_next(request))
         path = request.url.path
         request.state.visitor_hash = None
         token = request.cookies.get(COOKIE, '')
@@ -98,6 +103,30 @@ class PublicAccess(BaseHTTPMiddleware):
         response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
         if path.startswith('/api/threads') or retry:
             response.headers['Cache-Control'] = 'no-store'
+        response = await self.decorate(response)
+        return response
+
+    async def decorate(self, response):
+        if response.headers.get('content-type', '').startswith('text/html'):
+            body = b''.join([chunk async for chunk in response.body_iterator]).decode('utf-8')
+            body = body.replace('</head>', '<link rel="stylesheet" href="/contact.css"><script src="/visit.js" defer></script></head>', 1)
+            from starlette.responses import Response
+            headers = dict(response.headers)
+            headers.pop('content-length', None)
+            headers['cache-control'] = 'private, no-store'
+            response = Response(body, status_code=response.status_code, headers=headers, background=response.background)
+        csp = response.headers.get('Content-Security-Policy', '')
+        if csp:
+            scripts = []
+            connections = []
+            if os.getenv('LINKEDIN_PARTNER_ID'):
+                scripts += ['https://snap.licdn.com']
+                connections += ['https://px.ads.linkedin.com', 'https://px4.ads.linkedin.com']
+            if os.getenv('X_PIXEL_ID'):
+                scripts += ['https://static.ads-twitter.com', 'https://analytics.twitter.com']
+                connections += ['https://analytics.twitter.com', 'https://t.co', 'https://ads-api.twitter.com']
+            csp = csp.replace("script-src 'self'", "script-src 'self' "+' '.join(scripts)).replace("connect-src 'self'", "connect-src 'self' "+' '.join(connections))
+            response.headers['Content-Security-Policy'] = csp
         return response
 
 

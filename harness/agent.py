@@ -156,6 +156,10 @@ def prepare_turn(store, turn):
             config['max_output_tokens'] = int(os.getenv('OPENAI_MAX_OUTPUT_TOKENS', '2048'))
             config['reasoning_effort'] = os.getenv('OPENAI_REASONING_EFFORT')
         profile = store.profile(mode)
+        if mode == 'public':
+            from .personalization import guide_context
+            selected = store.query('SELECT profile_key FROM turn_personalization WHERE turn_id=?', (turn['id'],))
+            profile += guide_context(selected[0]['profile_key'] if selected else 'default')
         voice = store.brain.voice(mode)
         perspectives = store.brain.perspectives(turn['prompt'],mode)
         # Local models sometimes offer to search instead of calling the tool.
