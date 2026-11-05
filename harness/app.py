@@ -65,6 +65,16 @@ def owner(authorization: str = Header(default="")):
         raise HTTPException(401, "Private workspace requires OWNER_TOKEN.")
 
 
+def studio_owner(authorization: str = Header(default="")):
+    if not public_only():
+        return owner(authorization)
+    token = os.getenv('OWNER_STUDIO_TOKEN','')
+    if not token:
+        raise HTTPException(404, 'Owner studio is unavailable.')
+    if not secrets.compare_digest(authorization, 'Bearer '+token):
+        raise HTTPException(401, 'Enter your owner password.')
+
+
 def access(ident, authorization):
     rows = store.query("SELECT * FROM threads WHERE id=?", (ident,))
     if not rows:
@@ -125,7 +135,7 @@ def health():
 @app.get("/api/status")
 def status():
     config = settings()
-    return {"public_only": public_only(), "model_configured": config["configured"], "model": config["model"], "provider": config["provider"], "agent_runtime":config['agent_runtime'], "executor": os.getenv("EXECUTOR", "local"), "knowledge_backend": store.brain.backend, "knowledge_fallback_policy":"same-scope-canonical-files-when-index-busy" if store.brain.backend == 'gbrain' else None, "web_search_provider": web_provider(), "profile_configured": not store.profile("public").startswith("Profile not configured")}
+    return {"public_only": public_only(), "owner_studio": bool(os.getenv("OWNER_STUDIO_TOKEN")) if public_only() else True, "model_configured": config["configured"], "model": config["model"], "provider": config["provider"], "agent_runtime":config['agent_runtime'], "executor": os.getenv("EXECUTOR", "local"), "knowledge_backend": store.brain.backend, "knowledge_fallback_policy":"same-scope-canonical-files-when-index-busy" if store.brain.backend == 'gbrain' else None, "web_search_provider": web_provider(), "profile_configured": not store.profile("public").startswith("Profile not configured")}
 
 
 @app.get("/api/tools")
@@ -235,6 +245,49 @@ def add_note(body: NoteInput):
     if body.scope not in ("public", "private"):
         raise HTTPException(422, "Choose public or private")
     return store.brain.add_note(body.title, body.body, body.scope)
+
+
+# All write/review routes use the local owner boundary, including when a caller
+# knows a valid token for the separately deployed public-only edition.
+from .learning import Learning, Annotation, Revision, Conflict
+
+
+def learning_call(operation):
+    try:
+        return operation()
+    except Conflict as error:
+        raise HTTPException(409, str(error))
+    except KeyError:
+        raise HTTPException(404, "Note, source or reply not found.")
+    except ValueError as error:
+        raise HTTPException(422, str(error))
+
+
+@app.get("/api/owner/learning", dependencies=[Depends(studio_owner)])
+def learning_inventory():
+    return Learning(store.brain).inventory()
+
+
+@app.post("/api/owner/learning", dependencies=[Depends(studio_owner)])
+def save_learning(body: Annotation):
+    return learning_call(lambda: Learning(store.brain).save(body,store))
+
+
+@app.post("/api/owner/learning/{ident}/publish", dependencies=[Depends(studio_owner)])
+def publish_learning(ident: str, body: Revision):
+    return learning_call(lambda: Learning(store.brain).publish(ident,body.revision))
+
+
+@app.delete("/api/owner/learning/{ident}/publication", dependencies=[Depends(studio_owner)])
+def withdraw_learning(ident: str):
+    Learning(store.brain).remove(ident,public_only=True)
+    return {"withdrawn": True}
+
+
+@app.delete("/api/owner/learning/{ident}", dependencies=[Depends(studio_owner)])
+def forget_learning(ident: str):
+    Learning(store.brain).remove(ident)
+    return {"forgotten": True}
 
 
 @app.post("/api/threads/{ident}/routines", dependencies=[Depends(owner)])

@@ -162,4 +162,6 @@ class GBrain(FileBrain):
                     # opinion paragraph does not lose which work it describes.
                     evidence = list(dict.fromkeys(paragraphs[:3] + ranked[:4]))
                     results.append({"source": record["source"], "text": "\n\n".join(evidence)[:5000], "score": score, "backend": "gbrain"})
-        return sorted(self.perspectives(query,mode)+results, key=lambda x: x["score"], reverse=True)[:5]
+        from .learning import learning_hits
+        from .retrieval import rank_knowledge
+        return rank_knowledge(learning_hits(self,query,mode)+self.perspectives(query,mode)+results)
