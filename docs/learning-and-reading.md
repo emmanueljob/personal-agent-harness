@@ -1,16 +1,16 @@
 # Source notes and owner feedback
 
-The local owner studio has a **Reading & listening** tab. It lists canonical books
+Both the local and hosted owner studios have a **Reading & listening** tab. The hosted studio uses a separate `OWNER_STUDIO_TOKEN`, configured outside Git, as an owner password. It grants access only to source annotations and corrections; private profiles, private chat, routines and the full private library remain unavailable on the public deployment. It lists canonical books
 and active podcast references, with title/author search, tag filters and a notes-only
 view. Imported material is availability, not evidence of reading, listening or agreement.
 
 Select a source, record reading/listening status, add tags and explain a specific
 agreement, disagreement or influence. **Save & use privately** activates that reviewed
 note for new private turns. **Review for public agent** shows the exact saved version;
-**Approve public version** copies it to the local public snapshot. Unpublished edits
-never change the public version. Deploy the snapshot to update the hosted site.
+**Approve public version** copies it to the public snapshot on that instance. Unpublished edits
+never change the public version. New turns on that instance can retrieve the approved note immediately.
 
-A completed reply in the local edition has **Correct this reply / teach the twin**.
+A completed reply in the local edition, or a hosted reply after entering the owner password, has **Correct this reply / teach the twin**.
 Write the corrected fact or perspective and save it privately. It uses the same
 explicit public review flow. General voice preferences can have the `always` tag;
 other corrections are retrieved by topic. Corrections apply to new turns, while a
@@ -20,8 +20,7 @@ In private chat the agent can call `propose_memory` after an explicit owner corr
 This produces a private draft, ignored by retrieval until the owner reviews and saves
 it in the studio. The tool cannot activate or publish a note. Repeating the same durable
 tool call returns the existing proposal without replacing subsequent owner edits.
-Public conversations never have this tool, and all owner endpoints return 404 on a
-public-only deployment, including to callers holding an owner token.
+Public conversations never have this tool. Hosted annotation endpoints require the studio password. Private-chat/profile/routine endpoints still return 404 even with that password.
 
 ## Storage and retrieval
 
@@ -46,8 +45,7 @@ The prompt asks for relevant books alongside podcasts, attributed by title and a
 using recorded source/shelf links when available. Unrelated answers need no citation.
 
 **Make private** withdraws a local public note. **Forget** removes both local versions;
-it does not remove the underlying source. Redeploy to withdraw a previously published
-note from production. Existing conversation history and saved execution snapshots retain
+it does not remove the underlying source. Deploy to synchronize a withdrawal between the Mac and production. Existing conversation history and saved execution snapshots retain
 what they originally saw; forgetting a note is not deletion of chat history.
 
 There is no weight update, fine-tuning or automatic training on visitor chats. The
@@ -58,3 +56,16 @@ No dependency, database-schema or workflow-definition changes are required. The 
 private tool is registered through the existing Temporal tool-activity adapter. Test
 coverage uses synthetic sources and fake models, including scope isolation, revision
 conflicts, durable proposal replay and unchanged retry snapshots.
+
+## Deployment synchronization
+
+The private owner release controller performs a three-way merge of local and hosted
+public/private **learning notes only** before publishing the brain snapshot. A private
+baseline outside Git tracks the last observed common state. New notes, one-sided edits
+and deletions merge automatically; different edits to the same note stop the release.
+Full private profiles, email, raw sources and chat history are never synchronized.
+
+Synchronization is at deploy time, not continuous. A file lock guards local edits and
+an expected-state checksum guards the remote application step. If hosted notes change
+during transfer, publication fails without replacing them. The next release can retry
+against the latest state. Baselines and transfers stay outside the repository/image.

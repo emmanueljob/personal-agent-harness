@@ -138,3 +138,34 @@ def test_owner_routes_require_auth_and_are_disabled_on_public_deployment(tmp_pat
         assert c.post('/api/owner/learning',json=body,headers=auth).status_code==404
         assert c.post('/api/owner/learning/'+entry['id']+'/publish',json={'revision':entry['revision']},headers=auth).status_code==404
         assert c.delete('/api/owner/learning/'+entry['id'],headers=auth).status_code==404
+
+
+def test_hosted_studio_password_grants_only_learning_access(tmp_path,monkeypatch):
+    store,learning=setup(tmp_path,monkeypatch)
+    monkeypatch.setenv('PUBLIC_ONLY','true');monkeypatch.setenv('OWNER_STUDIO_TOKEN','studio-fixture')
+    monkeypatch.setenv('OWNER_TOKEN','local-fixture');monkeypatch.setenv('EXECUTOR','local');monkeypatch.setenv('AGENT_RUNTIME','legacy')
+    module=importlib.import_module('harness.app');monkeypatch.setattr(module,'store',store)
+    auth={'Authorization':'Bearer studio-fixture'}
+    with TestClient(module.app,base_url='https://portfolio.test') as c:
+        assert c.get('/api/status').json()['owner_studio'] is True
+        assert c.get('/api/owner/learning').status_code==401
+        assert c.get('/api/owner/learning',headers={'Authorization':'Bearer wrong'}).status_code==401
+        assert c.get('/api/owner/learning',headers=auth).status_code==200
+        saved=c.post('/api/owner/learning',headers=auth,json=dict(kind='book',target_id='example',note='An owner perspective about autonomy.')).json()
+        assert not store.brain.search('autonomy','public')
+        assert c.post('/api/owner/learning/'+saved['id']+'/publish',headers=auth,json=dict(revision=saved['revision'])).status_code==200
+        assert store.brain.search('autonomy','public')
+        assert c.get('/api/profiles/private',headers=auth).status_code==404
+        assert c.post('/api/threads',headers=auth,json={'mode':'private'}).status_code==404
+        assert c.get('/api/routines',headers=auth).status_code==404
+
+
+def test_three_way_sync_preserves_changes_deletions_and_rejects_conflicts():
+    from harness.learning_sync import merge_snapshots
+    base={'public':{'a':{'note':'old'}}}
+    local={'public':{'a':{'note':'old'},'b':{'note':'new on Mac'}}}
+    remote={'public':{'a':{'note':'new on site'}}}
+    assert merge_snapshots(base,local,remote)['public']=={'a':{'note':'new on site'},'b':{'note':'new on Mac'}}
+    assert merge_snapshots(base,{'public':{}},base)['public']=={}
+    assert merge_snapshots(base,base,{'public':{}})['public']=={}
+    with pytest.raises(ValueError):merge_snapshots(base,{'public':{'a':{'note':'local'}}},remote)
