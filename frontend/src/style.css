@@ -22,3 +22,5 @@
 #agent-entry{padding:10px 24px;text-align:center;font:12px/1.6 var(--font-body, sans-serif);color:var(--muted,#a9aaa5);background:var(--panel,#1c1e1c);border-bottom:1px solid var(--border,#393b35)}#agent-entry a{color:var(--text,#efeee7);text-decoration:underline;text-underline-offset:3px}
 
 .inference-note{margin:12px 0 0;color:var(--muted);font-size:12px;line-height:1.65;max-width:620px}
+
+.conversation-notice{margin:8px 0 0;color:var(--muted);font-size:11px;line-height:1.6;max-width:620px}

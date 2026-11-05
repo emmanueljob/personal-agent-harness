@@ -18,3 +18,7 @@ export const visitor=initialProfile();
 export function trackQuestion() {
  (window as Window & {portfolioTrack?:(name:string)=>void}).portfolioTrack?.('guide_question_asked');
 }
+
+export function trackUI(name:'theme_changed'|'suggestion_used'|'turn_retried') {
+ (window as Window & {portfolioTrack?:(name:string)=>void}).portfolioTrack?.(name);
+}
