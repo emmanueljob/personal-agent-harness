@@ -27,6 +27,8 @@ store = Store()
 @asynccontextmanager
 async def lifespan(app):
     app.state.public_store = store
+    from .observability import initialize
+    initialize(store)
     executor = os.getenv("EXECUTOR", "local")
     if executor not in ("local", "temporal"):
         raise RuntimeError("EXECUTOR must be local or temporal")
@@ -75,8 +77,11 @@ def studio_owner(authorization: str = Header(default="")):
         raise HTTPException(401, 'Enter your owner password.')
 
 
+from .observability import install as install_observability
+install_observability(app, studio_owner)
 from .admin import mount_admin
 mount_admin(app, lambda:store, studio_owner)
+
 
 def access(ident, authorization):
     rows = store.query("SELECT * FROM threads WHERE id=?", (ident,))

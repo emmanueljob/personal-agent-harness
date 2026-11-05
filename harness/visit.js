@@ -10,16 +10,21 @@
   let ids = {enabled:false};
   try { ids = await fetch('/api/visit-config').then(r=>r.json()); } catch {}
   const trackingAllowed = ids.enabled && navigator.doNotTrack !== '1' && !navigator.globalPrivacyControl;
+  let session = '';
+  if (trackingAllowed) {
+    try {session = sessionStorage.getItem('portfolio-analytics-session') || crypto.randomUUID().replaceAll('-','');sessionStorage.setItem('portfolio-analytics-session',session)} catch {}
+  }
   const track = (name, target='') => {
     if (!trackingAllowed) return;
     const url = new URL(location.href);
     for (const [key,value] of Object.entries(utm)) if (!url.searchParams.has(key)) url.searchParams.set(key,value);
     // Do not send conversation text, result tokens or arbitrary query parameters.
     for (const key of [...url.searchParams.keys()]) if (!keys.includes(key)) url.searchParams.delete(key);
-    const payload = JSON.stringify({name,target,url:url.pathname+url.search+url.hash,profile_key:profile.key,utm,referrer:document.referrer});
+    const payload = JSON.stringify({name,target,session_id:session,theme:document.documentElement.dataset.theme==='light'?'light':'dark',url:url.pathname+url.search+url.hash,profile_key:profile.key,utm,referrer:document.referrer});
     fetch('/api/visit-events',{method:'POST',headers:{'Content-Type':'application/json'},body:payload,keepalive:true}).catch(()=>{});
   };
   window.portfolioTrack = track;
+  window.addEventListener('portfolio:book-opened',event=>{if(!event.detail?.error)track('book_opened')});
   try {
     let saved = '';
     try { saved = JSON.parse(sessionStorage.getItem('portfolio-profile') || 'null')?.key || ''; } catch {}

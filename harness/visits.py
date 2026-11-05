@@ -1,4 +1,4 @@
-"""Cookieless Plausible event relay. Never forward or store visitor IPs."""
+"""First-party usage relay with optional analytics destinations; no visitor IPs."""
 import os
 from urllib.parse import urlsplit, urlunsplit
 import httpx
@@ -14,12 +14,14 @@ router = APIRouter()
 
 
 class VisitEvent(BaseModel):
-    name: Literal['pageview', 'profile_resolved', 'cta_click', 'guide_question_asked']
+    name: Literal['pageview', 'profile_resolved', 'cta_click', 'guide_question_asked', 'theme_changed', 'book_opened', 'suggestion_used', 'turn_retried']
     url: str = Field(max_length=3000)
     profile_key: str = Field(default='default', max_length=80)
     referrer: str = Field(default='', max_length=2000)
     utm: dict[str, str] = Field(default_factory=dict, max_length=5)
     target: Literal['email', 'booking', ''] = ''
+    session_id: str = Field(default='', pattern=r'^(?:[a-f0-9]{32})?$')
+    theme: Literal['light', 'dark', ''] = ''
 
 
 def referrer_origin(value):
@@ -63,8 +65,10 @@ def visit_event(event: VisitEvent, request: Request, tasks: BackgroundTasks):
         return Response(status_code=204)
     if event.profile_key not in active_profiles():
         event.profile_key = 'default'
+    if request.headers.get('dnt') == '1' or request.headers.get('sec-gpc') == '1':
+        return Response(status_code=204)
     from .public_access import consume
-    # Global bounded admission, with no IP or persistent visitor identifiers.
+    # Global bounded admission, with no IP-based analytics identifiers.
     consume(request.app.state.public_store, [('hour:analytics', 3600, 5000)])
     # Bounded event payload, no freeform questions and no IP storage.
     from .outreach import record_event
@@ -73,6 +77,12 @@ def visit_event(event: VisitEvent, request: Request, tasks: BackgroundTasks):
         record_event(event)
     except (OSError, sqlite3.Error):
         pass  # Tracking failures must not break navigation.
+    from .observability import record_ui, deliver_posthog
+    try:
+        payload = record_ui(request.app.state.public_store, event)
+        tasks.add_task(deliver_posthog, payload)
+    except (OSError, sqlite3.Error):
+        pass
     origin = os.getenv('PUBLIC_ORIGIN', str(request.base_url)).rstrip('/')
     tasks.add_task(deliver, event, origin)
     return Response(status_code=204)
