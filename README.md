@@ -165,7 +165,8 @@ With `--text-only`, the test removes response headers, HTML head metadata, scrip
 
 ## Campaign personalization and contact
 
-`harness/personalization.py` is the typed source of truth. Add a `Profile` to
+Use `/admin` for day-to-day configuration without a deploy.
+`harness/personalization.py` defines typed seed defaults. Developers can add a `Profile` to
 `CONTENTS` (person), `CAMPAIGNS` (company/audience), or `SOURCES`. Resolution is
 `utm_content` → `utm_campaign` → `utm_source` → default. A match may override the
 headline, pitch, project ID order, exactly three suggested questions, guide-only
@@ -264,3 +265,57 @@ when running on Fly.
 Validation: `python -m pytest tests/test_personalization.py tests/test_agent_surfaces.py
 tests/test_public_deployment.py -q`, followed by `npm ci && npm run build` in
 `frontend`. These checks use synthetic published fixtures and no model API calls.
+
+## Owner admin portal
+
+Open `/admin` (also linked in the portfolio footer). Sign in with the **existing
+owner studio password**: `OWNER_STUDIO_TOKEN` on the hosted edition or `OWNER_TOKEN`
+on the local edition. The portal never stores the password in browser storage;
+refreshing or signing out requires signing in again. It does not require a separate
+`PORTFOLIO_LINKS_PASSWORD`. The old CLI endpoints retain their existing password
+boundary for compatibility.
+
+The portal manages:
+
+- **Profiles & copy:** create by duplicating a profile; select person, company or
+  source; edit headline, pitch, roles banner, booking label, questions, guide-only
+  audience note, first-90-days copy and featured project order. Archive profiles
+  to stop new tagged resolutions. The default stays enabled.
+- **Site & projects:** identity, introduction, about text, source attribution,
+  footer, skills, career history, default questions and all project-card fields.
+  Advanced JSON editing is validated before applying to the form.
+- **Outreach links:** preview resolution, generate/copy opaque live-site links,
+  view new link history and revoke/reactivate links. Legacy mappings can be
+  managed independently in Visit reports. Labels remain private.
+- **Visit reports:** daily counts, event/date filters, CSV export and private tag
+  mappings, including earlier CLI-generated tags. Revocation preserves historical
+  counts. CSV values are escaped to prevent spreadsheet formula execution.
+- **Contact & guide:** contact email, HTTPS booking link, CTA labels, global guide
+  direction, local tracking toggle, optional Plausible domain and advertising IDs.
+  Advertising fields can stay blank; no pixel is needed for local counts.
+- **Learning studio:** the existing owner-reviewed notes and feedback workflow.
+- **System:** download site configuration and inspect runtime status.
+
+Changes save immediately into `DATA_DIR/site-config.sqlite`, outside Git and
+separate from the published knowledge store. Code deploys do not overwrite it.
+Outreach mappings/counts remain in `DATA_DIR/outreach.sqlite`. Back up the persistent
+app volume to preserve both; the configuration download does not include link
+mappings, counts, passwords or API credentials. Mac and hosted settings are separate.
+Each save checks a revision and rejects concurrent stale edits with 409 rather
+than overwriting another session. There is no third-party analytics or UTM event
+submission on the admin page. Admin APIs require owner authorization, are excluded
+from public discovery, and return non-cacheable responses; failed authentication
+attempts are globally bounded.
+
+Runtime profile and settings changes are read by both the web process and worker.
+New visits receive updated copy; existing browser sessions refresh their cached
+profile when they navigate. New guide snapshots include current owner-approved
+site guidance and presentation overrides. Completed/existing execution snapshots
+keep their original context on retry. Public API/MCP shapes and private knowledge
+boundaries are preserved.
+
+Hosting credentials, model-provider connections and owner-password recovery remain
+with the deployment tools. The portal intentionally does not expose environment
+variables, arbitrary files or private runtime histories. It does not change
+published knowledge when saving presentation copy. Saved changes affect public
+visitors as labeled in the UI; previews remain local to the owner until saved.

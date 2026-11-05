@@ -8,13 +8,12 @@ export function initialProfile():Personalization {
  try { value=JSON.parse(document.getElementById('personalization')?.textContent || 'null') || undefined; } catch {}
  const tagged=['utm_content','utm_campaign','utm_source','utm_medium','utm_term'].some(k=>new URLSearchParams(location.search).has(k));
  if (!tagged) {
-   try { const saved=JSON.parse(sessionStorage.getItem('portfolio-profile') || 'null');if(saved?.key)value=saved; } catch {}
+   try { const saved=JSON.parse(sessionStorage.getItem('portfolio-profile') || 'null');if(saved?.key&&saved.key!==value?.key)value=saved; } catch {}
  }
  const result={...fallback,...value};
  try {sessionStorage.setItem('portfolio-profile',JSON.stringify(result));}catch{}
  return result;
 }
-export const visitor=initialProfile();
 export function trackQuestion() {
  (window as Window & {portfolioTrack?:(name:string)=>void}).portfolioTrack?.('guide_question_asked');
 }

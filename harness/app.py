@@ -71,9 +71,12 @@ def studio_owner(authorization: str = Header(default="")):
     token = os.getenv('OWNER_STUDIO_TOKEN','')
     if not token:
         raise HTTPException(404, 'Owner studio is unavailable.')
-    if not secrets.compare_digest(authorization, 'Bearer '+token):
+    if not secrets.compare_digest(authorization.encode(), ('Bearer '+token).encode()):
         raise HTTPException(401, 'Enter your owner password.')
 
+
+from .admin import mount_admin
+mount_admin(app, lambda:store, studio_owner)
 
 def access(ident, authorization):
     rows = store.query("SELECT * FROM threads WHERE id=?", (ident,))
@@ -102,6 +105,7 @@ class RoutineInput(TurnInput):
     interval_seconds: int = Field(ge=60, le=31536000)
 
 
+@app.get("/admin", include_in_schema=False)
 @app.get("/")
 def index(request: Request):
     from .agent_surfaces import AGENT_NOTICE
@@ -109,8 +113,11 @@ def index(request: Request):
     html = path.read_text()
     if '</head>' not in html:
         html = html.replace('<html lang="en">', '<html lang="en"><head>', 1).replace('<main>', '</head><body><main>', 1).replace('</html>', '</body></html>')
-    if 'id="agent-entry"' not in html:
+    if request.url.path != '/admin' and 'id="agent-entry"' not in html:
         html = html.replace('<body>', '<body>'+AGENT_NOTICE, 1)
+    if request.url.path == '/admin':
+        html = html.replace(AGENT_NOTICE, '')
+        return HTMLResponse(html, headers={'Cache-Control':'private, no-store','X-Robots-Tag':'noindex, nofollow'})
     import json
     bootstrap = public_profile(resolve(request.query_params))
     payload = json.dumps(bootstrap).replace('<', '\\u003c')

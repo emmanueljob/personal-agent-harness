@@ -7,7 +7,9 @@
   const params = new URLSearchParams(location.search);
   if (keys.some(k => params.has(k))) utm = Object.fromEntries(keys.filter(k => params.has(k)).map(k => [k,params.get(k).slice(0,160)]));
   try { sessionStorage.setItem('portfolio-utm',JSON.stringify(utm)); } catch {}
-  const trackingAllowed = navigator.doNotTrack !== '1' && !navigator.globalPrivacyControl;
+  let ids = {enabled:false};
+  try { ids = await fetch('/api/visit-config').then(r=>r.json()); } catch {}
+  const trackingAllowed = ids.enabled && navigator.doNotTrack !== '1' && !navigator.globalPrivacyControl;
   const track = (name, target='') => {
     if (!trackingAllowed) return;
     const url = new URL(location.href);
@@ -25,11 +27,13 @@
     if (!r.ok) return;
     profile = await r.json();
     try { sessionStorage.setItem('portfolio-profile',JSON.stringify(profile)); } catch {}
+    window.portfolioVisitor = profile;
+    window.dispatchEvent(new CustomEvent('portfolio:profile-updated',{detail:profile}));
     const banner = document.createElement('aside'); banner.className='roles-banner'; banner.textContent=profile.banner;
-    document.body.prepend(banner);
+    if(profile.banner) document.body.prepend(banner);
     const cta = document.createElement('aside'); cta.className='contact-cta'; cta.setAttribute('aria-label','Contact');
-    const label = document.createElement('strong'); label.textContent="Hiring? Let's talk"; cta.append(label);
-    for (const [target,href,text] of [['email',profile.email,'Email me'],['booking',profile.booking,profile.cta === "Hiring? Let's talk" ? 'Book 15 min' : profile.cta]]) {
+    const label = document.createElement('strong'); label.textContent=profile.contact_heading||"Hiring? Let's talk"; cta.append(label);
+    for (const [target,href,text] of [['email',profile.email,profile.email_text||'Email me'],['booking',profile.booking,profile.cta === "Hiring? Let's talk" ? (profile.booking_text||'Book 15 min') : profile.cta]]) {
       if (!href) continue;
       const a=document.createElement('a');a.href=href;a.textContent=text;a.addEventListener('click',()=>track('cta_click',target));cta.append(a);
     }
@@ -44,7 +48,6 @@
     window.addEventListener('hashchange',page);window.addEventListener('popstate',page);
     const push=history.pushState.bind(history);history.pushState=(...args)=>{push(...args);page()};
     if (!trackingAllowed) return;
-    const ids = await fetch('/api/visit-config').then(r=>r.json());
     const load=src=>{const s=document.createElement('script');s.async=true;s.src=src;document.head.append(s)};
     if (/^\d+$/.test(ids.linkedin)) {
       window._linkedin_partner_id=ids.linkedin;

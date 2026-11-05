@@ -67,8 +67,8 @@ class Store:
         ident = ident or str(uuid.uuid4())
         with self.connect() as db:
             db.execute("INSERT OR IGNORE INTO turns VALUES (?,?,?,'queued',NULL,NULL,?)", (ident, thread_id, prompt, time.time()))
-            from .personalization import PROFILES
-            db.execute("INSERT OR IGNORE INTO turn_personalization VALUES (?,?)", (ident, profile_key if profile_key in PROFILES else 'default'))
+            from .personalization import active_profiles
+            db.execute("INSERT OR IGNORE INTO turn_personalization VALUES (?,?)", (ident, profile_key if profile_key in active_profiles() else 'default'))
             db.execute("INSERT OR IGNORE INTO turn_runtime VALUES (?,?)",(ident,agent_runtime()))
         return ident
 
