@@ -298,6 +298,13 @@ def save_learning(body: Annotation):
     return learning_call(lambda: Learning(store.brain).save(body,store))
 
 
+@app.get("/api/owner/training-data", dependencies=[Depends(studio_owner)])
+def training_data():
+    from fastapi.responses import JSONResponse
+    return JSONResponse(Learning(store.brain).training_data(),
+                        headers={"Cache-Control": "no-store"})
+
+
 @app.post("/api/owner/learning/{ident}/publish", dependencies=[Depends(studio_owner)])
 def publish_learning(ident: str, body: Revision):
     return learning_call(lambda: Learning(store.brain).publish(ident,body.revision))
