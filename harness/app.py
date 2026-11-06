@@ -183,6 +183,19 @@ def tool_catalog():
     return [{"name": t.name, "description": t.description} for t in plugins.tools({"mode": "public", "store": store})]
 
 
+@app.get('/resume', include_in_schema=False)
+def html_resume():
+    from .resume_html import render_resume
+    body=render_resume(store.brain)
+    if body is None:raise HTTPException(404,'No HTML resume is published.')
+    return HTMLResponse(body,headers={'Cache-Control':'no-store'})
+
+
+@app.get('/resume.css', include_in_schema=False)
+def resume_styles():
+    return FileResponse(Path(__file__).with_name('resume.css'),media_type='text/css')
+
+
 @app.get('/api/resume')
 def resume_metadata():
     from .resume import resume_info

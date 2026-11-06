@@ -72,3 +72,42 @@ The optional public PDF is included in explicit public-brain exports and normal
 data backups. Neither the PDF nor extracted resume text belongs in Git or the
 container image. Publishing a download does not rewrite the agent's knowledge,
 voice or approved career facts; those are reviewed separately as data.
+
+### HTML view and format configuration
+
+An optional, reviewed `public/resume.json` supplies the content for `/resume`.
+It uses a versioned schema: name, headline, summary, contacts and ordered sections
+with entries, dates, descriptions and nested bullet points. The app escapes all
+text and accepts only HTTPS, mail and telephone links; it never executes supplied
+HTML or CSS. The layout is responsive, accessible and print-friendly.
+
+These data fields control the site's Resume link and public availability:
+
+```json
+{
+  "version": 1,
+  "enabled": true,
+  "preferred_format": "html",
+  "formats": {"html": true, "pdf": true}
+}
+```
+
+These are fields within the complete content document, not a complete resume by
+themselves. Set a format to false to withdraw that endpoint. `enabled: false`
+withdraws both while retaining the files. Without a JSON document, an explicitly
+published PDF continues to work on its own. Invalid JSON fails closed.
+
+`source_pdf_sha256` can pin an HTML version to the exact PDF it was reviewed
+against. If that PDF changes, the stale HTML view is withheld and the site falls
+back to the new PDF until matching HTML data is published. Keep HTML and PDF
+content paired when updating a resume; neither rewrites the AI knowledge store.
+
+```sh
+python scripts/publish_resume_data.py /absolute/private/path/reviewed-resume.json
+python scripts/publish_resume_data.py /absolute/private/path/reviewed-resume.json --publish
+```
+
+Updating data requires `--replace` after review and backup, and needs no code deploy.
+Both resume files are included in explicit public exports and normal data backups.
+Removing only the JSON restores PDF-only defaults; to withdraw everything, disable
+it in the document or remove both public files.

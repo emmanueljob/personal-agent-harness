@@ -110,7 +110,7 @@ class PublicAccess(BaseHTTPMiddleware):
         return response
 
     async def decorate(self, response, request):
-        if response.headers.get('content-type', '').startswith('text/html') and request.url.path != '/admin' and not request.url.path.startswith('/admin-auth/'):
+        if response.headers.get('content-type', '').startswith('text/html') and request.url.path not in ('/admin','/resume') and not request.url.path.startswith('/admin-auth/'):
             body = b''.join([chunk async for chunk in response.body_iterator]).decode('utf-8')
             body = body.replace('</head>', '<link rel="stylesheet" href="/contact.css"><script src="/visit.js" defer></script></head>', 1)
             from starlette.responses import Response
