@@ -6,6 +6,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -97,6 +98,7 @@ class ThreadInput(BaseModel):
 
 
 class TurnInput(BaseModel):
+    model_choice: Literal['default','openai','qwen'] = 'default'
     prompt: str = Field(min_length=1, max_length=16000)
     profile_key: str = Field(default='default', max_length=80)
     request_id: str | None = Field(default=None, min_length=1, max_length=128)
@@ -149,7 +151,8 @@ def health():
 @app.get("/api/status")
 def status():
     config = settings()
-    return {"public_only": public_only(), "owner_studio": bool(os.getenv("OWNER_STUDIO_TOKEN")) if public_only() else True, "model_configured": config["configured"], "model": config["model"], "provider": config["provider"], "agent_runtime":config['agent_runtime'], "executor": os.getenv("EXECUTOR", "local"), "knowledge_backend": store.brain.backend, "knowledge_fallback_policy":"same-scope-canonical-files-when-index-busy" if store.brain.backend == 'gbrain' else None, "web_search_provider": web_provider(), "profile_configured": not store.profile("public").startswith("Profile not configured")}
+    from .models import qwen_available
+    return {"qwen_available": qwen_available(), "openai_available":bool(os.getenv("OPENAI_API_KEY")), "public_only": public_only(), "owner_studio": bool(os.getenv("OWNER_STUDIO_TOKEN")) if public_only() else True, "model_configured": config["configured"], "model": config["model"], "provider": config["provider"], "agent_runtime":config['agent_runtime'], "executor": os.getenv("EXECUTOR", "local"), "knowledge_backend": store.brain.backend, "knowledge_fallback_policy":"same-scope-canonical-files-when-index-busy" if store.brain.backend == 'gbrain' else None, "web_search_provider": web_provider(), "profile_configured": not store.profile("public").startswith("Profile not configured")}
 
 
 @app.get('/api/library/{kind}/{ident}')
@@ -230,7 +233,13 @@ def thread(ident: str, authorization: str = Header(default="")):
             call['ui_action'] = {'type':'bookshelf_selection','book_ids':ids}
             call['books'] = [{'id':i,'title':published[i]['title']} for i in ids]
         calls.append(call)
-    return {**data, "tool_calls": calls, "turns": store.query("SELECT * FROM turns WHERE thread_id=? ORDER BY created", (ident,)), "artifacts": store.query("SELECT * FROM artifacts WHERE thread_id=?", (ident,)), "events": store.query("SELECT e.* FROM events e JOIN turns t ON e.turn_id=t.id WHERE t.thread_id=? ORDER BY e.id DESC LIMIT 200", (ident,))[::-1]}
+    turns = store.query("SELECT t.*,COALESCE(c.choice,'default') AS model_choice,s.body AS saved_context FROM turns t LEFT JOIN turn_model_choice c ON c.turn_id=t.id LEFT JOIN execution_context s ON s.turn_id=t.id WHERE t.thread_id=? ORDER BY t.created", (ident,))
+    for turn in turns:
+        snapshot = turn.pop('saved_context')
+        config = json.loads(snapshot).get('config',{}) if snapshot else {}
+        turn['provider'] = config.get('provider')
+        turn['model'] = config.get('model')
+    return {**data, "tool_calls": calls, "turns": turns, "artifacts": store.query("SELECT * FROM artifacts WHERE thread_id=?", (ident,)), "events": store.query("SELECT e.* FROM events e JOIN turns t ON e.turn_id=t.id WHERE t.thread_id=? ORDER BY e.id DESC LIMIT 200", (ident,))[::-1]}
 
 
 @app.get("/api/profiles/{mode}", dependencies=[Depends(owner)])
@@ -243,18 +252,27 @@ def read_profile(mode: str):
 @app.post("/api/threads/{ident}/turns", status_code=202)
 def enqueue(ident: str, body: TurnInput, request: Request, authorization: str = Header(default="")):
     access(ident, authorization)
-    if not settings()["configured"]:
-        raise HTTPException(503, "Add OPENAI_API_KEY to .env and restart to enable chat.")
     turn_id = str(uuid.uuid5(uuid.NAMESPACE_URL, ident + ":" + body.request_id)) if body.request_id else None
     if turn_id:
         existing = store.query("SELECT prompt FROM turns WHERE id=?", (turn_id,))
         if existing and existing[0]["prompt"] != body.prompt:
             raise HTTPException(409, "request_id was already used for another prompt")
+    if turn_id and existing:
+        choices = store.query('SELECT choice FROM turn_model_choice WHERE turn_id=?',(turn_id,))
+        if (choices[0]['choice'] if choices else 'default') != body.model_choice:
+            raise HTTPException(409, 'request_id was already used for another model choice')
+    else:
+        try:
+            configured = settings(body.model_choice)['configured']
+        except ValueError as error:
+            raise HTTPException(503, str(error)) from error
+        if not configured:
+            raise HTTPException(503, 'This model is not configured.')
     if public_only() and len(body.prompt) > 2000:
         raise HTTPException(422, 'Please keep demo questions under 2,000 characters.')
     if not turn_id or not store.query('SELECT id FROM turns WHERE id=?', (turn_id,)):
         admit_turn(store, request)
-    turn_id = store.enqueue(ident, body.prompt, turn_id, profile_key=body.profile_key)
+    turn_id = store.enqueue(ident, body.prompt, turn_id, profile_key=body.profile_key, model_choice=body.model_choice)
     return {"id": turn_id, "status": store.query("SELECT status FROM turns WHERE id=?", (turn_id,))[0]["status"], "workflow_id": store.workflow_id(turn_id)}
 
 

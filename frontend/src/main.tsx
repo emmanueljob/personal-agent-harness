@@ -16,13 +16,13 @@ type Mode='public'|'private';
 const sections=[['conversation','Conversation'],['work','The work'],['person','The person'],['bookshelf','The bookshelf'],['podcasts','Podcasts'],['behind-the-curtain','The machinery']] as const;
 type Section=typeof sections[number][0];
 const sectionFromHash=():Section=>sections.find(([id])=>'#'+id===location.hash)?.[0]||'conversation';
-type Turn={id:string;prompt:string;status:string;result:string|null;error:string|null;created:number};
+type Turn={provider?:string;model?:string;model_choice?:string;id:string;prompt:string;status:string;result:string|null;error:string|null;created:number};
 type Artifact={id:string;title:string;body:string};
 type Event={id:number;turn_id:string;kind:string;label:string;created:number};
 type ToolRun={turn_id:string;name:string;sources:{title:string;url:string}[];fetched_at?:string;ui_action?:{type:string;book_ids:string[]};books?:{id:string;title:string}[]};
 type Thread={id:string;mode:Mode;tool_calls?:ToolRun[];turns:Turn[];artifacts:Artifact[];events:Event[]};
 type Routine={id:string;thread_id:string;prompt:string;interval_seconds:number;enabled:number};
-type Status={public_only?:boolean;owner_studio?:boolean;knowledge_backend?:string;provider:string;model:string;executor:string;model_configured:boolean};
+type Status={qwen_available?:boolean;openai_available?:boolean;public_only?:boolean;owner_studio?:boolean;knowledge_backend?:string;provider:string;model:string;executor:string;model_configured:boolean};
 const Arrow=()=> <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>;
 function ThemeIcon({light}:{light:boolean}){return <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">{light?<><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></>:<path d="M20 15.2A8.8 8.8 0 0 1 8.8 4a8.8 8.8 0 1 0 11.2 11.2Z"/>}</svg>}
 function Orb({busy}:{busy:boolean}){return <div className={'orb '+(busy?'orb-active':'')} aria-hidden="true"><div className="orb-aura"/><div className="orb-ring ring-back"/><div className="orb-sphere"/><div className="orb-texture"/><div className="orb-ring ring-front"/><span className="orb-light"/></div>}
@@ -74,6 +74,7 @@ function App(){
  const [token,setToken]=useState('');
  const [prompt,setPrompt]=useState('');
  const [sending,setSending]=useState(false);
+ const [modelChoice,setModelChoice]=useState<'default'|'openai'|'qwen'>('default');
  const [notice,setNotice]=useState('');
  const [status,setStatus]=useState<Status|null>(null);
  const [ownerOpen,setOwnerOpen]=useState(false);
@@ -88,7 +89,7 @@ function App(){
  const [noteScope,setNoteScope]=useState<Mode>('private');
  const [routines,setRoutines]=useState<Routine[]>([]);
  const [artifact,setArtifact]=useState<Artifact|null>(null);
- const requestRef=useRef<{prompt:string,id:string}|null>(null);
+ const requestRef=useRef<{prompt:string,id:string,modelChoice:string}|null>(null);
  const viewVersion=useRef(0);
  const endRef=useRef<HTMLDivElement>(null);
  const inputRef=useRef<HTMLTextAreaElement>(null);
@@ -106,6 +107,7 @@ function App(){
    const load=async()=>{try{const d=await api('/threads/'+threadId);if(active){setThread(d);setNotice(n=>n==='Private workspace requires OWNER_TOKEN.'?'':n)}}catch(e){if(active)setNotice((e as Error).message)}finally{if(active)timer=setTimeout(load,800)}};
    load();return()=>{active=false;clearTimeout(timer)};
  },[threadId,api]);
+ useEffect(()=>{const timer=setInterval(()=>{api('/status').then(setStatus).catch(()=>{})},15000);return()=>clearInterval(timer)},[api]);
  const lastTurn=thread?.turns.at(-1);
  const pending=thread?.turns.filter(t=>['queued','running'].includes(t.status))||[];
  useEffect(()=>{if(activeTab!=='conversation')return;endRef.current?.scrollIntoView({block:'nearest',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'})},[lastTurn?.id,lastTurn?.status,activeTab]);
@@ -115,11 +117,13 @@ function App(){
  const newThread=async(m=mode)=>{const version=viewVersion.current;const d=await api('/threads','POST',{mode:m});if(version!==viewVersion.current)return d.id as string;setThreadId(d.id);setThread({...d,turns:[],artifacts:[],events:[]});sessionStorage.setItem('afterhours-thread-'+m,d.id);return d.id as string};
  const switchMode=(m:Mode)=>{navigate('conversation');viewVersion.current++;setArtifact(null);setPrompt('');setMode(m);setThread(null);setThreadId(sessionStorage.getItem('afterhours-thread-'+m));setNotice('');requestRef.current=null};
  const send=async(text=prompt)=>{
-   if(!text.trim()||sending)return;const version=viewVersion.current;setSending(true);setNotice('');
+   if(!text.trim()||sending)return;
+   if(mode==='public'&&modelChoice==='qwen'&&!status?.qwen_available){setNotice('The laptop is offline. Choose OpenAI for your next message.');return;}
+   const version=viewVersion.current;setSending(true);setNotice('');
    try{
      const tid=threadId||await newThread();if(version!==viewVersion.current)return;
-     if(requestRef.current?.prompt!==text)requestRef.current={prompt:text,id:crypto.randomUUID()};
-     await api('/threads/'+tid+'/turns','POST',{prompt:text,request_id:requestRef.current.id,profile_key:visitor.key});
+     if(requestRef.current?.prompt!==text||requestRef.current.modelChoice!==modelChoice)requestRef.current={prompt:text,id:crypto.randomUUID(),modelChoice};
+     await api('/threads/'+tid+'/turns','POST',{prompt:text,request_id:requestRef.current.id,profile_key:visitor.key,model_choice:mode==='public'?modelChoice:'default'});
      if(mode==='public')trackQuestion();
      const updated=await api('/threads/'+tid);if(version===viewVersion.current){requestRef.current=null;setPrompt('');setThread(updated);}
    }catch(e){if(version===viewVersion.current)setNotice((e as Error).message)}finally{setSending(false)}
@@ -136,13 +140,14 @@ function App(){
  <div className={'presence '+(pending.length?'presence-busy':'')}><Orb busy={pending.length>0}/>{!thread?.turns.length&&<span className="presence-caption">Engineering depth. A little curiosity.</span>}</div>
  {!thread?.turns.length&&<motion.div className="welcome" initial={{opacity:0,y:8}} animate={{opacity:1,y:0}}><h1>{mode==='public'?(visitor.headline||<>Start with a <em>question.</em></>):<>What are we <em>making?</em></>}</h1><p>{mode==='public'?<>{visitor.pitch||portfolio.intro}</>:<>Your career, your ideas, and room to experiment.<br className="desktop-break"/> Let’s make something worth keeping.</>}</p></motion.div>}
  {visitor.company&&activeTab==='conversation'&&!thread?.turns.length&&<section className="first90"><h2>3 things I'd ship in my first 90 days at {visitor.company}</h2><ol>{visitor.first90.map(item=><li key={item}>{item}</li>)}</ol></section>}
- {Boolean(thread?.turns.length)&&<section className="transcript" aria-label="Conversation history">{thread?.turns.map(t=><article key={t.id} className="turn"><div className="reader-question"><span className="eyebrow">YOU</span><p>{t.prompt}</p></div><div className="reply"><div className="reply-meta"><span className="small-orb"/><span className="eyebrow">DIGITAL TWIN · AI</span><span className="reply-source">{mode==='public'?'PUBLISHED SOURCES':'PRIVATE STUDIO'}</span></div>{t.status==='completed'?<motion.div initial={{opacity:0,y:5}} animate={{opacity:1,y:0}} className="prose"><Markdown>{t.result||''}</Markdown></motion.div>:t.status==='failed'?<div className="failure"><p>{t.error||'This turn could not finish.'}</p><button className="inline-button" onClick={()=>perform(async()=>{await api('/turns/'+t.id+'/retry','POST');if(mode==='public')trackUI('turn_retried')})}>Resume this turn ↗</button></div>:<Working turn={t} events={thread.events}/>}{(thread.tool_calls||[]).filter(c=>c.turn_id===t.id&&c.books?.length).slice(-1).map(c=><div key={c.turn_id+'-books'} className="agent-book-result"><span>SELECTED FROM THE SHELF</span><p>{c.books!.map(b=>b.title.split(':')[0]).join(' · ')}</p><button onClick={()=>showShelf(c.ui_action!.book_ids)}>View {c.books!.length===1?'this book':c.books!.length+' books'} on the shelf ↗</button></div>)}{t.status==='completed'&&status&&(!status.public_only||(status.owner_studio&&!!token))&&<button className="inline-button teach-reply" onClick={()=>{setFeedbackSeed({id:t.id,prompt:t.prompt,result:t.result});setOwnerTab('learning');setOwnerOpen(true)}}>Correct this reply / teach the twin ↗</button>}{['completed','failed'].includes(t.status)&&<ToolTrace turnId={t.id} events={thread.events} runs={thread.tool_calls||[]}/>}</div></article>)}<div ref={endRef}/></section>}
+ {Boolean(thread?.turns.length)&&<section className="transcript" aria-label="Conversation history">{thread?.turns.map(t=><article key={t.id} className="turn"><div className="reader-question"><span className="eyebrow">YOU</span><p>{t.prompt}</p></div><div className="reply"><div className="reply-meta"><span className="small-orb"/><span className="eyebrow">DIGITAL TWIN · AI{t.provider?' · '+(t.provider==='ollama'?'QWEN LAB':'OPENAI'):''}</span><span className="reply-source">{mode==='public'?'PUBLISHED SOURCES':'PRIVATE STUDIO'}</span></div>{t.status==='completed'?<motion.div initial={{opacity:0,y:5}} animate={{opacity:1,y:0}} className="prose"><Markdown>{t.result||''}</Markdown></motion.div>:t.status==='failed'?<div className="failure"><p>{t.error||'This turn could not finish.'}</p><button className="inline-button" onClick={()=>perform(async()=>{await api('/turns/'+t.id+'/retry','POST');if(mode==='public')trackUI('turn_retried')})}>Resume this turn ↗</button></div>:<Working turn={t} events={thread.events}/>}{(thread.tool_calls||[]).filter(c=>c.turn_id===t.id&&c.books?.length).slice(-1).map(c=><div key={c.turn_id+'-books'} className="agent-book-result"><span>SELECTED FROM THE SHELF</span><p>{c.books!.map(b=>b.title.split(':')[0]).join(' · ')}</p><button onClick={()=>showShelf(c.ui_action!.book_ids)}>View {c.books!.length===1?'this book':c.books!.length+' books'} on the shelf ↗</button></div>)}{t.status==='completed'&&status&&(!status.public_only||(status.owner_studio&&!!token))&&<button className="inline-button teach-reply" onClick={()=>{setFeedbackSeed({id:t.id,prompt:t.prompt,result:t.result});setOwnerTab('learning');setOwnerOpen(true)}}>Correct this reply / teach the twin ↗</button>}{['completed','failed'].includes(t.status)&&<ToolTrace turnId={t.id} events={thread.events} runs={thread.tool_calls||[]}/>}</div></article>)}<div ref={endRef}/></section>}
  <div className="composer-area"><form className="composer" onSubmit={e=>{e.preventDefault();void send()}}><label className="sr-only" htmlFor="message">Your question</label><textarea id="message" ref={inputRef} value={prompt} onChange={e=>setPrompt(e.target.value)} rows={1} maxLength={16000} placeholder={mode==='public'?'What would you like to know?':'What are we working on?'} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void send()}}}/><button className="send-button" type="submit" disabled={sending||!prompt.trim()} aria-label="Send message"><Arrow/></button></form>
- {mode==='public'&&status?.provider==='ollama'&&<p className="inference-note">An experiment: this agent runs on a local AI model on my laptop, so replies can be slow.</p>}
+ {mode==='public'&&status?.public_only&&<div className="model-choice" role="group" aria-label="Model for your next message"><span>YOUR NEXT REPLY</span><button type="button" aria-pressed={modelChoice!=='qwen'} onClick={()=>setModelChoice('default')}>OpenAI <small>Recommended</small></button><button type="button" aria-pressed={modelChoice==='qwen'} disabled={!status.qwen_available} onClick={()=>setModelChoice('qwen')}>Qwen <small>{status.qwen_available?'Experimental':'Laptop offline'}</small></button></div>}
+ {mode==='public'&&modelChoice==='qwen'&&<p className="inference-note">The lab: Qwen runs on my laptop. I’m experimenting with its voice using my notes and prompts, so replies take longer.{!status?.qwen_available?' The laptop is offline—choose OpenAI to continue.':''}</p>}
  {mode==='public'&&<p className="conversation-notice">Conversations are saved and may be reviewed by the site owner to improve this demo. Please avoid sharing sensitive information.</p>}
  {!thread?.turns.length&&<div className="suggestions">{(mode==='public'?portfolio.suggestions:[{label:'Draft a career introduction',question:'Draft a short career introduction using my résumé and save it as an artifact.'},{label:'Explore an AI product idea',question:'Help me explore a product idea based on my background and interests.'}]).map(q=><button key={q.label} onClick={()=>ask(q.question)}>{q.label}<span>↗</span></button>)}</div>}
  {!thread?.turns.length&&availableTools.some(t=>t.name==='search_web')&&<div className="research-prompts" aria-label="Try the agent’s research tools"><span>Put it to work</span><button onClick={()=>ask('Show me No Rules Rules on the bookshelf, using your bookshelf tool.')}>Let the agent pick a book ↗</button><button onClick={()=>ask('Search the web for a recent article about AI agent engineering, read an original source, and compare one idea with the work described in this portfolio. Cite your sources.')}>Research an idea ↗</button><button onClick={()=>ask('Read https://agilemanifesto.org/principles.html and compare two principles with the leadership notes in your knowledge base. Cite the webpage and the relevant notes.')}>Read & compare ↗</button></div>}
- <div className="session-note"><span>{pending.length?'Your turn is saved. Working on a response.':status?.provider==='ollama'?(status.public_only?`Local model on ${portfolio.shortName}’s Mac · Conversations saved`:'Private inference on this Mac · Conversations saved'):'AI portfolio guide · Conversations saved'}</span>{Boolean(thread?.turns.length)&&<span>Enter to send · Shift + Enter for a new line</span>}</div>
+ <div className="session-note"><span>{pending.length?'Your turn is saved. Working on a response.':modelChoice==='qwen'?'Experimental Qwen · Conversations saved':status?.provider==='ollama'?(status.public_only?`Local model on ${portfolio.shortName}’s Mac · Conversations saved`:'Private inference on this Mac · Conversations saved'):'AI portfolio guide · Conversations saved'}</span>{Boolean(thread?.turns.length)&&<span>Enter to send · Shift + Enter for a new line</span>}</div>
  </div>
  {Boolean(thread?.artifacts.length)&&<section className="artifact-shelf" aria-label="Generated documents"><span className="eyebrow">MADE IN THIS CONVERSATION</span><div className="artifact-grid">{thread?.artifacts.map(a=><motion.button key={a.id} className="artifact-card" whileHover={{y:-3}} onClick={()=>setArtifact(a)}><span className="document-mark">↗</span><span><strong>{a.title}</strong><small>Open document</small></span></motion.button>)}</div></section>}
  </main>
