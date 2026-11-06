@@ -83,7 +83,13 @@ def visit_event(event: VisitEvent, request: Request, tasks: BackgroundTasks):
         record_event(event)
     except (OSError, sqlite3.Error):
         pass  # Tracking failures must not break navigation.
-    from .observability import record_ui, deliver_posthog
+    from .observability import record_ui, deliver_posthog, record_arrival
+    if event.name == 'pageview':
+        try:
+            record_arrival(request.app.state.public_store, getattr(request.state,'visitor_hash',None))
+        except (OSError, sqlite3.Error):
+            pass
+
     try:
         payload = record_ui(request.app.state.public_store, event)
         tasks.add_task(deliver_posthog, payload)

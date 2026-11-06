@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 import httpx
 from fastapi import Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
+from typing import Literal
 
 
 SCHEMA = """
@@ -20,6 +21,12 @@ CREATE TABLE IF NOT EXISTS ui_events(
  id INTEGER PRIMARY KEY, created REAL NOT NULL, session TEXT NOT NULL,
  name TEXT NOT NULL, section TEXT NOT NULL, target TEXT NOT NULL, theme TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS ui_events_created ON ui_events(created);
+CREATE TABLE IF NOT EXISTS owner_browsers(visitor_hash TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS visitor_arrivals(
+ id INTEGER PRIMARY KEY AUTOINCREMENT, visitor_hash TEXT NOT NULL,
+ created REAL NOT NULL, last_seen REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS visitor_arrivals_browser ON visitor_arrivals(visitor_hash,last_seen);
+
 """
 SECTIONS = {'conversation', 'work', 'person', 'bookshelf', 'podcasts', 'behind-the-curtain'}
 POSTHOG_HOSTS = {'us': 'https://us.i.posthog.com', 'eu': 'https://eu.i.posthog.com'}
@@ -28,6 +35,21 @@ POSTHOG_HOSTS = {'us': 'https://us.i.posthog.com', 'eu': 'https://eu.i.posthog.c
 def initialize(store):
     with store.connect() as db:
         db.executescript(SCHEMA)
+
+
+def record_arrival(store, visitor_hash):
+    if not visitor_hash:
+        return
+    now = time.time()
+    with store.connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        row = db.execute('SELECT id,last_seen FROM visitor_arrivals WHERE visitor_hash=? ORDER BY id DESC LIMIT 1', (visitor_hash,)).fetchone()
+        if row and now-row['last_seen'] < 1800:
+            db.execute('UPDATE visitor_arrivals SET last_seen=? WHERE id=?', (now,row['id']))
+        else:
+            db.execute('INSERT INTO visitor_arrivals(visitor_hash,created,last_seen) VALUES (?,?,?)', (visitor_hash,now,now))
+        db.execute('DELETE FROM visitor_arrivals WHERE last_seen < ?', (now-30*86400,))
+        db.execute('DELETE FROM visitor_arrivals WHERE id < (SELECT id FROM visitor_arrivals ORDER BY id DESC LIMIT 1 OFFSET 49999)')
 
 
 def enabled():
@@ -109,6 +131,36 @@ def conversation(db, ident):
 def install(app, owner_dependency):
     dependencies = [Depends(owner_dependency)]
 
+    @app.put('/api/owner/browser', dependencies=dependencies, include_in_schema=False)
+    def mark_browser(request: Request, mine: bool = True):
+        import re
+        import secrets
+        from .public_access import COOKIE, digest
+        token = request.cookies.get(COOKIE, '')
+        if not re.fullmatch(r'[a-f0-9]{64}', token):
+            token = secrets.token_hex(32)
+        with request.app.state.public_store.connect() as db:
+            if mine:
+                db.execute('INSERT OR IGNORE INTO owner_browsers VALUES (?)', (digest(token),))
+            else:
+                db.execute('DELETE FROM owner_browsers WHERE visitor_hash=?', (digest(token),))
+        result = JSONResponse({'mine':mine}, headers={'Cache-Control':'no-store'})
+        result.set_cookie(COOKIE,token,max_age=30*86400,secure=request.url.scheme=='https' or os.getenv('PUBLIC_ORIGIN','').startswith('https://'),httponly=True,samesite='lax')
+        return result
+
+    @app.get('/api/owner/visitors', dependencies=dependencies, include_in_schema=False)
+    def visitors(request: Request, after: int = Query(default=0,ge=0)):
+        from .public_access import COOKIE, digest
+        store = request.app.state.public_store
+        with store.connect() as db:
+            # Keep the alert cursor and rows in one snapshot so arrivals cannot
+            # fall between the two reads and be silently skipped by the browser.
+            db.execute('BEGIN')
+            rows = [dict(row) for row in db.execute("SELECT a.id,a.created,a.last_seen,substr(a.visitor_hash,1,12) AS browser FROM visitor_arrivals a LEFT JOIN owner_browsers o ON o.visitor_hash=a.visitor_hash WHERE o.visitor_hash IS NULL AND a.id>? ORDER BY a.id DESC LIMIT 100", (after,))]
+            cursor = db.execute('SELECT COALESCE(MAX(id),0) FROM visitor_arrivals').fetchone()[0]
+            mine = bool(db.execute('SELECT 1 FROM owner_browsers WHERE visitor_hash=?', (digest(request.cookies.get(COOKIE,'')),)).fetchone())
+        return JSONResponse({'arrivals':rows,'cursor':cursor,'mine':mine},headers={'Cache-Control':'no-store'})
+
     @app.get('/api/owner/observability', dependencies=dependencies, include_in_schema=False)
     def metrics(request: Request):
         store = request.app.state.public_store
@@ -124,16 +176,22 @@ def install(app, owner_dependency):
     @app.get('/api/owner/conversations', dependencies=dependencies, include_in_schema=False)
     def conversations(request: Request, before: int | None = None,
                       q: str = Query(default='', max_length=200),
+                      origin: Literal['all','visitor','owner','unknown'] = 'all',
                       limit: int = Query(default=25, ge=1, le=100)):
         # Keyset pagination uses SQLite rowid so concurrent new chats do not shift
         # already-inspected pages. Search text is bound, never interpolated SQL.
         store = request.app.state.public_store
         where = ' WHERE (? IS NULL OR h.rowid < ?) AND (? = \'\' OR EXISTS (SELECT 1 FROM turns s WHERE s.thread_id=h.id AND (instr(lower(s.prompt),lower(?))>0 OR instr(lower(COALESCE(s.result,\'\')),lower(?))>0)))'
-        args = (before, before, q, q, q)
+        classification = "CASE WHEN EXISTS (SELECT 1 FROM visitor_threads v JOIN owner_browsers o ON o.visitor_hash=v.visitor_hash WHERE v.thread_id=h.id) THEN 'owner' WHEN EXISTS (SELECT 1 FROM visitor_threads v WHERE v.thread_id=h.id) THEN 'visitor' ELSE 'unknown' END"
+        where += " AND (?='all' OR ("+classification+")=?)"
+        args = (before, before, q, q, q, origin, origin)
         rows = store.query('SELECT h.rowid AS cursor,h.id,h.mode,COUNT(t.id) AS turn_count,MIN(t.created) AS created,MAX(t.created) AS updated, SUM(CASE WHEN t.status=\'failed\' THEN 1 ELSE 0 END) AS failed FROM threads h LEFT JOIN turns t ON t.thread_id=h.id'+where+' GROUP BY h.rowid ORDER BY h.rowid DESC LIMIT ?', (*args, limit+1))
         page = rows[:limit]
         for row in page:
             prompt = store.query('SELECT prompt FROM turns WHERE thread_id=? ORDER BY created,id LIMIT 1', (row['id'],))
+            browser = store.query('SELECT substr(visitor_hash,1,12) AS browser FROM visitor_threads WHERE thread_id=?', (row['id'],))
+            row['browser'] = browser[0]['browser'] if browser else None
+            row['origin'] = store.query('SELECT '+classification+' AS origin FROM threads h WHERE h.id=?', (row['id'],))[0]['origin']
             row['preview'] = prompt[0]['prompt'][:180] if prompt else 'Empty conversation'
         return JSONResponse({'conversations':page, 'next': page[-1]['cursor'] if len(rows)>limit else None}, headers={'Cache-Control':'no-store'})
 
