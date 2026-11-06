@@ -8,11 +8,27 @@ def agent_runtime():
     return value
 
 
-def settings():
+def qwen_available():
+    if os.getenv('MODEL_BRIDGE_TOKEN'):
+        from .model_bridge import available
+        return available()
+    return os.getenv('PUBLIC_ONLY','').lower()!='true' and os.getenv('MODEL_PROVIDER')=='ollama'
+
+
+def settings(choice='default'):
     provider = os.getenv("MODEL_PROVIDER", "openai")
     if provider not in ("openai", "ollama", "hybrid"):
         raise ValueError("MODEL_PROVIDER must be openai, ollama or hybrid")
+    if choice not in ('default','openai','qwen'):
+        raise ValueError('Choose the default model, OpenAI or experimental Qwen.')
     bridged = False
+    if choice == 'openai':
+        provider = 'openai'
+    elif choice == 'qwen':
+        if not qwen_available():
+            raise ValueError('The experimental laptop model is offline. Choose OpenAI for your next message.')
+        provider = 'ollama'
+        bridged = bool(os.getenv('MODEL_BRIDGE_TOKEN'))
     if provider == 'hybrid':
         from .model_bridge import available
         bridged = available()

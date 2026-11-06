@@ -148,7 +148,8 @@ def prepare_turn(store, turn):
     if saved:
         snapshot = json.loads(saved[0]["body"])
     else:
-        config = settings()
+        choice = store.query("SELECT choice FROM turn_model_choice WHERE turn_id=?", (turn["id"],))
+        config = settings(choice[0]["choice"] if choice else "default")
         config["agent_runtime"] = store.runtime_for(turn["id"])
         config["context_window"] = int(os.getenv("OLLAMA_CONTEXT", "8192"))
         config["web_enabled"] = web_provider() != "disabled"
