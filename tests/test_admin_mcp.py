@@ -88,6 +88,8 @@ def test_admin_oauth_mcp_scope_revisions_and_refresh_rotation(tmp_path,monkeypat
         assert 'get_site_configuration' not in unauth.text
         metadata=client.get('/.well-known/oauth-protected-resource/admin-mcp').json()
         assert metadata['resource']=='https://testserver/admin-mcp'
+        authorization=client.get('/.well-known/oauth-authorization-server').json()
+        assert authorization['token_endpoint_auth_methods_supported']==['none']
         assert rpc(client,'tools/list',token='synthetic-owner-token').status_code==401
         tokens=connect(client,monkeypatch,private)
         access=tokens['access_token']

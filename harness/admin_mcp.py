@@ -12,10 +12,11 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from mcp.server import MCPServer
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
+from mcp.server.auth.routes import build_metadata
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp_types import ToolAnnotations
-from pydantic import Field
+from pydantic import AnyHttpUrl, Field
 from starlette.routing import Route
 
 from .admin import SettingsEdit, ProfileEdit, PortfolioEdit
@@ -148,10 +149,22 @@ def mount_admin_mcp(app, get_store):
             await self.current(scope,receive,private_send)
     forward = Forward()
     for path,methods in (
-        ('/admin-mcp',['GET','POST','DELETE']),('/.well-known/oauth-authorization-server',['GET','OPTIONS']),
+        ('/admin-mcp',['GET','POST','DELETE']),
         ('/.well-known/oauth-protected-resource/admin-mcp',['GET','OPTIONS']),
         ('/authorize',['GET','POST']),('/token',['POST','OPTIONS']),('/register',['POST','OPTIONS'])):
         app.router.routes.append(Route(path,forward,methods=methods))
+
+    @app.get('/.well-known/oauth-authorization-server',include_in_schema=False)
+    def authorization_metadata():
+        if not oauth.enabled:
+            return JSONResponse({'detail':'Admin sign-in is not configured.'},status_code=404)
+        metadata=build_metadata(issuer_url=AnyHttpUrl(oauth.origin),service_documentation_url=None,
+            client_registration_options=ClientRegistrationOptions(enabled=True,valid_scopes=[SCOPE],default_scopes=[SCOPE]),
+            revocation_options=RevocationOptions(enabled=True))
+        # This deployment intentionally registers only public PKCE clients.
+        data=metadata.model_dump(mode='json',exclude_none=True)
+        data['token_endpoint_auth_methods_supported']=['none']
+        return JSONResponse(data,headers={'Cache-Control':'no-store','Access-Control-Allow-Origin':'*'})
 
     @app.post('/revoke',include_in_schema=False)
     async def revoke(request:Request):
