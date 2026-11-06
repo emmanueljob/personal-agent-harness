@@ -34,13 +34,15 @@ def lookup(value, field):
         return None  # Missing/unavailable mapping fails closed to ordinary fallback.
 
 
-def build_link(base, person='', company='', source='outreach'):
-    """Generate fresh random aliases; names are private labels, never URL values."""
+def build_link(base, person='', company='', source='outreach', *, short=False, slug=''):
+    """Register private attribution codes and optionally a public /hi/name alias."""
     from .personalization import resolve
     url = urlsplit(base)
     if url.scheme != 'https' or not url.netloc or url.username or url.password or url.query or url.fragment or url.path not in ('','/'):
         raise ValueError('Base must be an HTTPS origin without path, query or fragment')
     values = {'utm_source':source, 'utm_campaign':company, 'utm_content':person}
+    if short and not any(values.values()):
+        raise ValueError('Provide a person, company or source for the short link.')
     aliases = {field:'t_'+secrets.token_hex(16) for field, value in values.items() if value}
     path = database_path()
     if path.resolve().is_relative_to(Path(__file__).resolve().parents[1]):
@@ -51,6 +53,7 @@ def build_link(base, person='', company='', source='outreach'):
     os.close(fd)
     os.chmod(path, 0o600)
     with sqlite3.connect(path, timeout=5) as db:
+        db.execute('BEGIN IMMEDIATE')
         db.execute('CREATE TABLE IF NOT EXISTS outreach_tags (token TEXT PRIMARY KEY, field TEXT NOT NULL, profile_key TEXT NOT NULL, label TEXT NOT NULL, created REAL NOT NULL)')
         for field, token in aliases.items():
             # Resolve each level independently, preserving person > company > source.
@@ -58,8 +61,11 @@ def build_link(base, person='', company='', source='outreach'):
             profile = resolve({field: values[field]})
             db.execute('INSERT INTO outreach_tags VALUES (?,?,?,?,?)', (token, field, profile.key, values[field][:160], time.time()))
         ensure_links(db)
-        db.execute('INSERT INTO outreach_links VALUES (?,?,?,?,1)', (secrets.token_hex(16), json.dumps(aliases), json.dumps(values), time.time()))
-    return base.rstrip('/')+'/?'+urlencode(aliases)
+        ident = secrets.token_hex(16)
+        db.execute('INSERT INTO outreach_links VALUES (?,?,?,?,1)', (ident, json.dumps(aliases), json.dumps(values), time.time()))
+        if short:
+            selected = register_short(db, ident, person or company, slug)
+    return base.rstrip('/')+('/hi/'+selected if short else '/?'+urlencode(aliases))
 
 
 def record_event(event):
@@ -95,6 +101,9 @@ def report():
         counts = [dict(row) for row in db.execute('SELECT * FROM outreach_counts ORDER BY day DESC LIMIT 5000')] if exists else []
         exists_links = db.execute("SELECT 1 FROM sqlite_master WHERE name='outreach_links'").fetchone()
         links = [{**dict(row),'tokens':json.loads(row['tokens']),'labels':json.loads(row['labels']), 'active':int(all(token not in disabled for token in json.loads(row['tokens']).values()))} for row in db.execute('SELECT * FROM outreach_links ORDER BY created DESC LIMIT 1000')] if exists_links else []
+        short = {r['link_id']:r['slug'] for r in db.execute('SELECT slug,link_id FROM outreach_short_links')} if db.execute("SELECT 1 FROM sqlite_master WHERE name='outreach_short_links'").fetchone() else {}
+        for link in links:
+            link['slug'] = short.get(link['id'])
     return {'tags': tags, 'counts': counts, 'links':links}
 
 
@@ -132,3 +141,68 @@ def set_tag_active(token, active):
             db.execute('DELETE FROM outreach_disabled_tags WHERE token=?',(token,))
         else:
             db.execute('INSERT OR IGNORE INTO outreach_disabled_tags VALUES (?)',(token,))
+
+
+SLUG = re.compile(r'[a-z0-9][a-z0-9-]{0,59}')
+
+
+def register_short(db, ident, label, slug=''):
+    import unicodedata
+    db.execute('CREATE TABLE IF NOT EXISTS outreach_short_links (slug TEXT PRIMARY KEY,link_id TEXT NOT NULL UNIQUE)')
+    existing = db.execute('SELECT slug FROM outreach_short_links WHERE link_id=?',(ident,)).fetchone()
+    if existing:
+        return existing[0]
+    if slug:
+        slug = slug.strip().lower()
+        if not SLUG.fullmatch(slug):
+            raise ValueError('Use up to 60 lowercase letters, numbers and hyphens for the public URL name.')
+        if db.execute('SELECT 1 FROM outreach_short_links WHERE slug=?',(slug,)).fetchone():
+            raise ValueError('That URL name is already in use. Choose another.')
+    else:
+        first = (label.strip().split() or [''])[0]
+        base = re.sub(r'[^a-z0-9]+','-',unicodedata.normalize('NFKD',first).encode('ascii','ignore').decode().lower()).strip('-')[:50] or secrets.token_hex(3)
+        slug = base
+        suffix = 2
+        while db.execute('SELECT 1 FROM outreach_short_links WHERE slug=?',(slug,)).fetchone():
+            slug = base+'-'+str(suffix);suffix += 1
+    db.execute('INSERT INTO outreach_short_links VALUES (?,?)',(slug,ident))
+    return slug
+
+
+def build_short_link(base, person='', company='', source='outreach', slug=''):
+    return build_link(base,person,company,source,short=True,slug=slug)
+
+
+def short_tokens(slug):
+    """Return private attribution codes only for an active registered short link."""
+    if not SLUG.fullmatch(slug):
+        return None
+    path = database_path()
+    if not path.is_file():
+        return None
+    try:
+        with sqlite3.connect(path.as_uri()+'?mode=ro',uri=True,timeout=2) as db:
+            row = db.execute('SELECT l.tokens,l.active FROM outreach_short_links s JOIN outreach_links l ON l.id=s.link_id WHERE s.slug=?',(slug,)).fetchone()
+        if not row or not row[1]:
+            return None
+        tokens = json.loads(row[0])
+        return tokens if tokens and all(lookup(token,field) is not None for field,token in tokens.items()) else None
+    except (sqlite3.Error, ValueError):
+        return None
+
+
+def shorten_link(base, ident):
+    url = urlsplit(base)
+    if url.scheme!='https' or not url.netloc or url.path not in ('','/') or url.query or url.fragment or url.username or url.password:
+        raise ValueError('Configure an HTTPS public origin.')
+    path = database_path()
+    if not path.is_file():
+        raise KeyError(ident)
+    with sqlite3.connect(path,timeout=5) as db:
+        db.execute('BEGIN IMMEDIATE')
+        row = db.execute('SELECT labels FROM outreach_links WHERE id=?',(ident,)).fetchone()
+        if not row:
+            raise KeyError(ident)
+        labels = json.loads(row[0])
+        slug = register_short(db,ident,labels.get('utm_content') or labels.get('utm_campaign') or '')
+    return base.rstrip('/')+'/hi/'+slug

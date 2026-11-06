@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 from . import site_config
 from .personalization import Profile, all_profiles, position_portfolio, DEFAULT_GUIDANCE, resolve, public_profile
 from .portfolio import Portfolio
-from .outreach import build_link, report, set_link_active, set_tag_active
+from .outreach import build_link, build_short_link, shorten_link, report, set_link_active, set_tag_active
 from .visits import OutreachInput
 import os
 
@@ -96,10 +96,20 @@ def mount_admin(app, get_store, authorize):
     @router.post('/links')
     def links(body:OutreachInput):
         try:
-            url = build_link(os.getenv('PUBLIC_ORIGIN','').rstrip('/'),body.person,body.company,body.source)
+            origin = os.getenv('PUBLIC_ORIGIN','').rstrip('/')
+            url = build_short_link(origin,body.person,body.company,body.source,body.slug) if body.short or body.slug else build_link(origin,body.person,body.company,body.source)
         except ValueError as error:
             raise HTTPException(422,str(error))
         return response({'url':url})
+
+    @router.post('/links/{ident}/shorten')
+    def shorten(ident: str):
+        try:
+            return response({'url':shorten_link(os.getenv('PUBLIC_ORIGIN','').rstrip('/'),ident)})
+        except KeyError:
+            raise HTTPException(404,'Link not found')
+        except ValueError as error:
+            raise HTTPException(422,str(error))
 
     @router.get('/outreach')
     def outreach():

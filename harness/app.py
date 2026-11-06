@@ -110,6 +110,7 @@ class RoutineInput(TurnInput):
     interval_seconds: int = Field(ge=60, le=31536000)
 
 
+@app.get("/hi/{slug}", include_in_schema=False)
 @app.get("/admin", include_in_schema=False)
 @app.get("/")
 def index(request: Request):
@@ -124,10 +125,18 @@ def index(request: Request):
         html = html.replace(AGENT_NOTICE, '')
         return HTMLResponse(html, headers={'Cache-Control':'private, no-store','X-Robots-Tag':'noindex, nofollow'})
     import json
-    bootstrap = public_profile(resolve(request.query_params))
+    slug = request.path_params.get('slug')
+    if slug:
+        from .outreach import short_tokens
+        tokens = short_tokens(slug)
+        if not tokens:
+            return HTMLResponse('<!doctype html><html><head><title>Link unavailable</title></head><body><main><h1>This link is no longer available.</h1><p><a href="/">Visit the portfolio</a></p></main></body></html>',status_code=404,headers={'Cache-Control':'no-store','X-Robots-Tag':'noindex, nofollow'})
+        bootstrap = public_profile(resolve(tokens))
+    else:
+        bootstrap = public_profile(resolve(request.query_params))
     payload = json.dumps(bootstrap).replace('<', '\\u003c')
     html = html.replace('</head>', '<script id="personalization" type="application/json">'+payload+'</script></head>')
-    return HTMLResponse(html, headers={'Cache-Control': 'private, no-store'})
+    return HTMLResponse(html, headers={'Cache-Control': 'private, no-store', **({'X-Robots-Tag':'noindex, nofollow'} if slug else {})})
 
 
 @app.get("/healthz")
@@ -163,7 +172,14 @@ def portfolio():
 
 @app.get('/api/personalization')
 def personalization(request: Request):
-    profile = resolve(request.query_params, request.headers.get('x-portfolio-profile', ''))
+    if request.query_params.get('greeting'):
+        from .outreach import short_tokens
+        tokens = short_tokens(request.query_params['greeting'])
+        if not tokens:
+            raise HTTPException(404,'Link not found.')
+        profile = resolve(tokens)
+    else:
+        profile = resolve(request.query_params, request.headers.get('x-portfolio-profile', ''))
     return JSONResponse(public_profile(profile), headers={'Cache-Control': 'private, no-store'})
 
 

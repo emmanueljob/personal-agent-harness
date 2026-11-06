@@ -7,6 +7,12 @@
   const params = new URLSearchParams(location.search);
   if (keys.some(k => params.has(k))) utm = Object.fromEntries(keys.filter(k => params.has(k)).map(k => [k,params.get(k).slice(0,160)]));
   try { sessionStorage.setItem('portfolio-utm',JSON.stringify(utm)); } catch {}
+  let greeting = /^\/hi\/([a-z0-9][a-z0-9-]{0,59})$/.exec(location.pathname)?.[1] || '';
+  try {
+    if (!greeting && keys.some(k=>params.has(k))) {sessionStorage.removeItem('portfolio-greeting');greeting=''}
+    else greeting=greeting||sessionStorage.getItem('portfolio-greeting')||'';
+    if(greeting){utm={};sessionStorage.setItem('portfolio-utm','{}');sessionStorage.setItem('portfolio-greeting',greeting)}
+  } catch {}
   let ids = {enabled:false};
   try { ids = await fetch('/api/visit-config').then(r=>r.json()); } catch {}
   const trackingAllowed = ids.enabled && navigator.doNotTrack !== '1' && !navigator.globalPrivacyControl;
@@ -20,7 +26,7 @@
     for (const [key,value] of Object.entries(utm)) if (!url.searchParams.has(key)) url.searchParams.set(key,value);
     // Do not send conversation text, result tokens or arbitrary query parameters.
     for (const key of [...url.searchParams.keys()]) if (!keys.includes(key)) url.searchParams.delete(key);
-    const payload = JSON.stringify({name,target,session_id:session,theme:document.documentElement.dataset.theme==='light'?'light':'dark',url:url.pathname+url.search+url.hash,profile_key:profile.key,utm,referrer:document.referrer});
+    const payload = JSON.stringify({name,target,greeting,session_id:session,theme:document.documentElement.dataset.theme==='light'?'light':'dark',url:(greeting?'/':url.pathname)+url.search+url.hash,profile_key:profile.key,utm,referrer:document.referrer});
     fetch('/api/visit-events',{method:'POST',headers:{'Content-Type':'application/json'},body:payload,keepalive:true}).catch(()=>{});
   };
   window.portfolioTrack = track;
@@ -28,7 +34,7 @@
   try {
     let saved = '';
     try { saved = JSON.parse(sessionStorage.getItem('portfolio-profile') || 'null')?.key || ''; } catch {}
-    const r = await fetch('/api/personalization'+location.search,{headers:{'X-Portfolio-Profile':saved}});
+    const r = await fetch('/api/personalization'+(greeting?'?greeting='+encodeURIComponent(greeting):location.search),{headers:{'X-Portfolio-Profile':saved}});
     if (!r.ok) return;
     profile = await r.json();
     try { sessionStorage.setItem('portfolio-profile',JSON.stringify(profile)); } catch {}

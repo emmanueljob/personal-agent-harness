@@ -178,7 +178,8 @@ to one of those maps. All profile content is public editorial configuration;
 
 The server embeds the landing profile in HTML before React mounts. Untagged
 navigation restores the resolved profile from `sessionStorage`; explicit unknown
-UTM values reset to default. Tags are never removed from the address bar. The
+UTM values reset to default. Legacy UTM URLs keep their tags; new short links
+serve the same experience at a clean `/hi/name` path. The
 browser also retains campaign attribution for every pageview, including hash-tab
 navigation and the human-readable agent pages. Session storage failures do not
 block rendering. The default keeps the existing guide and suggestions, with the
@@ -192,8 +193,9 @@ only the working email action appears. The sticky contact controls and editable
 roles banner appear on every HTML page. Machine-readable Markdown, API and MCP
 responses stay unchanged.
 
-Generate outreach links with **opaque random UTM codes**. Names, company names,
-email addresses and private labels never appear in generated URLs. Warm and cold
+Generate outreach links as **short `/hi/name` URLs**. The selected URL name is
+public; company/source labels and attribution codes stay in private mappings.
+Choose a custom public name in the admin link builder or with CLI `--slug`. Warm and cold
 sources have recruiter-oriented profile defaults; a recognized person profile
 still takes precedence over company, then source. Unknown person labels provide
 attribution while letting the company/source choose the experience.
@@ -208,20 +210,23 @@ python3 scripts/build_campaign_link.py --server --stats
 ```
 
 The generated URL looks like
-`https://eman.hisemailaddress.org/?utm_source=t_<random>&utm_campaign=t_<random>&utm_content=t_<random>`.
-Each code is independently random (128 bits), not a name hash or encoded name.
+`https://eman.hisemailaddress.org/hi/chett`.
+Underlying attribution codes remain independently random (128 bits). The short
+path resolves them server-side without a redirect to a long query string.
 Private mappings are stored in `DATA_DIR/outreach.sqlite` on the existing persistent
 volume; optionally override with `PORTFOLIO_LINKS_DB`, outside the source checkout.
 The server uses these mappings to resolve the profile before rendering. Labels
-stay private; visitors can see their own personalized greeting. Codes identify a
+stay private except for the chosen public URL name; visitors can see their own
+personalized greeting. Codes identify a
 link, not an authenticated person: forwarded links retain the same experience.
 
 The password is sent in an HTTPS Authorization header, never in a URL. The admin
 registration and stats routes return 404 if the password is unset and 401 when
 incorrect; they are excluded from public discovery. The CLI does not follow
 redirects with the password. Do not put real labels or passwords in URL parameters.
-Legacy descriptive tags still resolve for compatibility; the generator always
-produces opaque codes. Unknown codes or a missing registry fall back safely.
+Legacy descriptive and opaque tags still resolve for compatibility. Unknown or
+revoked short links return a neutral 404. See [short links](docs/short-links.md)
+for collision handling, migration and API compatibility.
 
 Without `--server`, the script registers in the runtime database on the machine
 where it runs. Use this mode on the serving machine; a laptop-only mapping cannot
@@ -284,9 +289,10 @@ The portal manages:
 - **Site & projects:** identity, introduction, about text, source attribution,
   footer, skills, career history, default questions and all project-card fields.
   Advanced JSON editing is validated before applying to the form.
-- **Outreach links:** preview resolution, generate/copy opaque live-site links,
+- **Outreach links:** preview resolution, generate/copy short live-site links,
   view new link history and revoke/reactivate links. Legacy mappings can be
-  managed independently in Visit reports. Labels remain private.
+  managed independently in Visit reports or shortened without resetting counts.
+  The selected public URL name is visible; other labels remain private.
 - **Visit reports:** daily counts, event/date filters, CSV export and private tag
   mappings, including earlier CLI-generated tags. Revocation preserves historical
   counts. CSV values are escaped to prevent spreadsheet formula execution.

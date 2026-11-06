@@ -20,6 +20,7 @@ class VisitEvent(BaseModel):
     referrer: str = Field(default='', max_length=2000)
     utm: dict[str, str] = Field(default_factory=dict, max_length=5)
     target: Literal['email', 'booking', ''] = ''
+    greeting: str = Field(default='', pattern=r'^(?:[a-z0-9][a-z0-9-]{0,59})?$')
     session_id: str = Field(default='', pattern=r'^(?:[a-f0-9]{32})?$')
     theme: Literal['light', 'dark', ''] = ''
 
@@ -63,6 +64,16 @@ def visit_event(event: VisitEvent, request: Request, tasks: BackgroundTasks):
         raise HTTPException(422, 'Expected a relative page URL')
     if not settings().tracking_enabled:
         return Response(status_code=204)
+    if event.greeting:
+        from .outreach import short_tokens
+        from .personalization import resolve
+        tokens = short_tokens(event.greeting)
+        if not tokens:
+            return Response(status_code=204)
+        event.utm = tokens
+        event.profile_key = resolve(tokens).key
+        event.url = '/'+('#'+urlsplit(event.url).fragment if urlsplit(event.url).fragment else '')
+        event.referrer = ''
     if event.profile_key not in active_profiles():
         event.profile_key = 'default'
     if request.headers.get('dnt') == '1' or request.headers.get('sec-gpc') == '1':
@@ -92,15 +103,17 @@ class OutreachInput(BaseModel):
     person: str = Field(default='', max_length=160)
     company: str = Field(default='', max_length=160)
     source: str = Field(default='outreach', max_length=160)
+    slug: str = Field(default='', max_length=60)
+    short: bool = False
 
 
 @router.post('/api/outreach-links', include_in_schema=False)
 def create_outreach_link(body: OutreachInput, request: Request):
     authenticate_link_builder(request)
-    from .outreach import build_link
+    from .outreach import build_short_link, build_link
     origin = os.getenv('PUBLIC_ORIGIN', '').rstrip('/')
     try:
-        url = build_link(origin, body.person, body.company, body.source)
+        url = build_short_link(origin, body.person, body.company, body.source, body.slug) if body.short or body.slug else build_link(origin, body.person, body.company, body.source)
     except ValueError:
         raise HTTPException(503, 'Configure an HTTPS public origin and private outreach database')
     return JSONResponse({'url':url}, headers={'Cache-Control':'no-store'})
