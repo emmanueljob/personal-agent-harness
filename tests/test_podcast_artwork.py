@@ -15,7 +15,7 @@ def test_episode_image_and_show_fallback_match_original_identity():
 
 
 def test_unavailable_or_unsafe_artwork_keeps_empty_fallback():
-    for url in ('javascript:alert(1)','http://cdn.example.org/image.jpg','https://127.0.0.1/image','https://user:password@example.org/image'):
+    for url in (None, {'href':'https://cdn.example.org/cover.jpg'}, 'javascript:alert(1)','http://cdn.example.org/image.jpg','https://127.0.0.1/image','https://user:password@example.org/image'):
         assert image_url(url)==''
     assert match_artwork({'title':'None','source_url':'https://example.org/none'},parse_feed(b'<rss><channel/></rss>')) is None
 

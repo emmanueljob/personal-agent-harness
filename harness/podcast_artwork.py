@@ -6,6 +6,7 @@ from .web_tools import public_url
 
 
 def image_url(value):
+    if not isinstance(value,str):return ''
     try:
         return public_url(value) if urlsplit(value).scheme == 'https' else ''
     except (ValueError, TypeError):

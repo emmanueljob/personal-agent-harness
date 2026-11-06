@@ -39,7 +39,7 @@ def sync(brain):
     root=reference_root(brain,'public','podcasts')
     records={p.stem:read_record(p) for p in root.glob('*.json')}
     records={k:r for k,r in records.items() if r['active'] and r['scope']=='public'}
-    show_feeds={r['provenance'].get('show'):r['provenance']['feed_url'] for r in records.values() if r['provenance'].get('feed_url')}
+    show_feeds={r['provenance'].get('show'):r['provenance']['feed_url'] for r in records.values() if r['provenance'].get('feed_url') and r['provenance'].get('show')}
     urls={r['provenance'].get('feed_url') or show_feeds.get(r['provenance'].get('show')) for r in records.values()}-{None,''}
     def fetch(url):
         try:return url,fetch_feed(url)
