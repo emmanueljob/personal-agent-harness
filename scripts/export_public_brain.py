@@ -39,6 +39,7 @@ def export_public(brain_root, destination):
         add(Path(name), required=True)
     add(Path('perspectives.json'))
     add(Path('learning.json'))
+    add(Path('podcast-artwork.json'))
     for source in sorted((root/'wiki').rglob('*.md')):
         relative = source.relative_to(root)
         if any(part.startswith('.') or part in ('raw','private') for part in relative.parts):
