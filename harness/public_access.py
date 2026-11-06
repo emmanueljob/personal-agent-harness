@@ -93,7 +93,9 @@ class PublicAccess(BaseHTTPMiddleware):
             rows = store.query('SELECT visitor_hash FROM visitor_threads WHERE thread_id=?', (ident,))
             if not valid or not rows or not secrets.compare_digest(rows[0]['visitor_hash'], request.state.visitor_hash):
                 return JSONResponse({'detail':'Conversation not found.'}, status_code=404)
-        fresh = path == '/api/threads' and request.method == 'POST' and not valid
+        from .site_config import settings
+        trackable = settings().tracking_enabled and request.headers.get('dnt') != '1' and request.headers.get('sec-gpc') != '1'
+        fresh = (path == '/api/threads' or (path == '/api/visit-events' and trackable)) and request.method == 'POST' and not valid
         if fresh:
             token = secrets.token_hex(32)
             request.state.visitor_hash = digest(token)

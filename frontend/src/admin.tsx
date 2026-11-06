@@ -1,7 +1,8 @@
-import React,{useEffect,useState} from 'react';
+import React,{useCallback,useEffect,useState} from 'react';
 import type {Portfolio} from './portfolio';
 import {LearningStudio} from './learning';
 import './admin.css';
+import {VisitorDashboard} from './visitors';
 
 type Profile={key:string;enabled:boolean;headline:string;pitch:string;featured:string[];questions:string[];system_note:string;cta:string;banner:string;company:string;first90:string[]};
 type Settings={contact_heading:string;email_button_text:string;booking_button_text:string;contact_email:string;booking_url:string;tracking_enabled:boolean;plausible_domain:string;linkedin_partner_id:string;x_pixel_id:string;guide_instructions:string};
@@ -10,7 +11,7 @@ type Link={id:string;slug?:string;tokens:Record<string,string>;labels:Record<str
 type Count={day:string;event:string;source:string;campaign:string;content:string;target:string;count:number};
 type Report={tags:{token:string;field:string;label:string;profile_key:string;active:boolean}[];links:Link[];counts:Count[]};
 type Api=(path:string,method?:string,body?:unknown)=>Promise<any>;
-const sections=['Profiles & copy','Site & projects','Outreach links','Visit reports','Contact & guide','Learning studio','System'] as const;
+const sections=['Profiles & copy','Site & projects','Outreach links','Visit reports','Visitors & conversations','Contact & guide','Learning studio','System'] as const;
 type Section=typeof sections[number];
 function download(filename:string,text:string,type='application/json'){const url=URL.createObjectURL(new Blob([text],{type}));const a=document.createElement('a');a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
 function Field({label,value,onChange,multiline=false,hint}:{label:string;value:string;onChange:(v:string)=>void;multiline?:boolean;hint?:string}){const help=React.useId();return <label className="admin-field"><span>{label}</span>{multiline?<textarea aria-label={label} aria-describedby={hint?help:undefined} rows={4} value={value} onChange={e=>onChange(e.target.value)}/>:<input aria-label={label} aria-describedby={hint?help:undefined} value={value} onChange={e=>onChange(e.target.value)}/>} {hint&&<small id={help}>{hint}</small>}</label>}
@@ -21,7 +22,7 @@ function rearrange<T>(items:T[],index:number,delta:number){const next=[...items]
 export default function AdminPortal(){
  const [password,setPassword]=useState(''),[token,setToken]=useState(''),[config,setConfig]=useState<Config|null>(null),[section,setSection]=useState<Section>('Profiles & copy'),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[dirty,setDirty]=useState(false);
  const request=async(secret:string,path:string,method='GET',body?:unknown)=>{const r=await fetch('/api'+path,{method,headers:{Authorization:'Bearer '+secret,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),cache:'no-store'});const d=await r.json();if(!r.ok)throw new Error(typeof d.detail==='string'?d.detail:Array.isArray(d.detail)?d.detail.map((x:{msg:string})=>x.msg).join('; '):'Request failed');return d};
- const api:Api=(path,method,body)=>request(token,path,method,body);
+ const api:Api=useCallback((path,method,body)=>request(token,path,method,body),[token]);
  const load=async()=>{setConfig(await api('/admin/config'));setDirty(false)};
  const save=async(action:()=>Promise<unknown>)=>{setBusy(true);setNotice('');try{await action();await load();setNotice('Saved. New visits and new guide turns use these settings immediately.')}catch(e){setNotice((e as Error).message)}finally{setBusy(false)}};
  useEffect(()=>{document.title='Portfolio admin';const warn=(e:BeforeUnloadEvent)=>{if(dirty){e.preventDefault();e.returnValue=''}};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn)},[dirty]);
@@ -31,6 +32,7 @@ export default function AdminPortal(){
  {section==='Profiles & copy'&&<ProfileEditor config={config} busy={busy} dirty={()=>setDirty(true)} discard={()=>setDirty(false)} save={save} api={api}/>}
  {section==='Site & projects'&&<PortfolioEditor config={config} busy={busy} dirty={()=>setDirty(true)} save={save} api={api}/>}
  {section==='Outreach links'&&<Links config={config} api={api}/>}
+ {section==='Visitors & conversations'&&<VisitorDashboard api={api}/>}
  {section==='Visit reports'&&<Reports api={api}/>}
  {section==='Contact & guide'&&<SettingsEditor config={config} busy={busy} dirty={()=>setDirty(true)} save={save} api={api}/>}
  {section==='Learning studio'&&<div className="admin-card"><LearningStudio api={api} seed={null}/></div>}

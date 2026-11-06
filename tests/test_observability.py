@@ -157,3 +157,55 @@ def test_admin_tracking_switch_stops_local_metrics_and_posthog(tmp_path, monkeyp
         save('settings', Settings(tracking_enabled=True).model_dump(), 1)
         assert client.post('/api/visit-events',json={'name':'pageview','url':'/'}).status_code == 204
         assert len(store.query('SELECT * FROM ui_events')) == 1
+
+
+def test_visitor_arrivals_owner_exclusion_and_conversation_filters(tmp_path, monkeypatch):
+    module, store = setup(tmp_path, monkeypatch)
+    from harness.observability import record_arrival, initialize
+    initialize(store)
+    from harness.public_access import digest, COOKIE
+    token = 'a'*64
+    visitor = digest(token)
+    thread = store.thread('public')
+    legacy = store.thread('public')
+    with store.connect() as db:
+        db.execute('INSERT INTO visitor_threads VALUES (?,?)', (thread['id'],visitor))
+    store.enqueue(thread['id'],'Synthetic visitor question')
+    record_arrival(store,visitor)
+    record_arrival(store,visitor)
+    with TestClient(module.app) as client:
+        for path in ('/api/owner/browser','/api/owner/visitors'):
+            result = client.put(path) if path.endswith('browser') else client.get(path)
+            assert result.status_code == 401
+        client.cookies.set(COOKIE,token)
+        data = client.get('/api/owner/visitors',headers=AUTH).json()
+        assert len(data['arrivals']) == 1 and not data['mine']
+        assert client.get('/api/owner/visitors',params={'after':data['cursor']},headers=AUTH).json()['arrivals'] == []
+        def ids(origin):
+            return [r['id'] for r in client.get('/api/owner/conversations',params={'origin':origin},headers=AUTH).json()['conversations']]
+        assert ids('visitor') == [thread['id']]
+        assert ids('unknown') == [legacy['id']]
+        assert client.put('/api/owner/browser',headers=AUTH).json()['mine']
+        assert ids('visitor') == [] and ids('owner') == [thread['id']]
+        assert client.get('/api/owner/visitors',headers=AUTH).json()['arrivals'] == []
+        client.put('/api/owner/browser?mine=false',headers=AUTH)
+        assert ids('visitor') == [thread['id']]
+        with store.connect() as db:
+            db.execute('UPDATE visitor_arrivals SET last_seen=last_seen-1801')
+        record_arrival(store,visitor)
+        assert len(client.get('/api/owner/visitors',headers=AUTH).json()['arrivals']) == 2
+
+
+def test_pageview_issues_browser_cookie_and_respects_opt_out(tmp_path, monkeypatch):
+    module, store = setup(tmp_path, monkeypatch)
+    from harness.public_access import COOKIE
+    with TestClient(module.app,base_url='https://testserver') as client:
+        client.post('/api/visit-events',json={'name':'pageview','url':'/'},headers={'DNT':'1'})
+        assert store.query('SELECT * FROM visitor_arrivals') == []
+        assert client.cookies.get(COOKIE) is None
+        client.cookies.clear()
+        assert client.post('/api/visit-events',json={'name':'pageview','url':'/'}).status_code == 204
+        assert client.cookies.get(COOKIE)
+        assert len(store.query('SELECT * FROM visitor_arrivals')) == 1
+        client.post('/api/visit-events',json={'name':'pageview','url':'/#work'})
+        assert len(store.query('SELECT * FROM visitor_arrivals')) == 1
