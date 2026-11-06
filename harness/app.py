@@ -37,7 +37,9 @@ async def lifespan(app):
         raise RuntimeError('Deep Agents runtime requires EXECUTOR=temporal.')
     task = asyncio.create_task(temporal_dispatcher(store) if executor == "temporal" else local_worker(store))
     try:
-        async with app.state.agent_mcp_manager().run():
+        async with contextlib.AsyncExitStack() as stack:
+            await stack.enter_async_context(app.state.agent_mcp_manager().run())
+            await stack.enter_async_context(app.state.admin_mcp_lifespan())
             yield
     finally:
         task.cancel()
@@ -480,5 +482,7 @@ def cover_asset(ident: str):
     return FileResponse(p, media_type='image/jpeg', headers={'Cache-Control':'private, max-age=0, must-revalidate'})
 
 
+from .admin_mcp import mount_admin_mcp
+mount_admin_mcp(app, lambda: store)
 from .agent_surfaces import mount_agent_surfaces
 mount_agent_surfaces(app, lambda: store)

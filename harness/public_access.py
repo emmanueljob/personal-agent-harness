@@ -71,7 +71,10 @@ class PublicAccess(BaseHTTPMiddleware):
             # The Fly-provided hostname remains usable during domain setup.
             if os.getenv('FLY_APP_NAME'):
                 expected.add('https://'+os.environ['FLY_APP_NAME']+'.fly.dev')
-            if (origin and origin.rstrip('/') not in expected) or request.headers.get('sec-fetch-site') == 'cross-site':
+            # OAuth token/registration endpoints use their protocol's validation;
+            # admin MCP requires a resource-bound bearer token on every request.
+            oauth_transport = path in {'/register','/token','/revoke','/admin-mcp'}
+            if not oauth_transport and ((origin and origin.rstrip('/') not in expected) or request.headers.get('sec-fetch-site') == 'cross-site'):
                 return JSONResponse({'detail':'Cross-site requests are not accepted.'}, status_code=403)
             try:
                 limit = 128000 if path.startswith('/api/model-bridge/') else 32000
@@ -107,7 +110,7 @@ class PublicAccess(BaseHTTPMiddleware):
         return response
 
     async def decorate(self, response, request):
-        if response.headers.get('content-type', '').startswith('text/html') and request.url.path != '/admin':
+        if response.headers.get('content-type', '').startswith('text/html') and request.url.path != '/admin' and not request.url.path.startswith('/admin-auth/'):
             body = b''.join([chunk async for chunk in response.body_iterator]).decode('utf-8')
             body = body.replace('</head>', '<link rel="stylesheet" href="/contact.css"><script src="/visit.js" defer></script></head>', 1)
             from starlette.responses import Response
