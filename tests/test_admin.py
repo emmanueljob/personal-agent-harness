@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from test_agent_surfaces import fixture_app
 from harness.portfolio import Portfolio
 from harness.site_config import records
-from test_personalization import tags_from_url
+from test_personalization import tags_from_url, code_from_url
 
 AUTH={'Authorization':'Bearer synthetic-owner-access'}
 
@@ -79,7 +79,7 @@ def test_custom_profile_link_preview_and_revocation(tmp_path,monkeypatch):
         preview=client.post('/api/admin/resolve',headers=AUTH,json=values).json()
         assert preview['key']=='content:fixture' and 'system_note' not in preview
         link=client.post('/api/admin/links',headers=AUTH,json=values).json()['url']
-        assert 'fixture' not in link and 'hex' not in link and 'warm' not in link
+        assert urlsplit(link).path=='/hi/fixture' and not urlsplit(link).query
         assert 'Hi Fixture' in client.get(link).text
         assert 'INTERNAL AUDIENCE GUIDANCE' not in client.get(link).text
         tags=tags_from_url(link)
@@ -164,7 +164,7 @@ def test_delete_link_removes_mappings_counts_and_keeps_other_links(tmp_path,monk
             tags=tags_from_url(url)
             assert client.post('/api/visit-events',json={'name':'pageview','url':'/?'+urlsplit(url).query,'utm':tags}).status_code==204
         state=client.get('/api/admin/outreach',headers=AUTH).json()
-        selected=next(link for link in state['links'] if link['id']==urlsplit(urls[0]).path.rsplit('/',1)[-1])
+        selected=next(link for link in state['links'] if link['id']==code_from_url(urls[0]))
         assert client.delete('/api/admin/links/'+selected['id']).status_code==401
         assert client.delete('/api/admin/links/'+selected['id'],headers={**AUTH,'Origin':'https://untrusted.example'}).status_code==403
         before=client.get('/api/admin/config',headers=AUTH).json()
@@ -205,3 +205,25 @@ def test_clear_old_links_includes_legacy_but_preserves_newer_links(tmp_path,monk
         assert client.get('/api/admin/outreach',headers=AUTH).json()=={'links':[],'tags':[],'counts':[]}
         assert client.delete('/api/admin/tags/'+token,headers=AUTH).status_code==404
         assert client.delete('/api/admin/links',headers=AUTH).json()=={'links_deleted':0,'tags_deleted':0,'count_rows_deleted':0}
+
+
+def test_readable_url_labels_collisions_and_rename(tmp_path,monkeypatch):
+    module,_=admin_app(tmp_path,monkeypatch)
+    with TestClient(module.app,base_url='https://testserver') as client:
+        values={'source':'cold','company':'hex','slug':'Hello Hex'}
+        first=client.post('/api/admin/links',headers=AUTH,json=values)
+        assert first.status_code==200 and first.json()['url']=='https://testserver/hi/hello-hex'
+        assert client.get('/hi/hello-hex').status_code==200
+        assert '"key": "campaign:hex"' in client.get('/hi/hello-hex').text
+        before=client.get('/api/admin/outreach',headers=AUTH).json()
+        assert before['links'][0]['slug']=='hello-hex'
+        assert client.post('/api/admin/links',headers=AUTH,json=values).status_code==409
+        assert client.get('/api/admin/outreach',headers=AUTH).json()==before
+        ident=before['links'][0]['id']
+        renamed=client.put('/api/admin/links/'+ident+'/slug',headers=AUTH,json={'slug':'intro'})
+        assert renamed.status_code==200
+        assert '"key": "default"' in client.get('/hi/hello-hex').text
+        assert '"key": "campaign:hex"' in client.get('/hi/intro').text
+        assert client.put('/api/admin/links/'+ident+'/slug',json={'slug':'unauthorized'}).status_code==401
+        client.delete('/api/admin/links/'+ident,headers=AUTH)
+        assert '"key": "default"' in client.get('/hi/intro').text

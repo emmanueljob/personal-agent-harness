@@ -98,17 +98,20 @@ class OutreachInput(BaseModel):
     person: str = Field(default='', max_length=160)
     company: str = Field(default='', max_length=160)
     source: str = Field(default='outreach', max_length=160)
+    slug: str = Field(default='',max_length=160)
 
 
 @router.post('/api/outreach-links', include_in_schema=False)
 def create_outreach_link(body: OutreachInput, request: Request):
     authenticate_link_builder(request)
-    from .outreach import build_link
+    from .outreach import build_link, LinkConflict
     origin = os.getenv('PUBLIC_ORIGIN', '').rstrip('/')
     try:
-        url = build_link(origin, body.person, body.company, body.source)
-    except ValueError:
-        raise HTTPException(503, 'Configure an HTTPS public origin and private outreach database')
+        url = build_link(origin, body.person, body.company, body.source, body.slug)
+    except LinkConflict as error:
+        raise HTTPException(409,str(error))
+    except ValueError as error:
+        raise HTTPException(422,str(error))
     return JSONResponse({'url':url}, headers={'Cache-Control':'no-store'})
 
 

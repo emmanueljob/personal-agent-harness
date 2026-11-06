@@ -110,6 +110,7 @@ class RoutineInput(TurnInput):
     interval_seconds: int = Field(ge=60, le=31536000)
 
 
+@app.get("/hi/{slug}", include_in_schema=False)
 @app.get("/r/{code}", include_in_schema=False)
 @app.get("/admin", include_in_schema=False)
 @app.get("/")
@@ -163,7 +164,9 @@ def portfolio():
 
 
 def visitor_profile(request):
-    code = request.path_params.get('code') or request.headers.get('x-outreach-link','')
+    from .outreach import link_id
+    slug = request.path_params.get('slug')
+    code = (link_id(slug) or 'invalid-clean-link') if slug is not None else request.path_params.get('code') or request.headers.get('x-outreach-link','')
     if code:
         from .outreach import link_tags
         # Explicit invalid/revoked/deleted links must not restore a saved profile.

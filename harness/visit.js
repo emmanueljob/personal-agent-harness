@@ -2,8 +2,9 @@
 (async () => {
   const keys = ['utm_source','utm_medium','utm_campaign','utm_content','utm_term'];
   let profile = {key:'default'};
-  const cleanPath = location.pathname.match(/^\/r\/([^/]+)$/);
-  let outreachCode = cleanPath?.[1] || '';
+  const cleanPath = /^\/(?:r|hi)\//.test(location.pathname);
+  let outreachCode = '';
+  if(cleanPath){try{outreachCode=JSON.parse(document.getElementById('personalization')?.textContent||'null')?.outreach_code||'invalid-clean-link'}catch{outreachCode='invalid-clean-link'}}
   if(!cleanPath) {try {outreachCode=sessionStorage.getItem('portfolio-outreach-code')||''}catch{}}
   let utm = {};
   try { utm = JSON.parse(sessionStorage.getItem('portfolio-utm') || '{}'); } catch {}
