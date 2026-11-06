@@ -1,17 +1,29 @@
-"""Opaque outreach tags; the mapping lives in private runtime state, never Git."""
+"""Clean outreach links and private attribution, stored outside Git."""
 import os
 import json
 import re
 import secrets
 import sqlite3
 import time
+import unicodedata
 from pathlib import Path
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import urlsplit
 
 from .paths import data_directory
 
 FIELDS = ('utm_source', 'utm_campaign', 'utm_content')
 TOKEN = re.compile(r't_[0-9a-f]{32}')
+LINK_CODE = re.compile(r'[A-Za-z0-9_-]{16,64}')
+
+
+class LinkConflict(ValueError):
+    pass
+
+
+def slugify(value):
+    value = unicodedata.normalize('NFKD',value).encode('ascii','ignore').decode().lower()
+    return re.sub(r'[^a-z0-9_-]+','-',value).strip('-_')[:64]
+
 
 
 def database_path():
@@ -34,14 +46,18 @@ def lookup(value, field):
         return None  # Missing/unavailable mapping fails closed to ordinary fallback.
 
 
-def build_link(base, person='', company='', source='outreach'):
-    """Generate fresh random aliases; names are private labels, never URL values."""
+def build_link(base, person='', company='', source='outreach', slug=''):
+    """Generate a clean path; names and attribution fields stay in private storage."""
     from .personalization import resolve
     url = urlsplit(base)
     if url.scheme != 'https' or not url.netloc or url.username or url.password or url.query or url.fragment or url.path not in ('','/'):
         raise ValueError('Base must be an HTTPS origin without path, query or fragment')
     values = {'utm_source':source, 'utm_campaign':company, 'utm_content':person}
     aliases = {field:'t_'+secrets.token_hex(16) for field, value in values.items() if value}
+    code = secrets.token_urlsafe(16)
+    label = slugify(slug or person or company or source or 'intro')
+    if not label:
+        raise ValueError('Choose a URL label with letters or numbers')
     path = database_path()
     if path.resolve().is_relative_to(Path(__file__).resolve().parents[1]):
         raise ValueError('Outreach mappings must be stored outside the source repository')
@@ -58,8 +74,16 @@ def build_link(base, person='', company='', source='outreach'):
             profile = resolve({field: values[field]})
             db.execute('INSERT INTO outreach_tags VALUES (?,?,?,?,?)', (token, field, profile.key, values[field][:160], time.time()))
         ensure_links(db)
-        db.execute('INSERT INTO outreach_links VALUES (?,?,?,?,1)', (secrets.token_hex(16), json.dumps(aliases), json.dumps(values), time.time()))
-    return base.rstrip('/')+'/?'+urlencode(aliases)
+        public_slug = label
+        suffix = 2
+        while db.execute('SELECT 1 FROM outreach_slugs WHERE slug=?',(public_slug,)).fetchone():
+            if slug:
+                raise LinkConflict('That URL label is already in use. Choose another label.')
+            public_slug = label[:58]+'-'+str(suffix)
+            suffix += 1
+        db.execute('INSERT INTO outreach_links VALUES (?,?,?,?,1)', (code, json.dumps(aliases), json.dumps(values), time.time()))
+        db.execute('INSERT INTO outreach_slugs VALUES (?,?)',(public_slug,code))
+    return base.rstrip('/')+'/hi/'+public_slug
 
 
 def record_event(event):
@@ -101,13 +125,16 @@ def report():
         exists = db.execute("SELECT 1 FROM sqlite_master WHERE name='outreach_counts'").fetchone()
         counts = [dict(row) for row in db.execute('SELECT * FROM outreach_counts ORDER BY day DESC LIMIT 5000')] if exists else []
         exists_links = db.execute("SELECT 1 FROM sqlite_master WHERE name='outreach_links'").fetchone()
-        links = [{**dict(row),'tokens':json.loads(row['tokens']),'labels':json.loads(row['labels']), 'active':int(all(token not in disabled for token in json.loads(row['tokens']).values()))} for row in db.execute('SELECT * FROM outreach_links ORDER BY created DESC LIMIT 1000')] if exists_links else []
+        slug_table = db.execute("SELECT 1 FROM sqlite_master WHERE name='outreach_slugs'").fetchone()
+        slugs = {row[1]:row[0] for row in db.execute('SELECT slug,link_id FROM outreach_slugs')} if slug_table else {}
+        links = [{**dict(row), 'slug':slugs.get(row['id'],''),'tokens':json.loads(row['tokens']),'labels':json.loads(row['labels']), 'active':int(all(token not in disabled for token in json.loads(row['tokens']).values()))} for row in db.execute('SELECT * FROM outreach_links ORDER BY created DESC LIMIT 1000')] if exists_links else []
     return {'tags': tags, 'counts': counts, 'links':links}
 
 
 def ensure_links(db):
     db.execute('CREATE TABLE IF NOT EXISTS outreach_links (id TEXT PRIMARY KEY,tokens TEXT NOT NULL,labels TEXT NOT NULL,created REAL NOT NULL,active INTEGER NOT NULL)')
     db.execute('CREATE TABLE IF NOT EXISTS outreach_disabled_tags (token TEXT PRIMARY KEY)')
+    db.execute('CREATE TABLE IF NOT EXISTS outreach_slugs (slug TEXT PRIMARY KEY,link_id TEXT NOT NULL UNIQUE)')
 
 
 def set_link_active(ident, active):
@@ -198,6 +225,8 @@ def delete_links(*, ident=None, token=None, before=None):
             if 'outreach_disabled_tags' in tables:
                 db.execute(f'DELETE FROM outreach_disabled_tags WHERE token IN ({marks})',batch)
         for gid in ids:
+            if 'outreach_slugs' in tables:
+                db.execute('DELETE FROM outreach_slugs WHERE link_id=?',(gid,))
             result['links_deleted'] += db.execute('DELETE FROM outreach_links WHERE id=?',(gid,)).rowcount
         if ident is None and token is None and before is None:
             # Clear any historical orphan count/disabled rows as well.
@@ -205,4 +234,60 @@ def delete_links(*, ident=None, token=None, before=None):
                 result['count_rows_deleted'] += db.execute('DELETE FROM outreach_counts').rowcount
             if 'outreach_disabled_tags' in tables:
                 db.execute('DELETE FROM outreach_disabled_tags')
+            if 'outreach_slugs' in tables:
+                db.execute('DELETE FROM outreach_slugs WHERE link_id NOT IN (SELECT id FROM outreach_links)')
         return result
+
+
+def link_tags(code):
+    """Resolve a public clean-link code into private attribution fields."""
+    if not LINK_CODE.fullmatch(code):
+        return {}
+    target = database_path()
+    if not target.is_file():
+        return {}
+    try:
+        with sqlite3.connect(target.as_uri()+'?mode=ro',uri=True,timeout=2) as db:
+            db.execute('BEGIN')
+            row = db.execute('SELECT tokens FROM outreach_links WHERE id=?',(code,)).fetchone()
+            if not row:
+                return {}
+            disabled = {r[0] for r in db.execute('SELECT token FROM outreach_disabled_tags')}
+            return {field:token for field,token in json.loads(row[0]).items() if field in FIELDS and token not in disabled
+                    and db.execute('SELECT 1 FROM outreach_tags WHERE token=? AND field=?',(token,field)).fetchone()}
+    except sqlite3.Error:
+        return {}
+
+
+def link_id(slug):
+    if not re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,63}',slug):
+        return ''
+    target = database_path()
+    if not target.is_file():
+        return ''
+    try:
+        with sqlite3.connect(target.as_uri()+'?mode=ro',uri=True,timeout=2) as db:
+            row = db.execute('SELECT link_id FROM outreach_slugs WHERE slug=?',(slug,)).fetchone()
+            return row[0] if row else ''
+    except sqlite3.Error:
+        return ''
+
+
+def set_link_slug(ident, slug):
+    slug = slugify(slug)
+    if not slug:
+        raise ValueError('Choose a URL label with letters or numbers')
+    target = database_path()
+    if not target.is_file():
+        raise KeyError(ident)
+    with sqlite3.connect(target,timeout=5) as db:
+        ensure_links(db)
+        db.execute('BEGIN IMMEDIATE')
+        if not db.execute('SELECT 1 FROM outreach_links WHERE id=?',(ident,)).fetchone():
+            raise KeyError(ident)
+        used = db.execute('SELECT link_id FROM outreach_slugs WHERE slug=?',(slug,)).fetchone()
+        if used and used[0] != ident:
+            raise LinkConflict('That URL label is already in use. Choose another label.')
+        db.execute('DELETE FROM outreach_slugs WHERE link_id=?',(ident,))
+        db.execute('INSERT INTO outreach_slugs VALUES (?,?)',(slug,ident))
+    return slug

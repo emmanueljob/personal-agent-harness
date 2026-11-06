@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 from . import site_config
 from .personalization import Profile, all_profiles, position_portfolio, DEFAULT_GUIDANCE, resolve, public_profile
 from .portfolio import Portfolio
-from .outreach import build_link, report, set_link_active, set_tag_active, delete_links
+from .outreach import build_link, report, set_link_active, set_tag_active, delete_links, LinkConflict, set_link_slug
 from .visits import OutreachInput
 import os
 
@@ -96,7 +96,9 @@ def mount_admin(app, get_store, authorize):
     @router.post('/links')
     def links(body:OutreachInput):
         try:
-            url = build_link(os.getenv('PUBLIC_ORIGIN','').rstrip('/'),body.person,body.company,body.source)
+            url = build_link(os.getenv('PUBLIC_ORIGIN','').rstrip('/'),body.person,body.company,body.source,body.slug)
+        except LinkConflict as error:
+            raise HTTPException(409,str(error))
         except ValueError as error:
             raise HTTPException(422,str(error))
         return response({'url':url})
@@ -138,5 +140,16 @@ def mount_admin(app, get_store, authorize):
             return response(delete_links(token=token))
         except KeyError:
             raise HTTPException(404,'Tag not found')
+
+    @router.put('/links/{ident}/slug')
+    def rename_link(ident:str,body:OutreachInput):
+        try:
+            return response({'slug':set_link_slug(ident,body.slug)})
+        except KeyError:
+            raise HTTPException(404,'Link not found')
+        except LinkConflict as error:
+            raise HTTPException(409,str(error))
+        except ValueError as error:
+            raise HTTPException(422,str(error))
 
     app.include_router(router)

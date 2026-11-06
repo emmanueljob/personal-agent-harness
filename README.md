@@ -192,8 +192,8 @@ only the working email action appears. The sticky contact controls and editable
 roles banner appear on every HTML page. Machine-readable Markdown, API and MCP
 responses stay unchanged.
 
-Generate outreach links with **opaque random UTM codes**. Names, company names,
-email addresses and private labels never appear in generated URLs. Warm and cold
+Generate **clean outreach links** with an editable public /hi/ label and no query string. Choose a readable label such as a person or company name, or a neutral label
+such as intro. That label is public; all other attribution stays private. Warm and cold
 sources have recruiter-oriented profile defaults; a recognized person profile
 still takes precedence over company, then source. Unknown person labels provide
 attribution while letting the company/source choose the experience.
@@ -208,8 +208,14 @@ python3 scripts/build_campaign_link.py --server --stats
 ```
 
 The generated URL looks like
-`https://eman.hisemailaddress.org/?utm_source=t_<random>&utm_campaign=t_<random>&utm_content=t_<random>`.
-Each code is independently random (128 bits), not a name hash or encoded name.
+`https://eman.hisemailaddress.org/hi/<name-or-company>`.
+Set the public label in the portal, or use `--slug intro` in the CLI. Without an
+explicit CLI label, it derives one from person, company or source and adds a suffix
+if needed. Explicit duplicate labels return 409; existing links are never silently
+overwritten. Names in readable labels are visible in URLs. A random internal
+128-bit ID still ties the link to its private attribution and count records.
+Attribution fields are resolved privately on the server; they are not added to
+the address bar, and the clean route renders directly without a UTM redirect.
 Private mappings are stored in `DATA_DIR/outreach.sqlite` on the existing persistent
 volume; optionally override with `PORTFOLIO_LINKS_DB`, outside the source checkout.
 The server uses these mappings to resolve the profile before rendering. Labels
@@ -220,8 +226,11 @@ The password is sent in an HTTPS Authorization header, never in a URL. The admin
 registration and stats routes return 404 if the password is unset and 401 when
 incorrect; they are excluded from public discovery. The CLI does not follow
 redirects with the password. Do not put real labels or passwords in URL parameters.
-Legacy descriptive tags still resolve for compatibility; the generator always
-produces opaque codes. Unknown codes or a missing registry fall back safely.
+Legacy UTM links still resolve for compatibility; new generated links and the
+admin history Copy action use `/hi/<label>` when a readable label is set. Existing random-code links can
+be assigned a readable address with **Edit URL label** in the saved-link list.
+Changing a label replaces its previous readable address; the underlying record
+and counts are preserved. Random `/r/<code>` paths remain compatible. Unknown codes or a missing registry fall back safely.
 
 Without `--server`, the script registers in the runtime database on the machine
 where it runs. Use this mode on the serving machine; a laptop-only mapping cannot
@@ -330,3 +339,12 @@ learning notes, conversations, or the separate general UI metrics. Old generated
 URLs fall back to the default experience; existing untagged browser sessions may
 retain their cached profile. API cleanup can supply a `before` cutoff to preserve
 links created after a cleanup snapshot.
+
+Readable links preserve their path during tab navigation. The browser retains only
+the clean-link code for attribution across `/agents` and other pages; event
+requests send that code and the server resolves the private source/company/person
+fields. Their codes remain internal to the existing registry and count tables.
+Revoked, deleted or unknown clean links render the default experience without a
+redirect. Existing legacy UTM attribution, owner controls, API and MCP remain
+compatible. No additional credentials are required. The additive outreach_slugs table is
+created lazily on the persistent volume; deleting a link also removes its label.
