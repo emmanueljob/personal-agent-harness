@@ -80,12 +80,18 @@ def test_anonymous_question_tokens_scoping_and_rate_limit(tmp_path,monkeypatch):
         r=first.post('/api/public/questions',json={'question':'What does the public profile say?'})
         assert r.status_code==202,r.text
         body=r.json();assert len(body['result_token'])==64
+        assert body['speaker']['type']=='ai_digital_twin'
+        assert body['speaker']['voice']=='first_person'
         assert first.get(body['status_url']).status_code==422
         assert second.get(body['status_url'],headers={'X-Result-Token':'0'*64}).status_code==404
         assert first.get(body['status_url'],headers={'X-Result-Token':body['result_token']}).json()['status']=='queued'
         with store.connect() as db:db.execute("UPDATE turns SET status='completed',result='Fixture public answer' WHERE id=?",(body['turn_id'],))
         result=first.get(body['status_url'],headers={'X-Result-Token':body['result_token']})
         assert result.json()['answer']=='Fixture public answer'
+        assert result.json()['speaker']==body['speaker']
+        assert 'not a verbatim statement' in result.json()['speaker']['attribution']
+        assert 'first person' in first.get('/agents.md').text
+        assert 'digital twin' in first.get('/agents').text
         assert 'prompt' not in result.json() and result.headers['cache-control']=='no-store'
         raw=store.query('SELECT token_hash FROM public_agent_questions')[0]['token_hash']
         assert raw!=body['result_token']

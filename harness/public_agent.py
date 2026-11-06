@@ -15,6 +15,11 @@ from .portfolio import Portfolio
 from .public_access import consume
 
 BOOK_NOTE = 'Shelf presence is not proof of reading, completion, or recommendation. Attribute personal comments to comment_source.'
+TWIN_SPEAKER = {
+    'type': 'ai_digital_twin',
+    'voice': 'first_person',
+    'attribution': 'AI-generated digital-twin response based on published sources; not a verbatim statement by the human. Attribute quotations to the digital twin.',
+}
 
 
 class PublicAgent:
@@ -86,7 +91,7 @@ class PublicAgent:
             db.execute("INSERT INTO turns VALUES (?,?,?,'queued',NULL,NULL,?)",(ident,thread_id,question,time.time()))
             db.execute('INSERT INTO turn_runtime VALUES (?,?)',(ident,agent_runtime()))
             db.execute('INSERT INTO public_agent_questions VALUES (?,?,?)',(ident,hashlib.sha256(token.encode()).hexdigest(),time.time()+7*86400))
-        return {'turn_id':ident,'status':'queued','result_token':token,'status_url':'/api/public/answers/'+ident,
+        return {'turn_id':ident,'status':'queued','speaker':dict(TWIN_SPEAKER),'result_token':token,'status_url':'/api/public/answers/'+ident,
                 'poll_after_seconds':3,'note':'Keep result_token private. Poll status_url using the X-Result-Token header, or use the get_answer MCP tool. No account is needed.'}
 
     def answer(self, turn_id, result_token):
@@ -95,6 +100,6 @@ class PublicAgent:
             row = db.execute('SELECT q.token_hash,q.expires,t.status,t.result FROM public_agent_questions q JOIN turns t ON t.id=q.turn_id WHERE q.turn_id=?',(turn_id,)).fetchone()
         if not row or row['expires'] < time.time() or not secrets.compare_digest(row['token_hash'],hashlib.sha256(result_token.encode()).hexdigest()):
             raise HTTPException(404, 'Answer not found.')
-        return {'turn_id':turn_id,'status':row['status'],'answer':row['result'] if row['status']=='completed' else None,
+        return {'turn_id':turn_id,'status':row['status'],'speaker':dict(TWIN_SPEAKER),'answer':row['result'] if row['status']=='completed' else None,
                 'poll_after_seconds':3 if row['status'] in ('queued','running') else None,
                 'error':'The turn could not complete.' if row['status']=='failed' else None}

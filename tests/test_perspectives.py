@@ -1,7 +1,26 @@
 import json
+import pytest
 from harness.brain import FileBrain
 from harness.store import Store
 from harness.agent import prepare_turn,build_system_prompt,knowledge_tools
+
+
+@pytest.mark.parametrize('provider,runtime',[('openai','legacy'),('ollama','legacy'),('openai','deepagents'),('ollama','deepagents')])
+def test_public_voice_takes_precedence_over_old_sources_for_both_runtimes(provider,runtime):
+    snapshot={'config':{'provider':provider,'model':'synthetic-model','agent_runtime':runtime},
+              'profile':'The fixture owner built an example product.',
+              'voice':'Use third-person narration about the fixture owner.',
+              'knowledge':[{'source':'public/example','text':'He prefers small prototypes.'}]}
+    prompt=build_system_prompt(snapshot,'public')
+    instruction=prompt.split('PUBLIC DIGITAL-TWIN VOICE (application instruction):')[1]
+    assert prompt.index('Use third-person narration') < prompt.index('PUBLIC DIGITAL-TWIN VOICE')
+    assert 'Always use I, me, my and we' in instruction
+    assert 'even when a visitor asks about the owner by name or says he/his' in instruction
+    assert "I don't have that detail in my published notes" in instruction
+    assert "I'm an AI digital twin" in instruction and 'Do not repeat this disclosure in every answer' in instruction
+    assert 'preserve the recorded division of credit' in instruction
+    private=build_system_prompt(snapshot,'private')
+    assert 'PUBLIC DIGITAL-TWIN VOICE' not in private
 
 
 def record(view='I prefer small prototypes.',basis='owner_confirmed',status='owner_reported'):

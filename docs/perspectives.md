@@ -1,6 +1,6 @@
 # Digital twin perspectives
 
-The public agent speaks in first person as a labeled AI digital twin. It uses scoped owner knowledge for personal facts and opinions, while podcast transcripts remain external references. Both legacy and Deep Agents execution use the same prompt builder and turn preparation.
+The public agent speaks in first person as a labeled AI digital twin. It uses scoped owner knowledge for personal facts and opinions, while podcast transcripts remain external references. Both legacy and Deep Agents execution use the same prompt builder and turn preparation. A final public presentation instruction keeps first-person narration even when older notes or prior replies use third person. The UI explains the AI identity; public question/answer responses also return `speaker` metadata so HTTP, MCP and WebMCP consumers can preserve attribution. This changes the prompt for newly prepared turns; already-running Temporal workflows retain the prompt captured in their execution history. It does not rewrite stored answers or publish knowledge.
 
 Store owner-authored perspective data in `{brain}/{public|private}/perspectives.json`, outside Git. The public exporter includes only the public file. Source privacy checks reject this filename if someone attempts to commit it.
 
