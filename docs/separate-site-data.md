@@ -48,3 +48,27 @@ Removing a value from the current source does not remove previous commits,
 Git author identities, released images, logs, forks or caches. A history cleanup
 requires a separately coordinated rewrite and cleanup of published artifacts.
 Rotate an exposed credential rather than relying on deleting its history.
+
+## Downloadable resume
+
+The app serves only an explicitly published `BRAIN_DIR/public/resume.pdf` at
+`/resume.pdf`, with a download link in the header and footer. `/api/resume` reports
+availability; the public profile API also advertises it. A fresh installation has
+no resume and shows no download link. Private files, symlinks, invalid PDFs and
+files over 20 MiB are never served. Downloads use a fixed filename and no-store
+headers; replacing the file does not require a code deploy.
+
+Review the PDF itself, including contact details and links, before publication:
+
+```sh
+python scripts/publish_resume.py /absolute/private/path/reviewed-resume.pdf
+python scripts/publish_resume.py /absolute/private/path/reviewed-resume.pdf --publish
+```
+
+Use `--brain-root` for an installation's external data folder. Updating an existing
+resume requires `--replace`; take a backup first. Removing the public PDF withdraws
+the link on a page reload. Public downloads may have been saved by visitors.
+The optional public PDF is included in explicit public-brain exports and normal
+data backups. Neither the PDF nor extracted resume text belongs in Git or the
+container image. Publishing a download does not rewrite the agent's knowledge,
+voice or approved career facts; those are reviewed separately as data.
