@@ -39,6 +39,12 @@ def test_public_chats_belong_to_browser_and_owner_routes_are_disabled(tmp_path,m
         cookie=r.headers['set-cookie'].lower()
         assert 'httponly' in cookie and 'secure' in cookie and 'samesite=lax' in cookie
         ident=r.json()['id']
+        # Starting fresh must remain possible after the former ten-chat cap.
+        from harness.public_access import digest
+        for _ in range(10):
+            consume(store, [('day:threads:'+digest(first.cookies.get('portfolio_visitor')), 86400, 10)])
+        for _ in range(11):
+            assert first.post('/api/threads',json={'mode':'public'}).status_code==200
         assert first.get('/api/threads/'+ident).status_code==200
         turn=first.post('/api/threads/'+ident+'/turns',json={'prompt':'A short question','request_id':'same'})
         assert turn.status_code==202
