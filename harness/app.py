@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from .store import Store
@@ -181,6 +181,26 @@ def media_library(query: str = '', kind: str = 'all', notes_only: bool = False, 
 def tool_catalog():
     from .agent import plugins
     return [{"name": t.name, "description": t.description} for t in plugins.tools({"mode": "public", "store": store})]
+
+
+@app.get('/api/resume')
+def resume_metadata():
+    from .resume import resume_info
+    return resume_info(store.brain)
+
+
+@app.get('/resume.pdf', include_in_schema=False)
+def resume_download():
+    from .resume import published_resume
+    body = published_resume(store.brain)
+    if body is None:
+        raise HTTPException(404, 'No resume is published.')
+    return Response(body, media_type='application/pdf', headers={
+        'Content-Disposition': 'attachment; filename="resume.pdf"',
+        'Cache-Control': 'no-store',
+        'X-Content-Type-Options': 'nosniff',
+        'Content-Security-Policy': 'sandbox',
+    })
 
 
 @app.get("/api/portfolio", response_model=Portfolio)

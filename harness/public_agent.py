@@ -28,7 +28,8 @@ class PublicAgent:
 
     def profile(self):
         from .personalization import position_portfolio
-        return {'profile': position_portfolio(Portfolio.model_validate(self.store.brain.public_portfolio())).model_dump(),
+        from .resume import resume_info
+        return {'resume': resume_info(self.store.brain), 'profile': position_portfolio(Portfolio.model_validate(self.store.brain.public_portfolio())).model_dump(),
                 'published_profile': self.store.profile('public')[:18000],
                 'sources': [{'id': 'public/profile.md', 'url': '/#person', 'kind': 'owner_supplied'}],
                 'note': 'Career claims are owner-supplied, not independent verification. Use recorded dates; unknown details remain unknown.'}
