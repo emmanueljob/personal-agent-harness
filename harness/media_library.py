@@ -12,6 +12,7 @@ from urllib.parse import quote
 from .brain import FileBrain
 from .ingestion import reference_root, read_record
 from .learning import Learning
+from .podcast_artwork import image_url
 
 Kind = Literal['all', 'book', 'podcast']
 GENERIC = set('a an the and of for from me my your his her their eman emmanuel owner does is are has have can could should us it them want wants give some good best favorite favourite recommend recommends recommendation recommendations suggest suggestions book books podcast podcasts episode episodes listen listening read reading please about show shows what which would you he like likes to i'.split())
@@ -40,6 +41,7 @@ def _podcast_metadata(root, scope, manifest):
             author=str(provenance.get('show', 'Podcast')).replace('_', ' ').replace('-', ' '),
             url=record['source_url'], site_url='/?episode='+quote(ident)+'#podcasts',
             published=str(provenance.get('published', ''))[:80],
+            artwork_url=image_url(provenance.get('artwork_url') or provenance.get('image_url') or provenance.get('image') or ''),
             experience='unknown', note='', tags=[], note_source='',
             comment='', comment_source='', recommendation='unknown', reference_available=True))
     return rows
@@ -60,8 +62,10 @@ def catalog(brain, mode='public'):
                 recommendation=book.get('recommendation', 'unknown'), reference_available=True)
         folder = reference_root(brain, scope, 'podcasts')
         manifest = tuple((p.name, p.stat().st_mtime_ns, p.stat().st_size) for p in sorted(folder.glob('*.json')))
+        artwork = json.loads(brain.read(scope,'podcast-artwork.json') or '{"episodes":{}}').get('episodes',{})
         for row in _podcast_metadata(str(brain.root.resolve()), scope, manifest):
-            rows['podcast:'+row['id']] = {**row}
+            art=artwork.get(row['id'],{})
+            rows['podcast:'+row['id']] = {**row,'artwork_url':row.get('artwork_url') or image_url(art.get('url','')), 'artwork_kind':'episode' if row.get('artwork_url') else art.get('kind','')}
     # Notes themselves are explicit publications, even when their original source
     # is unavailable. Never open a private source to enrich a public annotation.
     learning = Learning(brain)
@@ -78,7 +82,7 @@ def catalog(brain, mode='public'):
             row.update(note=annotation['note'], tags=annotation['tags'], experience=annotation['experience'],
                        note_source=scope+'/learning.json#'+annotation['id'])
     for row in rows.values():
-        row.setdefault('note', ''); row.setdefault('tags', []); row.setdefault('experience', 'unknown')
+        row.setdefault('artwork_url',''); row.setdefault('artwork_kind',''); row.setdefault('note', ''); row.setdefault('tags', []); row.setdefault('experience', 'unknown')
         row['has_owner_note'] = bool(row['note'].strip())
         row['has_attributed_comment'] = bool(row['comment'].strip() and row['comment_source'].strip())
         row['recommendation_basis'] = 'owner_note' if row['has_owner_note'] else 'attributed_comment' if row['has_attributed_comment'] else 'reference_library'

@@ -23,7 +23,7 @@ def normalize(row, collection, scope='private', format='reference'):
         row = {'source_id':f"podcast:{row.get('show','')}:{row.get('id','')}",
                'title':row.get('title'),'text':row.get('text'),
                'source_url':row.get('episode_url') or row.get('transcript_source'), 'source_kind':'podcast',
-               'provenance':{**row.get('provenance',{}),**{k:row[k] for k in ('show','published','episode_url','transcript_source','feed_url','guid','language','transcription_method','transcription_model') if k in row},
+               'provenance':{**row.get('provenance',{}),**{k:row[k] for k in ('show','published','episode_url','transcript_source','feed_url','guid','artwork_url','image_url','image','show_image_url','language','transcription_method','transcription_model') if k in row},
                              **{k:v for k,v in row.items() if k.startswith('transcription_')},
                              **({'raw_sha256':row['sha256']} if row.get('sha256') else {})}}
     if not isinstance(row,dict) or row.get('scope',scope) != scope or row.get('knowledge_role','external_reference') != 'external_reference' or row.get('owner_endorsement','not_established') != 'not_established':

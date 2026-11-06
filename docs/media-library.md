@@ -8,7 +8,10 @@ source repository or promoted from private to public by a search or page view.
 
 The Podcasts tab is a listening room with show filters, search, a notes-only
 filter, episode details, personal reactions, listening status and original links.
-Episode cards use lightweight CSS depth and waveform artwork. They do not play
+Episode cards use original episode cover images inside the existing CSS depth treatment.
+When episode-specific artwork is unavailable, the show image is used; missing or
+failed images fall back to the waveform design. The selected episode displays its
+cover in the detail panel too. They do not play
 or download audio. Deep links use `/?episode=<published-id>#podcasts`.
 The bookshelf now displays the current published reading note and searches
 comments/tags as well as title/author, without rewriting canonical shelf metadata.
@@ -48,3 +51,25 @@ immediately. Removing a reference invalidates the derived metadata. An explicitl
 published note remains available even if its original reference is absent, with
 `reference_available=false`; private material is never opened to enrich it.
 No new database schema, dependencies or knowledge publication are required.
+
+
+## Episode artwork
+
+Artwork URLs are separate, scoped metadata in `public/podcast-artwork.json`, outside
+Git and the image build. The public-brain exporter includes this file. The catalog
+reads only the same scope's metadata and only decorates currently visible episodes.
+Provided artwork fields in newly ingested podcast metadata are retained too.
+
+Refresh existing published episodes from their original feeds after imports:
+
+```sh
+python scripts/sync_podcast_artwork.py --brain-root /path/to/external/brain
+```
+
+The sync matches exact episode GUID/link identities, then normalized titles, and
+falls back to show artwork. Each feed is fetched once with bounded size, redirects,
+timeouts and checked/pinned public IPs. It never downloads audio, calls a model,
+changes listening status or rewrites transcripts. The manifest records whether the
+image was episode or show artwork and the original feed URL. Prior artwork survives
+a failed feed refresh, while withdrawn episode IDs are removed from the manifest.
+Image loads are lazy and send no referrer. Artwork JSON and images stay out of Git.

@@ -19,7 +19,7 @@ VERSION = '8.30.1'
 MAX_BLOB = 2_000_000
 MAX_SCAN = 64_000_000
 BLOCKED_DIRS = {'.runtime','.venv','node_modules','dist','data','brain','state','private','raw','artifacts','previews','downloads','.ssh','.aws','__pycache__','.pytest_cache'}
-BLOCKED_NAMES = {'profile.md','voice.md','portfolio.json','perspectives.json','learning.json','bookshelf.json','library.json','.ds_store','.gitconfig','.netrc','.npmrc'}
+BLOCKED_NAMES = {'profile.md','voice.md','portfolio.json','perspectives.json','learning.json','podcast-artwork.json','bookshelf.json','library.json','.ds_store','.gitconfig','.netrc','.npmrc'}
 TEXT_TYPES = {'.py','.ts','.tsx','.js','.mjs','.css','.html','.json','.toml','.md','.txt','.yaml','.yml','.sh','.lock'}
 SPECIAL = {'Dockerfile','.dockerignore','.gitignore','.env.example','.gitleaks.toml','.githooks/pre-commit','.githooks/pre-push'}
 
