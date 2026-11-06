@@ -13,8 +13,8 @@ from harness.outreach import build_link
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--person', default='', help='Private person label/profile selector; never goes in the URL')
-    parser.add_argument('--company', default='', help='Private company/audience label/profile selector')
+    parser.add_argument('--person', default='', help='Person profile selector; used as the public URL label unless --slug is supplied')
+    parser.add_argument('--company', default='', help='Company profile selector; default URL label when no person is supplied')
     parser.add_argument('--source', default='outreach', help='Private source label; e.g. warm, cold or riviera')
     parser.add_argument('--slug',default='',help='Public URL label; defaults to person, company or source')
     parser.add_argument('--base', default='https://eman.hisemailaddress.org')
