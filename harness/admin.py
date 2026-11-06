@@ -1,11 +1,11 @@
 """Authenticated owner portal APIs. Credentials remain in deployment configuration."""
-from fastapi import APIRouter, Depends, HTTPException, Request, Header
+from fastapi import APIRouter, Depends, HTTPException, Request, Header, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from . import site_config
 from .personalization import Profile, all_profiles, position_portfolio, DEFAULT_GUIDANCE, resolve, public_profile
 from .portfolio import Portfolio
-from .outreach import build_link, report, set_link_active, set_tag_active
+from .outreach import build_link, report, set_link_active, set_tag_active, delete_links
 from .visits import OutreachInput
 import os
 
@@ -120,5 +120,23 @@ def mount_admin(app, get_store, authorize):
         except KeyError:
             raise HTTPException(404,'Tag not found')
         return response({'active':body.active})
+
+    @router.delete('/links')
+    def clear_links(before:float|None=Query(default=None,ge=0)):
+        return response(delete_links(before=before))
+
+    @router.delete('/links/{ident}')
+    def remove_link(ident:str):
+        try:
+            return response(delete_links(ident=ident))
+        except KeyError:
+            raise HTTPException(404,'Link not found')
+
+    @router.delete('/tags/{token}')
+    def remove_tag(token:str):
+        try:
+            return response(delete_links(token=token))
+        except KeyError:
+            raise HTTPException(404,'Tag not found')
 
     app.include_router(router)

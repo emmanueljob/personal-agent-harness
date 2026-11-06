@@ -152,3 +152,54 @@ def test_dynamic_guide_snapshot_and_legacy_tag_management(tmp_path,monkeypatch):
         assert not client.get('/api/admin/outreach',headers=AUTH).json()['tags'][0]['active']
         assert client.put('/api/admin/tags/'+tags['utm_source'],headers=AUTH,json={'active':True}).status_code==200
         assert client.get('/api/personalization',params=tags).json()['key']=='source:warm'
+
+
+def test_delete_link_removes_mappings_counts_and_keeps_other_links(tmp_path,monkeypatch):
+    module,_=admin_app(tmp_path,monkeypatch)
+    with TestClient(module.app,base_url='https://testserver') as client:
+        urls=[client.post('/api/admin/links',headers=AUTH,json={'source':'warm','company':'hex','person':'chett'}).json()['url'] for _ in range(2)]
+        for url in urls:
+            tags={k:v[0] for k,v in parse_qs(urlsplit(url).query).items()}
+            assert client.post('/api/visit-events',json={'name':'pageview','url':'/?'+urlsplit(url).query,'utm':tags}).status_code==204
+        state=client.get('/api/admin/outreach',headers=AUTH).json()
+        selected=next(link for link in state['links'] if link['tokens']['utm_source'] in urls[0])
+        assert client.delete('/api/admin/links/'+selected['id']).status_code==401
+        assert client.delete('/api/admin/links/'+selected['id'],headers={**AUTH,'Origin':'https://untrusted.example'}).status_code==403
+        before=client.get('/api/admin/config',headers=AUTH).json()
+        result=client.delete('/api/admin/links/'+selected['id'],headers=AUTH)
+        assert result.status_code==200
+        assert result.json()=={'links_deleted':1,'tags_deleted':3,'count_rows_deleted':1}
+        state=client.get('/api/admin/outreach',headers=AUTH).json()
+        assert len(state['links'])==1 and len(state['tags'])==3 and len(state['counts'])==1
+        tags={k:v[0] for k,v in parse_qs(urlsplit(urls[0]).query).items()}
+        assert client.get('/api/personalization',params=tags).json()['key']=='default'
+        assert client.post('/api/visit-events',json={'name':'pageview','url':'/?'+urlsplit(urls[0]).query,'utm':tags}).status_code==204
+        assert len(client.get('/api/admin/outreach',headers=AUTH).json()['counts'])==1
+        assert client.get('/api/admin/config',headers=AUTH).json()==before
+        assert client.delete('/api/admin/links/'+selected['id'],headers=AUTH).status_code==404
+
+
+def test_clear_old_links_includes_legacy_but_preserves_newer_links(tmp_path,monkeypatch):
+    module,_=admin_app(tmp_path,monkeypatch)
+    import sqlite3,time
+    from harness.outreach import database_path
+    with TestClient(module.app,base_url='https://testserver') as client:
+        old=client.post('/api/admin/links',headers=AUTH,json={'source':'warm'}).json()['url']
+        oldtoken=parse_qs(urlsplit(old).query)['utm_source'][0]
+        with sqlite3.connect(database_path()) as db:
+            db.execute('DELETE FROM outreach_links')  # Reproduce pre-portal legacy tags.
+        cutoff=time.time()
+        newer=client.post('/api/admin/links',headers=AUTH,json={'source':'cold'}).json()['url']
+        assert client.delete('/api/admin/links').status_code==401
+        result=client.delete('/api/admin/links',headers=AUTH,params={'before':cutoff}).json()
+        assert result['tags_deleted']==1 and result['links_deleted']==0
+        state=client.get('/api/admin/outreach',headers=AUTH).json()
+        assert len(state['links'])==1 and len(state['tags'])==1 and oldtoken not in str(state)
+        newtags={k:v[0] for k,v in parse_qs(urlsplit(newer).query).items()}
+        assert client.get('/api/personalization',params=newtags).json()['key']=='source:cold'
+        token=newtags['utm_source']
+        result=client.delete('/api/admin/tags/'+token,headers=AUTH).json()
+        assert result['tags_deleted']==1 and result['links_deleted']==1
+        assert client.get('/api/admin/outreach',headers=AUTH).json()=={'links':[],'tags':[],'counts':[]}
+        assert client.delete('/api/admin/tags/'+token,headers=AUTH).status_code==404
+        assert client.delete('/api/admin/links',headers=AUTH).json()=={'links_deleted':0,'tags_deleted':0,'count_rows_deleted':0}
