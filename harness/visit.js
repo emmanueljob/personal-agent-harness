@@ -17,8 +17,23 @@
   try { ids = await fetch('/api/visit-config').then(r=>r.json()); } catch {}
   const trackingAllowed = ids.enabled && navigator.doNotTrack !== '1' && !navigator.globalPrivacyControl;
   let session = '';
+  let lastActivity = 0;
+  const analyticsSession = () => {
+    const now = Date.now();
+    try {
+      session = sessionStorage.getItem('portfolio-analytics-session') || '';
+      lastActivity = Number(sessionStorage.getItem('portfolio-analytics-last')) || 0;
+    } catch {}
+    if (!/^[a-f0-9]{12}7[a-f0-9]{19}$/.test(session) || now-lastActivity >= 30*60*1000 || now-parseInt(session.slice(0,12),16) >= 24*60*60*1000) {
+      const random = crypto.randomUUID().replaceAll('-','');
+      session = now.toString(16).padStart(12,'0')+'7'+random.slice(13,16)+'8'+random.slice(17);
+    }
+    lastActivity = now;
+    try {sessionStorage.setItem('portfolio-analytics-session',session);sessionStorage.setItem('portfolio-analytics-last',String(now))} catch {}
+    return session;
+  };
   if (trackingAllowed) {
-    try {session = sessionStorage.getItem('portfolio-analytics-session') || crypto.randomUUID().replaceAll('-','');sessionStorage.setItem('portfolio-analytics-session',session)} catch {}
+    analyticsSession();
   }
   const track = (name, target='') => {
     if (!trackingAllowed) return;
@@ -26,7 +41,7 @@
     for (const [key,value] of Object.entries(utm)) if (!url.searchParams.has(key)) url.searchParams.set(key,value);
     // Do not send conversation text, result tokens or arbitrary query parameters.
     for (const key of [...url.searchParams.keys()]) if (outreachCode || !keys.includes(key)) url.searchParams.delete(key);
-    const payload = JSON.stringify({name,target,outreach_code:outreachCode,session_id:session,theme:document.documentElement.dataset.theme==='light'?'light':'dark',url:url.pathname+url.search+url.hash,profile_key:profile.key,utm,referrer:document.referrer});
+    const payload = JSON.stringify({name,target,outreach_code:outreachCode,session_id:analyticsSession(),theme:document.documentElement.dataset.theme==='light'?'light':'dark',url:url.pathname+url.search+url.hash,profile_key:profile.key,utm,referrer:document.referrer});
     fetch('/api/visit-events',{method:'POST',headers:{'Content-Type':'application/json'},body:payload,keepalive:true}).catch(()=>{});
   };
   window.portfolioTrack = track;

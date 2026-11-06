@@ -32,7 +32,14 @@ on the web process (Fly secrets/config in production; private environment locall
 No frontend rebuild is needed. Events use the region's fixed HTTPS ingestion
 endpoint. Server-side delivery disables GeoIP enrichment and person profiles.
 PostHog receives the explicit event name, hashed tab session ID, section enum,
-contact target enum and light/dark theme. Delivery times out after three seconds
+contact target enum and light/dark theme. Local `pageview` events are exported as
+standard `$pageview` events so Web Analytics can count them. Safe page metadata
+includes only the configured public origin, allowlisted static paths and known
+section hashes; custom-link slugs, query strings and unknown paths are discarded.
+UUIDv7 tab sessions rotate after 30 minutes idle or 24 hours total. Their random
+bits are hashed before export as `$session_id`; visitors are session-scoped, not
+unique people across visits. Historical custom `pageview` events are not rewritten.
+Delivery times out after three seconds
 and is not retried; local metrics remain available during PostHog outages. Invalid
 regions disable external delivery. Leaving the token blank disables PostHog.
 Existing optional analytics providers keep their own configured behavior.
