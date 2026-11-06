@@ -29,7 +29,7 @@ def fixture(tmp_path,monkeypatch):
 
 def test_recommendations_list_notes_without_topic_overlap_and_keep_provenance(tmp_path,monkeypatch):
     store,_,episode,_=fixture(tmp_path,monkeypatch)
-    data=search_media(store.brain,'give some good podcast recommendations from eman',kind='podcast',notes_only=True)
+    data=search_media(store.brain,'give some good podcast recommendations from owner',kind='podcast',notes_only=True)
     assert data['total']==1
     row=data['results'][0]
     assert row['id']==episode['id'] and row['experience']=='listened'
@@ -107,7 +107,7 @@ def test_new_recommendation_turn_snapshots_published_notes_and_retry_keeps_snaps
     monkeypatch.setenv('MODEL_PROVIDER','ollama')
     monkeypatch.setenv('OLLAMA_CONTEXT','32768')
     monkeypatch.setenv('WEB_SEARCH_PROVIDER','disabled')
-    ident=store.enqueue(store.thread('public')['id'],'give some good podcast recommendations from eman')
+    ident=store.enqueue(store.thread('public')['id'],'give some good podcast recommendations from owner')
     turn=store.query('SELECT * FROM turns WHERE id=?',(ident,))[0]
     mode,snapshot=prepare_turn(store,turn)
     assert mode=='public'

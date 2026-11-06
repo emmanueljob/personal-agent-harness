@@ -26,7 +26,7 @@ Create an OAuth client with application type **Web application**, with this
 authorized redirect URI:
 
 ```
-https://eman.hisemailaddress.org/admin-auth/callback
+https://portfolio.example.org/admin-auth/callback
 ```
 
 Configure these values privately on the server, never in Git or a chat message:
@@ -62,13 +62,13 @@ complete OAuth and verify an authenticated `get_site_configuration` call.
 For a Codex installation supporting CLI-managed MCP servers, the equivalent is:
 
 ```sh
-codex mcp add portfolio-admin --url https://eman.hisemailaddress.org/admin-mcp
+codex mcp add portfolio-admin --url https://portfolio.example.org/admin-mcp
 codex mcp login portfolio-admin
 ```
 
 Other clients should use Streamable HTTP at `/admin-mcp`, discover OAuth via the
 401 challenge, register a public client (`token_endpoint_auth_method=none`) and
-use S256 PKCE with resource `https://eman.hisemailaddress.org/admin-mcp` and scope
+use S256 PKCE with resource `https://portfolio.example.org/admin-mcp` and scope
 `portfolio:admin`. Redirect URIs must be HTTPS or loopback HTTP for native clients.
 No static owner/API credential should be entered into a plugin manifest.
 

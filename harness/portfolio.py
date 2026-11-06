@@ -8,6 +8,17 @@ class Suggestion(BaseModel):
 
 
 class Project(BaseModel):
+    url: str = ""
+
+    @field_validator("url")
+    @classmethod
+    def safe_url(cls, value):
+        from urllib.parse import urlsplit
+        parsed = urlsplit(value)
+        if value and (parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password):
+            raise ValueError("Project links must use HTTPS without credentials")
+        return value
+
     id: str
     eyebrow: str
     title: str

@@ -53,7 +53,7 @@ def record_ui(store, event):
     # contain names, so report them as the home page, never as raw URLs.
     path = urlsplit(event.url).path
     path = path if path in {'/', '/agents', '/agents.md', '/llms.txt'} else '/'
-    origin = os.getenv('PUBLIC_ORIGIN', 'https://eman.hisemailaddress.org').rstrip('/')
+    origin = os.getenv('PUBLIC_ORIGIN', '').rstrip('/')
     properties.update({'$current_url': origin+path+('#'+section if section != 'conversation' else ''),
                        '$host': urlsplit(origin).netloc, '$pathname': path})
     if event.session_id and event.session_id[12] == '7':

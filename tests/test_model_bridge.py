@@ -64,14 +64,14 @@ def test_model_job_roundtrip_claim_isolation_and_cleanup(bridge):
 
 def test_canonical_redirect_preserves_path_and_cannot_be_host_injected(monkeypatch):
     monkeypatch.setenv('REDIRECT_HOSTS','example.org')
-    monkeypatch.setenv('PUBLIC_ORIGIN','https://eman.example.org')
+    monkeypatch.setenv('PUBLIC_ORIGIN','https://taylor.example.org')
     monkeypatch.setenv('PUBLIC_ONLY','false')
     app=FastAPI();app.add_middleware(PublicAccess)
     @app.get('/healthz')
     def health():return {'status':'ok'}
     with TestClient(app,base_url='https://example.org',follow_redirects=False) as c:
         r=c.get('/books?q=one')
-        assert r.status_code==308 and r.headers['location']=='https://eman.example.org/books?q=one'
+        assert r.status_code==308 and r.headers['location']=='https://taylor.example.org/books?q=one'
         assert c.post('/books').status_code==421
         assert c.get('/healthz',headers={'Host':'evil.example'}).status_code==200
 

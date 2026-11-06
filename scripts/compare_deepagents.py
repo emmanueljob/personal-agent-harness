@@ -26,7 +26,7 @@ from langchain_core.messages import AIMessage
 from temporalio.client import Client
 
 CASES={
- 'knowledge':('public','In at most 90 words, explain how Eman likes to lead engineers. Use approved knowledge and cite the relevant notes. Do not invent examples.'),
+ 'knowledge':('public','In at most 90 words, explain how the owner likes to lead engineers. Use approved knowledge and cite the relevant notes. Do not invent examples.'),
  'bookshelf':('public','Use browse_bookshelf to show No Rules Rules on the bookshelf. Use the actual published book record, then confirm briefly.'),
  'webpage':('public','Call read_webpage for https://agilemanifesto.org/principles.html and summarize two principles in your own words. Cite the actual webpage. Keep it under 90 words.'),
  'artifact':('private','Call save_artifact to save a Markdown document titled Comparison demo containing four short steps to test a product idea in two days. Use synthetic examples. Then confirm briefly.'),

@@ -15,7 +15,7 @@ from .learning import Learning
 from .podcast_artwork import image_url
 
 Kind = Literal['all', 'book', 'podcast']
-GENERIC = set('a an the and of for from me my your his her their eman emmanuel owner does is are has have can could should us it them want wants give some good best favorite favourite recommend recommends recommendation recommendations suggest suggestions book books podcast podcasts episode episodes listen listening read reading please about show shows what which would you he like likes to i'.split())
+GENERIC = set('a an the and of for from me my your his her their owner does is are has have can could should us it them want wants give some good best favorite favourite recommend recommends recommendation recommendations suggest suggestions book books podcast podcasts episode episodes listen listening read reading please about show shows what which would you he like likes to i'.split())
 POLICY = ('Recommend useful matches from the owner notes, explaining the specific idea or reaction. '
           'An owner note can support your recommendation without being an explicit endorsement of the entire source. '
           'Read negative or mixed notes honestly. Only claim a personal favorite or explicit recommendation when the note says so. '
@@ -94,7 +94,9 @@ def search_media(brain, query='', kind: Kind='all', notes_only=False, show='', l
         raise ValueError('Use a short query, valid media kind and bounded pagination.')
     rows = catalog(brain, mode)
     shows = sorted({r['author'] for r in rows if r['kind']=='podcast'})
-    terms = set(re.findall(r'\w+', query.lower()))-GENERIC
+    identity = brain.public_portfolio()
+    names = ' '.join(str(identity.get(key, '')) for key in ('name', 'shortName', 'surname'))
+    terms = set(re.findall(r'\w+', query.lower()))-GENERIC-set(re.findall(r'\w+', names.lower()))
     ranked = []
     for row in rows:
         if (kind!='all' and row['kind']!=kind) or (notes_only and not row['has_owner_note']) or (show and row['author']!=show):
