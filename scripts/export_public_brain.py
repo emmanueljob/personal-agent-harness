@@ -37,6 +37,13 @@ def export_public(brain_root, destination):
         entries['brain/public/'+relative.as_posix()] = body
     for name in ('profile.md', 'voice.md', 'portfolio.json', 'bookshelf.json'):
         add(Path(name), required=True)
+    # Only an explicitly published, bounded PDF belongs in a public export.
+    if (root/'resume.pdf').exists() or (root/'resume.pdf').is_symlink():
+        from harness.brain import FileBrain
+        from harness.resume import published_resume
+        if published_resume(FileBrain(Path(brain_root))) is None:
+            raise ValueError('Published resume must be a regular, bounded PDF.')
+        add(Path('resume.pdf'))
     add(Path('perspectives.json'))
     add(Path('learning.json'))
     add(Path('podcast-artwork.json'))
