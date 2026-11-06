@@ -1,5 +1,6 @@
 import json
 import time
+import uuid
 
 import httpx
 from fastapi.testclient import TestClient
@@ -96,9 +97,34 @@ def test_metrics_and_content_free_posthog_relay(tmp_path, monkeypatch):
         exported = json.dumps(sent)+json.dumps(store.query('SELECT * FROM ui_events'))
         for secret in ('SECRET','secret-name','secret.example','private-company','a'*32):assert secret not in exported
         assert sent[0][1]['properties']['$geoip_disable'] is True
+        assert sent[0][1]['event'] == '$pageview'
+        assert sent[0][1]['properties']['$pathname'] == '/'
+        assert sent[0][1]['properties']['$current_url'].endswith('/#bookshelf')
         monkeypatch.delenv('POSTHOG_PROJECT_TOKEN')
         assert client.post('/api/visit-events',json=payload).status_code == 204 and len(sent) == 2
         assert client.get('/api/owner/observability',headers=AUTH).json()['events'][0]['count'] == 3
+
+
+def test_posthog_safe_pages_and_hashed_v7_session(tmp_path, monkeypatch):
+    from harness.observability import record_ui, initialize
+    from harness.visits import VisitEvent
+    module, store = setup(tmp_path, monkeypatch)
+    initialize(store)
+    monkeypatch.setenv('PUBLIC_ORIGIN', 'https://portfolio.example')
+    session = '019a548012347abc8def0123456789ab'
+    events = [record_ui(store, VisitEvent(name=name, url=url, session_id=session))
+              for name, url in [('pageview','/hi/private-person?utm_content=secret#work'),
+                                ('cta_click','/agents?token=secret#arbitrary-secret')]]
+    properties = [e['properties'] for e in events]
+    assert events[0]['event'] == '$pageview' and events[1]['event'] == 'cta_click'
+    assert properties[0]['$current_url'] == 'https://portfolio.example/#work'
+    assert properties[1]['$current_url'] == 'https://portfolio.example/agents'
+    assert properties[0]['$session_id'] == properties[1]['$session_id']
+    ident = uuid.UUID(properties[0]['$session_id'])
+    assert ident.version == 7 and ident.hex[:12] == session[:12]
+    assert ident.hex != session
+    assert events[0]['distinct_id'] == events[1]['distinct_id']
+    assert not any(s in json.dumps(events) for s in ('private-person','secret',session))
 
 
 def test_metrics_retention_and_upstream_failure_do_not_break_chat(tmp_path, monkeypatch):

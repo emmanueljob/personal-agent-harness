@@ -1,7 +1,7 @@
 """Private conversation inspection and content-free UI analytics.
 
 Uses the application's persistent volume, never the source tree. The analytics
-relay deliberately cannot export prompts, tool payloads, URLs, or owner panel contents.
+relay deliberately cannot export prompts, tool payloads, arbitrary URLs, or owner panel contents.
 """
 import hashlib
 import json
@@ -46,9 +46,23 @@ def record_ui(store, event):
                    (time.time(), session, *row.values()))
         db.execute('DELETE FROM ui_events WHERE created < ?', (time.time()-30*86400,))
         db.execute('DELETE FROM ui_events WHERE id < (SELECT id FROM ui_events ORDER BY id DESC LIMIT 1 OFFSET 49999)')
-    return {'event': event.name, 'distinct_id': session or str(uuid.uuid4()), 'properties': {
+    properties = {
             '$process_person_profile': False, '$geoip_disable': True,
-            'section': section, 'target': event.target, 'theme': event.theme}}
+            'section': section, 'target': event.target, 'theme': event.theme}
+    # Allow only public static routes. Outreach slugs and arbitrary paths can
+    # contain names, so report them as the home page, never as raw URLs.
+    path = urlsplit(event.url).path
+    path = path if path in {'/', '/agents', '/agents.md', '/llms.txt'} else '/'
+    origin = os.getenv('PUBLIC_ORIGIN', 'https://eman.hisemailaddress.org').rstrip('/')
+    properties.update({'$current_url': origin+path+('#'+section if section != 'conversation' else ''),
+                       '$host': urlsplit(origin).netloc, '$pathname': path})
+    if event.session_id and event.session_id[12] == '7':
+        # Preserve the UUIDv7 time prefix, hash its random bits. No raw browser
+        # identifier or conversation cookie is exported.
+        value = event.session_id[:12]+'7'+session[13:16]+'8'+session[17:32]
+        properties['$session_id'] = str(uuid.UUID(hex=value))
+    return {'event': '$pageview' if event.name == 'pageview' else event.name,
+            'distinct_id': session or str(uuid.uuid4()), 'properties': properties}
 
 
 async def deliver_posthog(payload):
