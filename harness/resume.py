@@ -6,7 +6,7 @@ def valid_pdf(body):
     return len(body) <= MAX_BYTES and body.startswith(b'%PDF-') and b'%%EOF' in body[-4096:]
 
 
-def published_resume(brain):
+def _resume_bytes(brain):
     try:
         scope = brain.scope('public')
         path = scope / 'resume.pdf'
@@ -24,5 +24,26 @@ def published_resume(brain):
 
 
 def resume_info(brain):
-    body = published_resume(brain)
-    return {'available': body is not None, 'url': '/resume.pdf' if body is not None else '', 'type': 'application/pdf'}
+    from .resume_data import load_resume_data
+    import hashlib
+    try:
+        data=load_resume_data(brain)
+    except (OSError,ValueError):
+        return {'available':False,'url':'','type':'','html_url':'','pdf_url':''}
+    body=_resume_bytes(brain)
+    enabled=data is None or data.enabled
+    pdf=enabled and (data is None or data.formats.pdf) and body is not None
+    html=bool(enabled and data is not None and data.formats.html)
+    # A new PDF must not silently leave an HTML version derived from an older file.
+    if html and data.source_pdf_sha256:
+        html=body is not None and hashlib.sha256(body).hexdigest()==data.source_pdf_sha256
+    html_url='/resume' if html else ''
+    pdf_url='/resume.pdf' if pdf else ''
+    preferred=html_url if data is not None and data.preferred_format=='html' else pdf_url
+    url=preferred or html_url or pdf_url
+    return {'available':bool(url),'url':url,'type':'text/html' if url=='/resume' else 'application/pdf' if url else '',
+            'html_url':html_url,'pdf_url':pdf_url}
+
+
+def published_resume(brain):
+    return _resume_bytes(brain) if resume_info(brain)['pdf_url'] else None
