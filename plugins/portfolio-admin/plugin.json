@@ -1,0 +1,15 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "portfolio-admin",
+  "version": "0.1.0",
+  "description": "Owner-only portfolio administration: configuration, outreach, conversation diagnostics and reviewed learning notes.",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Portfolio Admin",
+        "shortDescription": "Manage my portfolio and digital twin",
+        "capabilities": ["Read", "Write"]
+      }
+    }
+  }
+}

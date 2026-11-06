@@ -1,0 +1,11 @@
+{
+  "name": "portfolio-owner-tools",
+  "interface": {"displayName": "Portfolio Owner Tools"},
+  "plugins": [
+    {
+      "name": "portfolio-admin",
+      "source": {"source": "local", "path": "./plugins/portfolio-admin"},
+      "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"}
+    }
+  ]
+}
