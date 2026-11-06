@@ -37,11 +37,11 @@ DSP_METRICS_DRAFT = '$150M DSP org, +30% revenue'
 DEFAULT = Profile(key='default')
 RIVIERA = Profile(
     key='source:riviera', headline='Engineering leader for AI product companies',
-    pitch='I build product and app engineering teams that ship. At Mojo (trymojo.ai), I built the 16-person team and launched in September 2026. Open to remote EM-to-VP and senior IC roles; approximately $375K base target.',
+    pitch='I build product and app engineering teams that ship. At Mojo (trymojo.ai), I built the 16-person team and launched in September 2026. Open to remote EM-to-VP and senior IC roles.',
     featured=['mojo', 'factory', 'ads', 'data'],
-    questions=['Why him for my role?', 'How did he build the Mojo team and launch the product?', 'What roles and compensation is he targeting?'],
-    system_note='Visitor is a recruiter from Riviera. Emphasize product/app engineering, Mojo, remote EM-to-VP and senior IC roles, and approximately $375K base target.',
-    cta='Book 15 min', banner='Open to remote EM-to-VP and senior IC roles · ~$375K base target',
+    questions=['Why him for my role?', 'How did he build the Mojo team and launch the product?', 'What kinds of roles would be a good fit?'],
+    system_note='Visitor is a recruiter from Riviera. Emphasize product/app engineering, Mojo, remote EM-to-VP and senior IC roles.',
+    cta='Book 15 min', banner='Open to remote EM-to-VP and senior IC roles',
 )
 SOURCES = {'riviera': RIVIERA, **{
     label: RIVIERA.model_copy(update={'key':'source:'+label, 'system_note':f'Visitor arrived via {label} outreach. Emphasize product/app engineering and relevant published career experience.'})
@@ -120,6 +120,7 @@ def guide_context(key):
         + p.system_note + '\nSuggested questions: ' + ' | '.join(p.questions)
         + '\nOwner site guidance: ' + (settings().guide_instructions or DEFAULT_GUIDANCE)
         + '\nCurrent owner-approved presentation overrides: '+json.dumps(read('portfolio') or {})
+        + '\nCompensation preferences: do not volunteer salary, pay targets or compensation preferences, including in general hiring or role-fit answers. Only discuss them when the visitor explicitly asks about compensation; consult approved knowledge for the recorded preference. Never invent an amount or treat a target as a firm minimum.'
         + '\nWhen discussing hiring or fit, end with '+f'[{p.cta}]({c["booking"] or c["email"]}).')
 
 

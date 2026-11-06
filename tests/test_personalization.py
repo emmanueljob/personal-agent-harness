@@ -51,7 +51,7 @@ def test_seed_rendering(tmp_path, monkeypatch, params, key):
             assert p['company'] and len(p['first90']) == 3
         if key.startswith('content:'):
             assert 'Hi '+key.split(':')[1].title() in p['headline']
-            assert '$375K' in p['pitch'] and p['cta'] == 'Book 15 min'
+            assert p['cta'] == 'Book 15 min'
 
 
 def test_session_and_safe_notes(tmp_path, monkeypatch):
@@ -240,3 +240,26 @@ def test_clean_link_server_render_header_context_and_counts(tmp_path,monkeypatch
         assert client.get(url).status_code==200
         assert client.get('/api/personalization',headers={'X-Outreach-Link':code}).json()['key']=='default'
         assert client.get('/api/personalization',headers={'X-Outreach-Link':'unknown-clean-code','X-Portfolio-Profile':'content:chett'}).json()['key']=='default'
+
+
+@pytest.mark.parametrize('params', [{},{'utm_source':'riviera'},{'utm_source':'warm'},{'utm_source':'cold'},{'utm_content':'amie'},{'utm_content':'chett'}])
+def test_compensation_is_not_promoted_in_landing_copy(tmp_path,monkeypatch,params):
+    module,_=fixture_app(tmp_path,monkeypatch)
+    with TestClient(module.app) as client:
+        response=client.get('/api/personalization',params=params)
+        data=response.json()
+        visible=' '.join([data['banner'],data['pitch'],*data['questions']]).lower()
+        assert not re.search(r'\$\s*\d|salary|compensation|base target',visible)
+        assert 'system_note' not in data
+        key=data['key']
+        guidance=guide_context(key)
+        assert 'do not volunteer salary' in guidance
+        assert 'visitor explicitly asks' in guidance
+
+
+def test_compensation_rule_applies_with_owner_guide_overrides(tmp_path,monkeypatch):
+    from harness import site_config
+    fixture_app(tmp_path,monkeypatch)
+    monkeypatch.setattr(site_config,'settings',lambda:site_config.Settings(guide_instructions='Focus on leadership.'))
+    assert 'Focus on leadership.' in guide_context('default')
+    assert 'do not volunteer salary' in guide_context('default')
