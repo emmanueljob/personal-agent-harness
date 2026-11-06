@@ -101,7 +101,7 @@ class AdminOAuth:
             raise AuthorizeError(error='invalid_scope')
         state = secrets.token_urlsafe(32)
         self.put('pending',state,dict(client_id=client.client_id,client_name=client.client_name or 'MCP client',
-            params=params.model_dump(mode='json'),nonce=secrets.token_urlsafe(32),verifier=secrets.token_urlsafe(48)),time.time()+600)
+            params=params.model_dump(mode='json'),nonce=secrets.token_urlsafe(32),verifier=secrets.token_urlsafe(48),expires_at=time.time()+600),time.time()+600)
         return self.origin+'/admin-auth/consent?'+urlencode({'state':state})
 
     def consent(self, state, cookie=None):
@@ -109,13 +109,22 @@ class AdminOAuth:
         if not pending:
             return None
         if cookie:
-            pending['cookie_hash'] = digest(cookie)
-            self.put('pending',state,pending,time.time()+600)
+            # Opening a handoff in a second browser must not invalidate the first.
+            # Every callback still needs a cookie registered by a consent visit.
+            hashes=pending.get('cookie_hashes', [pending['cookie_hash']] if pending.get('cookie_hash') else [])
+            pending['cookie_hashes']=list(dict.fromkeys([*hashes,digest(cookie)]))[-8:]
+            self.put('pending',state,pending,pending.get('expires_at',time.time()+600))
         return pending
+
+    def browser_matches(self, pending, cookie):
+        if not pending or not cookie:
+            return False
+        hashes=pending.get('cookie_hashes', [pending['cookie_hash']] if pending.get('cookie_hash') else [])
+        return any(secrets.compare_digest(value,digest(cookie)) for value in hashes)
 
     def google_url(self, state, cookie):
         pending = self.get('pending',state)
-        if not pending or not cookie or not secrets.compare_digest(pending.get('cookie_hash',''),digest(cookie)):
+        if not self.browser_matches(pending,cookie):
             raise ValueError('Sign-in session expired. Start again from your MCP client.')
         return 'https://accounts.google.com/o/oauth2/v2/auth?'+urlencode({
             'client_id':os.environ['ADMIN_GOOGLE_CLIENT_ID'], 'redirect_uri':self.origin+'/admin-auth/callback',
@@ -136,7 +145,7 @@ class AdminOAuth:
 
     async def finish_google(self, state, code, cookie):
         pending = self.get('pending',state)
-        if not pending or not cookie or not secrets.compare_digest(pending.get('cookie_hash',''),digest(cookie)):
+        if not self.browser_matches(pending,cookie):
             raise ValueError('Sign-in session expired. Start again from your MCP client.')
         # Consume before network I/O so concurrent callbacks cannot reuse a flow.
         pending = self.get('pending',state,consume=True)

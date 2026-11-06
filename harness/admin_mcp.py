@@ -186,28 +186,28 @@ def mount_admin_mcp(app, get_store):
         return JSONResponse({},headers=headers)
 
     @app.get('/admin-auth/consent',include_in_schema=False)
-    def consent(state:str):
+    def consent(request:Request,state:str):
         pending = oauth.consent(state) if oauth.enabled else None
         if not pending:
             return JSONResponse({'detail':'Sign-in session expired.'},status_code=400)
-        cookie = secrets.token_urlsafe(32)
+        cookie = request.cookies.get('portfolio_admin_oauth') or secrets.token_urlsafe(32)
         oauth.consent(state,cookie)
         body = ('<!doctype html><title>Portfolio admin access</title><h1>Connect a client to your portfolio admin</h1>'
                 '<p>Client: '+html.escape(pending['client_name'])+'</p><p>Return address: '+html.escape(pending['params']['redirect_uri'])+'</p>'
                 '<p>This grants access to private conversation logs, settings, outreach links and learning notes. Continue only if you started this connection.</p>'
-                '<form method="post" action="/admin-auth/google"><input type="hidden" name="state" value="'+html.escape(state,quote=True)+'">'
-                '<button>Continue with Google</button></form>')
+                '<p><a href="/admin-auth/google?state='+html.escape(state,quote=True)+'">Continue with Google</a></p>')
         response = HTMLResponse(body,headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer',
             'Content-Security-Policy':"default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"})
         response.set_cookie('portfolio_admin_oauth',cookie,secure=True,httponly=True,samesite='lax',max_age=600,path='/admin-auth')
         return response
 
+    @app.get('/admin-auth/google',include_in_schema=False)
     @app.post('/admin-auth/google',include_in_schema=False)
     async def google(request:Request):
         if not oauth.enabled:
             return JSONResponse({'detail':'Admin sign-in is not configured.'},status_code=404)
         try:
-            state = str((await request.form()).get('state',''))
+            state = request.query_params.get('state','') if request.method=='GET' else str((await request.form()).get('state',''))
             target = oauth.google_url(state,request.cookies.get('portfolio_admin_oauth'))
         except ValueError:
             return JSONResponse({'detail':'Sign-in session expired. Start again.'},status_code=400)
