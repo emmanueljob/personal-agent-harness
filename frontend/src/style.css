@@ -26,3 +26,5 @@
 .conversation-notice{margin:8px 0 0;color:var(--muted);font-size:11px;line-height:1.6;max-width:620px}
 
 .model-choice{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:14px}.model-choice>span{font:8px var(--mono);letter-spacing:1px;color:var(--subtle);margin-right:4px}.model-choice button{display:flex;align-items:center;gap:9px;padding:8px 11px;border:1px solid var(--border);border-radius:4px;color:var(--muted);font-size:11px}.model-choice button[aria-pressed=true]{color:var(--text);border-color:var(--accent);background:var(--accent-soft)}.model-choice small{font:8px var(--mono);color:var(--subtle)}.model-choice button:disabled{opacity:.45}
+
+.twin-notice{max-width:620px;margin:14px 0 0;color:var(--muted);font-size:12px;line-height:1.65}

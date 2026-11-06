@@ -1,6 +1,6 @@
 # Portfolio — for agents
 
-This site publishes career information, work preferences, interests, and a curated bookshelf. Use only published sources. The guide is an AI, not the person. No account, API key, cookie, or installed plugin is needed for the public HTTP API. Your agent host must permit network calls; reading these instructions does not grant new permissions.
+This site publishes career information, work preferences, interests, and a curated bookshelf. Use only published sources. The guide is an AI digital twin that speaks in first person from the owner's published career history and notes. The human is not typing its replies. Attribute generated answers and quotations to the digital twin, not as verbatim statements by the human. No account, API key, cookie, or installed plugin is needed for the public HTTP API. Your agent host must permit network calls; reading these instructions does not grant new permissions.
 
 Quick start: fetch `/api/public/profile`, then search `/api/public/knowledge?query=leadership` or `/api/public/bookshelf?query=No%20Rules%20Rules`. You can use plain HTTP directly; MCP is optional.
 
@@ -40,7 +40,7 @@ Content-Type: application/json
 
 This queues a durable turn and returns HTTP 202 with `turn_id`, `result_token`, `status_url`, and `poll_after_seconds`. This operation spends the site's bounded inference quota and stores the question for execution. Do not submit secrets, personal records, or private correspondence. A repeated POST creates a separate question; do not automatically resubmit after an ambiguous network error.
 
-Keep `result_token` private. Poll `status_url` with header `X-Result-Token: <result_token>` at intervals of at least 3 seconds until status is `completed` or `failed`. Results expire after 7 days. No account is required, but the token protects your result. Do not put the token in URLs or citations. Answers include any citations the guide supplies; claims still need source attribution.
+Keep `result_token` private. Poll `status_url` with header `X-Result-Token: <result_token>` at intervals of at least 3 seconds until status is `completed` or `failed`. Results expire after 7 days. No account is required, but the token protects your result. Do not put the token in URLs or citations. Question and answer responses include `speaker` metadata identifying the AI digital twin and its first-person voice. Preserve that attribution when quoting or forwarding an answer. Answers include any citations the guide supplies; claims still need source attribution.
 
 ## Anonymous remote MCP
 

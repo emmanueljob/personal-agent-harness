@@ -16,7 +16,7 @@ from .store import Store
 from .runner import local_worker
 from .durable import temporal_dispatcher
 from .models import settings
-from .public_access import PublicAccess, public_only, admit_turn, consume
+from .public_access import PublicAccess, public_only, admit_turn
 from .portfolio import Portfolio
 from .personalization import resolve, public_profile, position_portfolio
 from .bookshelf import Shelf, ImportInput, Selection, BookEdit
@@ -209,8 +209,6 @@ def create_thread(body: ThreadInput, request: Request, authorization: str = Head
         raise HTTPException(422, "Choose public or private")
     if body.mode == "private":
         owner(authorization)
-    if public_only():
-        consume(store, [('day:threads:'+request.state.visitor_hash, 86400, 10)])
     thread = store.thread(body.mode)
     if public_only():
         with store.connect() as db:
