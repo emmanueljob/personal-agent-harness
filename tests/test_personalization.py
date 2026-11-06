@@ -10,6 +10,19 @@ from scripts.build_campaign_link import build_link
 from test_agent_surfaces import fixture_app
 
 
+def code_from_url(url):
+    from harness.outreach import link_id
+    path=urlsplit(url).path
+    return link_id(path.rsplit('/',1)[-1]) if path.startswith('/hi/') else path.rsplit('/',1)[-1]
+
+
+def tags_from_url(url):
+    from harness.outreach import link_tags
+    return link_tags(code_from_url(url)) if urlsplit(url).path.startswith(('/hi/','/r/')) else {key:value[0] for key,value in parse_qs(urlsplit(url).query).items()}
+
+
+
+
 @pytest.mark.parametrize('params,key', [
     ({}, 'default'),
     ({'utm_source':'riviera'}, 'source:riviera'),
@@ -129,11 +142,11 @@ def test_events_private_and_optional(tmp_path,monkeypatch):
 def test_link_builder(tmp_path, monkeypatch):
     monkeypatch.setenv('PORTFOLIO_LINKS_DB',str(tmp_path/'outreach.sqlite'))
     url=build_link('https://eman.hisemailaddress.org','chett','hex','cold')
-    tags={key:value[0] for key,value in parse_qs(urlsplit(url).query).items()}
+    tags=tags_from_url(url)
+    assert not urlsplit(url).query and urlsplit(url).path=='/hi/chett'
     assert set(tags) == {'utm_source','utm_campaign','utm_content'}
     assert all(re.fullmatch(r't_[0-9a-f]{32}',value) for value in tags.values())
-    for label in ['chett','hex','cold']:
-        assert label not in url
+    assert 'utm_' not in url
     assert resolve(tags).key == 'content:chett'
     assert resolve({k:v for k,v in tags.items() if k != 'utm_content'}).key == 'campaign:hex'
     assert resolve({'utm_source':tags['utm_source']}).key == 'source:cold'
@@ -150,8 +163,8 @@ def test_link_builder(tmp_path, monkeypatch):
 def test_opaque_unknown_labels_and_missing_registry(tmp_path, monkeypatch):
     monkeypatch.setenv('PORTFOLIO_LINKS_DB',str(tmp_path/'outreach.sqlite'))
     url=build_link('https://example.org','A Private Person','hex','warm')
-    tags={key:value[0] for key,value in parse_qs(urlsplit(url).query).items()}
-    assert 'Private' not in url and 'warm' not in url
+    tags=tags_from_url(url)
+    assert urlsplit(url).path=='/hi/a-private-person' and not urlsplit(url).query
     assert resolve(tags).key == 'campaign:hex'
     from harness.outreach import database_path
     database_path().unlink()
@@ -173,8 +186,8 @@ def test_registered_links_and_pixel_free_visit_counts(tmp_path,monkeypatch):
         response=client.post('/api/outreach-links',headers=headers,json={'person':'chett','company':'hex','source':'cold'})
         assert response.status_code == 200
         url=response.json()['url']
-        assert 'chett' not in url and 'hex' not in url and 'cold' not in url
-        tags={key:value[0] for key,value in parse_qs(urlsplit(url).query).items()}
+        assert urlsplit(url).path=='/hi/chett' and not urlsplit(url).query
+        tags=tags_from_url(url)
         home=client.get(url)
         assert "Hi Chett" in home.text
         assert client.get('/api/personalization',params=tags).json()['key']=='content:chett'
@@ -194,3 +207,36 @@ def test_registered_links_and_pixel_free_visit_counts(tmp_path,monkeypatch):
         # Unregistered/name-bearing tags do not enter the local counts.
         assert client.post('/api/visit-events',json={**event,'utm':{'utm_content':'Private Person'}}).status_code==204
         assert next(row for row in client.get('/api/outreach-stats',headers=headers).json()['counts'] if row['event']=='pageview')['count']==2
+
+
+def test_clean_link_server_render_header_context_and_counts(tmp_path,monkeypatch):
+    module,_=fixture_app(tmp_path,monkeypatch)
+    monkeypatch.setenv('PUBLIC_ORIGIN','https://testserver')
+    monkeypatch.setenv('PORTFOLIO_LINKS_PASSWORD','synthetic-link-admin')
+    headers={'Authorization':'Bearer synthetic-link-admin'}
+    with TestClient(module.app,base_url='https://testserver') as client:
+        url=client.post('/api/outreach-links',headers=headers,json={'person':'chett','company':'hex','source':'cold'}).json()['url']
+        parsed=urlsplit(url);code=code_from_url(url)
+        assert not parsed.query and not parsed.fragment
+        assert parsed.path=='/hi/chett'
+        landing=client.get(url,follow_redirects=False)
+        assert landing.status_code==200 and 'location' not in landing.headers
+        assert "Hi Chett" in landing.text and 'system_note' not in landing.text
+        bootstrap=json.loads(re.search(r'<script id="personalization" type="application/json">(.*?)</script>',landing.text)[1])
+        assert bootstrap['outreach_code']==code and 'utm_source' not in bootstrap
+        saved=client.get('/api/personalization',headers={'X-Outreach-Link':code,'X-Portfolio-Profile':'campaign:every'}).json()
+        assert saved['key']=='content:chett'
+        event={'name':'pageview','url':parsed.path+'#work','outreach_code':code,'profile_key':'default'}
+        assert client.post('/api/visit-events',json=event).status_code==204
+        stats=client.get('/api/outreach-stats',headers=headers).json()
+        assert stats['counts'][0]['count']==1
+        assert stats['counts'][0]['source']==tags_from_url(url)['utm_source']
+        from harness.outreach import set_link_active,delete_links
+        set_link_active(code,False)
+        assert client.get('/api/personalization',headers={'X-Outreach-Link':code,'X-Portfolio-Profile':'content:chett'}).json()['key']=='default'
+        assert client.post('/api/visit-events',json=event).status_code==204
+        assert client.get('/api/outreach-stats',headers=headers).json()['counts'][0]['count']==1
+        delete_links(ident=code)
+        assert client.get(url).status_code==200
+        assert client.get('/api/personalization',headers={'X-Outreach-Link':code}).json()['key']=='default'
+        assert client.get('/api/personalization',headers={'X-Outreach-Link':'unknown-clean-code','X-Portfolio-Profile':'content:chett'}).json()['key']=='default'

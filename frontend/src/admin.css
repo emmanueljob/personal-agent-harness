@@ -5,3 +5,5 @@
 @media(max-width:650px){.admin-top{padding:0 18px;height:70px}.admin-top>div{gap:12px;font-size:12px}.admin-layout{display:block}.admin-sidebar{min-height:0;border-right:0;border-bottom:1px solid var(--admin-line);padding:12px}.admin-sidebar>.admin-eyebrow,.admin-sidebar>p{display:none}.admin-sidebar nav{display:flex;overflow:auto;margin:0;gap:5px}.admin-sidebar nav button{white-space:nowrap}.admin-main{padding:23px 14px}.admin-card{padding:18px}.admin-save{padding:12px}.admin-save span{max-width:180px}.admin-login{padding:20px}.admin-login-card{padding:28px}.admin-login-card h1{font-size:39px}.admin-metrics{grid-template-columns:1fr}.admin-metrics .admin-card{margin:0}.admin-heading{align-items:start}.admin-top .admin-brand{font-size:14px}}
 
 .admin-career{padding:18px 0;border-bottom:1px solid var(--admin-line);margin-bottom:18px}
+
+.admin-shell .admin-danger{color:#8b3431;border-color:#d7b5ae}.admin-shell .admin-danger:hover:not(:disabled){background:#f8e9e4}

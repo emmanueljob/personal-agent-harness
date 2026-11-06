@@ -2,11 +2,17 @@
 (async () => {
   const keys = ['utm_source','utm_medium','utm_campaign','utm_content','utm_term'];
   let profile = {key:'default'};
+  const cleanPath = /^\/(?:r|hi)\//.test(location.pathname);
+  let outreachCode = '';
+  if(cleanPath){try{outreachCode=JSON.parse(document.getElementById('personalization')?.textContent||'null')?.outreach_code||'invalid-clean-link'}catch{outreachCode='invalid-clean-link'}}
+  if(!cleanPath) {try {outreachCode=sessionStorage.getItem('portfolio-outreach-code')||''}catch{}}
   let utm = {};
   try { utm = JSON.parse(sessionStorage.getItem('portfolio-utm') || '{}'); } catch {}
   const params = new URLSearchParams(location.search);
+  if (!cleanPath && keys.some(k=>params.has(k))) outreachCode='';
   if (keys.some(k => params.has(k))) utm = Object.fromEntries(keys.filter(k => params.has(k)).map(k => [k,params.get(k).slice(0,160)]));
-  try { sessionStorage.setItem('portfolio-utm',JSON.stringify(utm)); } catch {}
+  if(outreachCode) utm={};
+  try { sessionStorage.setItem('portfolio-outreach-code',outreachCode);sessionStorage.setItem('portfolio-utm',JSON.stringify(utm)); } catch {}
   let ids = {enabled:false};
   try { ids = await fetch('/api/visit-config').then(r=>r.json()); } catch {}
   const trackingAllowed = ids.enabled && navigator.doNotTrack !== '1' && !navigator.globalPrivacyControl;
@@ -19,8 +25,8 @@
     const url = new URL(location.href);
     for (const [key,value] of Object.entries(utm)) if (!url.searchParams.has(key)) url.searchParams.set(key,value);
     // Do not send conversation text, result tokens or arbitrary query parameters.
-    for (const key of [...url.searchParams.keys()]) if (!keys.includes(key)) url.searchParams.delete(key);
-    const payload = JSON.stringify({name,target,session_id:session,theme:document.documentElement.dataset.theme==='light'?'light':'dark',url:url.pathname+url.search+url.hash,profile_key:profile.key,utm,referrer:document.referrer});
+    for (const key of [...url.searchParams.keys()]) if (outreachCode || !keys.includes(key)) url.searchParams.delete(key);
+    const payload = JSON.stringify({name,target,outreach_code:outreachCode,session_id:session,theme:document.documentElement.dataset.theme==='light'?'light':'dark',url:url.pathname+url.search+url.hash,profile_key:profile.key,utm,referrer:document.referrer});
     fetch('/api/visit-events',{method:'POST',headers:{'Content-Type':'application/json'},body:payload,keepalive:true}).catch(()=>{});
   };
   window.portfolioTrack = track;
@@ -28,7 +34,7 @@
   try {
     let saved = '';
     try { saved = JSON.parse(sessionStorage.getItem('portfolio-profile') || 'null')?.key || ''; } catch {}
-    const r = await fetch('/api/personalization'+location.search,{headers:{'X-Portfolio-Profile':saved}});
+    const r = await fetch('/api/personalization'+location.search,{headers:{'X-Portfolio-Profile':saved,'X-Outreach-Link':outreachCode}});
     if (!r.ok) return;
     profile = await r.json();
     try { sessionStorage.setItem('portfolio-profile',JSON.stringify(profile)); } catch {}
