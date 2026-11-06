@@ -64,7 +64,7 @@ def test_discovery_contracts_public_reads_and_no_private_exposure(tmp_path,monke
         assert spec['paths'] and all(p.startswith('/api/public/') for p in spec['paths'])
         assert '/api/owner' not in c.get('/openapi.json').text
         tools=c.get('/api/public/tools').json()['tools']
-        assert {t['name'] for t in tools}=={'get_profile','search_knowledge','browse_bookshelf','ask_portfolio_agent','get_answer'}
+        assert {t['name'] for t in tools}=={'get_profile','search_knowledge','browse_bookshelf','search_library','ask_portfolio_agent','get_answer'}
         assert 'ctx' not in next(t for t in tools if t['name']=='ask_portfolio_agent')['inputSchema']['properties']
         assert c.get('/api/public/bookshelf?query=PRIVATE').json()['books']==[]
         assert c.get('/api/public/knowledge?query=leadership&limit=99').status_code==422
@@ -107,7 +107,7 @@ def test_mcp_protocol_scope_validation_and_origin_protection(tmp_path,monkeypatc
         initialized=call(c,'initialize',{'protocolVersion':'2025-11-25','capabilities':{},'clientInfo':{'name':'fixture','version':'1'}})
         assert 'tools' in initialized['capabilities']
         tools=call(c,'tools/list',{})['tools']
-        assert len(tools)==5
+        assert len(tools)==6
         result=call(c,'tools/call',{'name':'search_knowledge','arguments':{'query':'leadership'}})
         assert not result.get('isError') and 'autonomy' in json.dumps(result)
         assert 'PRIVATE' not in json.dumps(result)

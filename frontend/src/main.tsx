@@ -1,3 +1,4 @@
+import Podcasts from './podcasts';
 import {ObservabilityStudio} from './observability';
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
@@ -12,7 +13,7 @@ import {LearningStudio,type FeedbackSeed} from './learning';
 import {registerPortfolioTools} from './webmcp';
 
 type Mode='public'|'private';
-const sections=[['conversation','Conversation'],['work','The work'],['person','The person'],['bookshelf','The bookshelf'],['behind-the-curtain','The machinery']] as const;
+const sections=[['conversation','Conversation'],['work','The work'],['person','The person'],['bookshelf','The bookshelf'],['podcasts','Podcasts'],['behind-the-curtain','The machinery']] as const;
 type Section=typeof sections[number][0];
 const sectionFromHash=():Section=>sections.find(([id])=>'#'+id===location.hash)?.[0]||'conversation';
 type Turn={id:string;prompt:string;status:string;result:string|null;error:string|null;created:number};
@@ -36,7 +37,7 @@ function ToolTrace({turnId,events,runs}:{turnId:string;events:Event[];runs:ToolR
  const steps=events.filter(e=>e.turn_id===turnId&&(e.kind.startsWith('tool')||e.kind.startsWith('knowledge')));
  const calls=runs.filter(r=>r.turn_id===turnId);const sources=Array.from(new Map(calls.flatMap(c=>c.sources).map(s=>[s.url,s])).values());
  if(!steps.length&&!calls.length)return null;
- return <details className="tool-trace"><summary>Tools & sources <span>{calls.length?calls.map(c=>c.name==='search_web'?'Web search':c.name==='browse_bookshelf'?'Bookshelf':'Page reader').filter((v,i,a)=>a.indexOf(v)===i).join(' · '):'Knowledge search'}</span></summary><ol>{steps.map(e=><li key={e.id}>{e.label}</li>)}</ol>{sources.length>0&&<div className="research-sources">{sources.map(s=><a key={s.url} href={s.url} target="_blank" rel="noreferrer">{s.title||new URL(s.url).hostname}<span>↗</span></a>)}</div>}</details>
+ return <details className="tool-trace"><summary>Tools & sources <span>{calls.length?calls.map(c=>c.name==='search_web'?'Web search':c.name==='browse_bookshelf'?'Bookshelf':c.name==='search_library'?'Library & notes':'Page reader').filter((v,i,a)=>a.indexOf(v)===i).join(' · '):'Knowledge search'}</span></summary><ol>{steps.map(e=><li key={e.id}>{e.label}</li>)}</ol>{sources.length>0&&<div className="research-sources">{sources.map(s=><a key={s.url} href={s.url} target="_blank" rel="noreferrer">{s.title||new URL(s.url).hostname}<span>↗</span></a>)}</div>}</details>
 }
 
 function App(){
@@ -129,7 +130,7 @@ function App(){
  const download=(a:Artifact)=>{const url=URL.createObjectURL(new Blob([a.body],{type:'text/markdown'}));const link=document.createElement('a');link.href=url;link.download=a.title.replace(/[^\p{L}\p{N} _-]/gu,'').slice(0,80)+'.md';link.click();URL.revokeObjectURL(url)};
  return <MotionConfig reducedMotion="user"><div className="afterhours-app" data-theme={theme}>
  <header className="topbar"><a className="identity" href="#conversation" onClick={e=>{e.preventDefault();navigate('conversation')}} aria-label={portfolio.name+'’s AI portfolio'}><span className="identity-orb"/><span>{portfolio.name} <span className="identity-divider">/</span> <span className="identity-edition">portfolio</span></span></a><nav aria-label="Portfolio navigation"><div className="section-tabs" role="tablist" aria-label="Portfolio sections">{sections.map(([id,label],i)=><button key={id} id={'tab-'+id} role="tab" aria-selected={activeTab===id} aria-controls={'panel-'+id} tabIndex={activeTab===id?0:-1} onClick={()=>navigate(id)} onKeyDown={e=>tabKey(e,i)}>{label}</button>)}</div><button className="theme-toggle" onClick={()=>{setTheme(theme==='dark'?'light':'dark');requestAnimationFrame(()=>trackUI('theme_changed'))}} aria-label={theme==='dark'?'Switch to light mode':'Switch to dark mode'}><ThemeIcon light={theme==='dark'}/><span>{theme==='dark'?'Light':'Dark'}</span></button></nav></header>
- <div hidden={activeTab==='bookshelf'||activeTab==='behind-the-curtain'} className={'app-body portfolio-panel '+(context?'with-context':'')}>
+ <div hidden={activeTab==='bookshelf'||activeTab==='podcasts'||activeTab==='behind-the-curtain'} className={'app-body portfolio-panel '+(context?'with-context':'')}>
  <main id="panel-conversation" role="tabpanel" aria-labelledby="tab-conversation" tabIndex={0} hidden={activeTab!=='conversation'} className={'agent-stage '+(thread?.turns.length?'has-conversation':'')}>
  <div className="conversation-bar"><span className="mode-caption"><span className="status-dot"/>{mode==='public'?'A CONVERSATION WITH '+portfolio.shortName.toUpperCase()+'’S DIGITAL TWIN':'YOUR PRIVATE STUDIO'}</span><button className="fresh-button" onClick={()=>{viewVersion.current++;void perform(()=>newThread())}}><span>↺</span> Start fresh</button></div>
  <div className={'presence '+(pending.length?'presence-busy':'')}><Orb busy={pending.length>0}/>{!thread?.turns.length&&<span className="presence-caption">Engineering depth. A little curiosity.</span>}</div>
@@ -150,6 +151,7 @@ function App(){
  </aside>}
  </div>
  <div className="portfolio-panel" id="panel-bookshelf" role="tabpanel" aria-labelledby="tab-bookshelf" tabIndex={0} hidden={activeTab!=='bookshelf'}><Bookshelf books={books} ask={ask} enabled={activeTab==='bookshelf'} selection={shelfSelection} clearSelection={()=>setShelfSelection(null)}/></div>
+ <div className="portfolio-panel" id="panel-podcasts" role="tabpanel" aria-labelledby="tab-podcasts" tabIndex={0} hidden={activeTab!=='podcasts'}>{activeTab==='podcasts'&&<Podcasts ask={ask}/>}</div>
  <div className="portfolio-panel" id="panel-behind-the-curtain" role="tabpanel" aria-labelledby="tab-behind-the-curtain" tabIndex={0} hidden={activeTab!=='behind-the-curtain'}><Architecture ask={ask}/></div>
  <footer className="footer"><span className="footer-signature">{portfolio.footer}</span><div><a className="owner-link" href="/agents">For agents ↗</a><span className="footer-meta">AI GUIDE · {portfolio.resumeLabel}</span>{status&&(!status.public_only||status.owner_studio)&&<a href="/admin" className="owner-link">Admin portal ↗</a>}{status&&(!status.public_only||status.owner_studio)&&<button onClick={()=>{if(status.public_only)setOwnerTab('learning');setOwnerOpen(true)}} className="owner-link">Owner studio ↗</button>}</div></footer>
  <AnimatePresence>{notice&&<motion.div className="notice" initial={{opacity:0,y:5}} animate={{opacity:1,y:0}} exit={{opacity:0}} role="status"><span>{notice}</span><button aria-label="Dismiss notification" onClick={()=>setNotice('')}>×</button></motion.div>}</AnimatePresence>

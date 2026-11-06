@@ -13,6 +13,7 @@ All paths below are relative to this site's origin. Resolve them against the sit
 - `GET /api/public/profile` — published profile, presentation fields, source attribution, and recorded dates.
 - `GET /api/public/knowledge?query=leadership&limit=5` — search public notes and external references. Query: 1–200 characters; limit: 1–5. Results include text, source IDs and citation URLs.
 - `GET /api/public/bookshelf?query=No%20Rules%20Rules&limit=8` — search published books by title, author, category or notes. Query up to 200 characters; limit: 1–40. Empty query lists books. Pass `offset` (0–10,000) equal to `next_offset` to fetch the next page; `null` means complete. Follow each returned URL to inspect that book on the site.
+- `GET /api/public/library?kind=podcast&notes_only=true` — search books, episodes, tags and owner notes. `kind`: `all`, `book`, or `podcast`; `query` up to 200 characters, `notes_only` boolean, `limit` 1–40, and `offset` from `next_offset`. An empty query lists sources with owner notes first. Use this for recommendations; explain the note that supports each pick and distinguish your suggestion from an explicit owner endorsement. Follow `site_url` to the listening room or bookshelf.
 - `GET /api/public/tools` — tool names, descriptions, input schemas and annotations.
 - `GET /api/public/openapi.json` — the HTTP API contract, excluding owner routes.
 
@@ -45,7 +46,7 @@ Keep `result_token` private. Poll `status_url` with header `X-Result-Token: <res
 
 Endpoint: `/mcp`, transport: Streamable HTTP. No OAuth or site login is required. A real MCP client must initialize the connection and use tools/list and tools/call; this endpoint is not a normal JSON REST endpoint. Some hosts still require approval or server configuration before connecting.
 
-Tools: `get_profile`, `search_knowledge`, `browse_bookshelf`, `ask_portfolio_agent`, `get_answer`. They use the same public capabilities as HTTP. Save question result tokens privately. Remote MCP calls return book data and URLs; they do not manipulate a browser page.
+Tools: `get_profile`, `search_knowledge`, `browse_bookshelf`, `search_library`, `ask_portfolio_agent`, `get_answer`. They use the same public capabilities as HTTP. Save question result tokens privately. Remote MCP calls return book data and URLs; they do not manipulate a browser page.
 
 ## WebMCP: interact with the open site
 

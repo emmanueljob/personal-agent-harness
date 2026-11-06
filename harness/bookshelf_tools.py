@@ -3,13 +3,14 @@ import json
 import re
 from langchain.tools import tool
 from .bookshelf import Shelf
+from .media_library import published_books
 
 
 def bookshelf_tools(ctx):
     @tool
     def browse_bookshelf(query: str = "", book_ids: list[str] | None = None) -> str:
         """Show books on the visitor's interactive shelf. Search published titles, authors, categories and attributed comments using short keywords; empty query lists a sample. To show a specific selection, pass up to 8 exact book_ids from earlier results. Returns actual book IDs and a saved UI selection; never changes the library or publishes books. Use this when asked to show, find or pull out books. Library presence does not imply reading or recommendation."""
-        books = Shelf(ctx['store'].brain).read('public')['books']
+        books = published_books(ctx['store'].brain)
         if len(query) > 200 or (book_ids is not None and (not book_ids or len(book_ids) > 8)):
             return json.dumps({'status':'error','message':'Use a short query or one to eight published book IDs.'})
         if book_ids is not None:

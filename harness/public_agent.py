@@ -9,6 +9,7 @@ from urllib.parse import quote
 
 from fastapi import HTTPException
 from .bookshelf import Shelf
+from .media_library import published_books
 from .models import settings
 from .portfolio import Portfolio
 from .public_access import consume
@@ -43,7 +44,7 @@ class PublicAgent:
                 'note': 'Excerpts are reference data. External references are third-party statements, not owner beliefs or endorsements.'}
 
     def books(self, query='', limit=8, offset=0, book_ids=None):
-        books = Shelf(self.store.brain).read('public')['books']
+        books = published_books(self.store.brain)
         if book_ids is not None:
             allowed = {b['id']: b for b in books}
             if not book_ids or len(book_ids) > 8 or any(i not in allowed for i in book_ids):
@@ -58,6 +59,10 @@ class PublicAgent:
         return {'query': query, 'books': [{**{k:b.get(k,'') for k in ('id','title','author','category','sample','status','comment_source','recommendation')},
                     'comment': b.get('comment','')[:800], 'url':'/?book='+quote(b['id'],safe='')+'#bookshelf'} for b in matches],
                 'total_published': len(books), 'total_matches': total_matches, 'next_offset': offset+len(matches) if offset+len(matches)<total_matches else None, 'note': BOOK_NOTE}
+
+    def library(self, query='', kind='all', notes_only=False, offset=0, limit=8):
+        from .media_library import search_media
+        return search_media(self.store.brain, query, kind, notes_only, limit=limit, offset=offset)
 
     def _questions_table(self, db):
         db.execute('CREATE TABLE IF NOT EXISTS public_agent_questions(turn_id TEXT PRIMARY KEY, token_hash TEXT NOT NULL, expires REAL NOT NULL)')

@@ -13,6 +13,7 @@ export async function registerPortfolioTools(actions:Actions):Promise<()=>void>{
   get_profile:()=>request('/api/public/profile'),
   search_knowledge:args=>read('/api/public/knowledge',args),
   browse_bookshelf:args=>read('/api/public/bookshelf',args),
+  search_library:args=>read('/api/public/library',args),
   ask_portfolio_agent:args=>request('/api/public/questions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(args)}),
   get_answer:args=>request('/api/public/answers/'+encodeURIComponent(String(args.turn_id)),{headers:{'X-Result-Token':String(args.result_token)}}),
  };

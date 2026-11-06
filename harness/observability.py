@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS ui_events(
  name TEXT NOT NULL, section TEXT NOT NULL, target TEXT NOT NULL, theme TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS ui_events_created ON ui_events(created);
 """
-SECTIONS = {'conversation', 'work', 'person', 'bookshelf', 'behind-the-curtain'}
+SECTIONS = {'conversation', 'work', 'person', 'bookshelf', 'podcasts', 'behind-the-curtain'}
 POSTHOG_HOSTS = {'us': 'https://us.i.posthog.com', 'eu': 'https://eu.i.posthog.com'}
 
 
