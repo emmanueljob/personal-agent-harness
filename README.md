@@ -166,35 +166,24 @@ With `--text-only`, the test removes response headers, HTML head metadata, scrip
 ## Campaign personalization and contact
 
 Use `/admin` for day-to-day configuration without a deploy.
-`harness/personalization.py` defines typed seed defaults. Developers can add a `Profile` to
-`CONTENTS` (person), `CAMPAIGNS` (company/audience), or `SOURCES`. Resolution is
-`utm_content` → `utm_campaign` → `utm_source` → default. A match may override the
-headline, pitch, project ID order, exactly three suggested questions, guide-only
-system note, CTA label, roles banner, company and first-90-days placeholders.
-Use `RIVIERA.model_copy(update={...})` to inherit the recruiter profile. Include
-new profiles in the existing `PROFILES` collection automatically by adding them
-to one of those maps. All profile content is public editorial configuration;
-“hidden” notes are excluded from HTML/JSON, not a place for secrets.
+The app ships with a neutral default profile only. Create person, company and
+source profiles through the owner portal; all values live in the external
+`site-config.sqlite` database. Resolution is `utm_content` → `utm_campaign` →
+`utm_source` → default. Hidden guide notes are not a place for secrets.
 
 The server embeds the landing profile in HTML before React mounts. Untagged
 navigation restores the resolved profile from `sessionStorage`; explicit unknown
 UTM values reset to default. Tags are never removed from the address bar. The
 browser also retains campaign attribution for every pageview, including hash-tab
 navigation and the human-readable agent pages. Session storage failures do not
-block rendering. The default keeps the existing guide and suggestions, with the
-requested product/app positioning and contact improvements. DSP metrics remain
-unconfirmed and are deliberately absent from public claims. The original published
-knowledge is unchanged; the guide receives owner-approved positioning guidance.
-
-Set `PORTFOLIO_CONTACT_EMAIL` (defaults to eman@hisemailaddress.org) and
-`PORTFOLIO_BOOKING_URL` to an HTTPS booking URL. Until a booking URL is supplied,
-only the working email action appears. The sticky contact controls and editable
-roles banner appear on every HTML page. Machine-readable Markdown, API and MCP
-responses stay unchanged.
+block rendering. No career claims, recipients, contact address or targeting
+campaigns are supplied by the application. Configure contact and booking details
+in the owner portal or `PORTFOLIO_CONTACT_EMAIL` / `PORTFOLIO_BOOKING_URL`.
+With no contact configured, the application emits no contact link.
 
 Generate **clean outreach links** with an editable public /hi/ label and no query string. Choose a readable label such as a person or company name, or a neutral label
-such as intro. That label is public; all other attribution stays private. Warm and cold
-sources have recruiter-oriented profile defaults; a recognized person profile
+such as intro. That label is public; all other attribution stays private. Only explicitly configured
+profiles change the landing experience; a recognized person profile
 still takes precedence over company, then source. Unknown person labels provide
 attribution while letting the company/source choose the experience.
 
@@ -202,13 +191,13 @@ Set a long random `PORTFOLIO_LINKS_PASSWORD` on the server and in your local she
 then register a link directly on the live site:
 
 ```sh
-python3 scripts/build_campaign_link.py --server --source cold --company hex --person chett
+python3 scripts/build_campaign_link.py --server --source cold --company exampleco --person casey
 python3 scripts/build_campaign_link.py --server --source warm --company openai
 python3 scripts/build_campaign_link.py --server --stats
 ```
 
 The generated URL looks like
-`https://eman.hisemailaddress.org/hi/<name-or-company>`.
+`https://portfolio.example.org/hi/<name-or-company>`.
 Set the public label in the portal, or use `--slug intro` in the CLI. Without an
 explicit CLI label, it derives one from person, company or source and adds a suffix
 if needed. Explicit duplicate labels return 409; existing links are never silently
@@ -350,3 +339,5 @@ compatible. No additional credentials are required. The additive outreach_slugs 
 created lazily on the persistent volume; deleting a link also removes its label.
 
 Failed web-tool attempts are recorded as sanitized error results and count toward the existing four-result turn budget. A repeated identical call reuses its saved error rather than issuing another request. Existing successful result caches and Temporal activity names remain compatible.
+
+See [separate site data](docs/separate-site-data.md) for migration, deployment configuration and history limits.

@@ -214,7 +214,7 @@ def build_system_prompt(snapshot, mode):
         "Give useful, conversational answers with concrete examples, usually 1–2 short paragraphs unless more detail is needed. "
         "For an ordinary visitor question, aim for 60–120 words. Start with the answer, not 'based on the approved knowledge'. "
         "Follow the voice guidance for warmth, informality and fitting humor; do not turn every reply into a biography or book report. "
-        "Use relaxed, direct language and occasional dry humor, not corporate polish or a joke in every answer. Older voice notes requesting third-person narration are superseded by this digital-twin presentation. "
+        "Use the configured voice guidance for tone and humor. "
         "Owner perspective records distinguish owner_confirmed views from inferred views. State owner_confirmed views as personal opinions, not independently verified facts about a company or person. "
         "For inferred views, give a useful tentative take grounded in recorded principles and related sources, clearly marking the interpretation as your best read as the digital twin. Do not invent a firm owner position. "
         "When an owner perspective links to influences, explain the connection and cite those specific original episode URLs. "
@@ -272,7 +272,7 @@ def build_system_prompt(snapshot, mode):
         + f"This turn uses provider {config['provider']} and model {config['model']}. "
         + ("Temporal handles durable turn retries and scheduled routines. " if os.getenv("EXECUTOR") == "temporal" else "A local persistent worker processes turns. ")
         + ("This turn runs Deep Agents inside Temporal, with model and application tool calls as individual Activities. " if config.get("agent_runtime")=="deepagents" else "This turn uses the legacy LangGraph SQLite checkpointer inside one Temporal Activity. ")
-        + ("This public PoC is hosted on Fly.io. The web app, worker and persistent Temporal development server share one Machine. Only published knowledge is deployed; the private edition stays on the owner’s Mac. " if config.get("public_deployment") else "Public and private profile contexts are separate. Private mode can save Markdown documents with a tool. ")
+        + ("This is a public deployment. Only published knowledge is available. " if config.get("public_deployment") else "Public and private profile contexts are separate. Private mode can save Markdown documents with a tool. ")
     )
     if mode == 'public':
         # Keep the presentation rule after source material: older voice notes,

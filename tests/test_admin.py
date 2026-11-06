@@ -2,7 +2,7 @@ import json
 from urllib.parse import urlsplit, parse_qs
 import pytest
 from fastapi.testclient import TestClient
-from test_agent_surfaces import fixture_app
+from test_personalization import fixture_app
 from harness.portfolio import Portfolio
 from harness.site_config import records
 from test_personalization import tags_from_url, code_from_url
@@ -14,7 +14,7 @@ def admin_app(tmp_path,monkeypatch):
     module, store=fixture_app(tmp_path,monkeypatch)
     monkeypatch.setenv('OWNER_STUDIO_TOKEN','synthetic-owner-access')
     monkeypatch.setenv('PUBLIC_ORIGIN','https://testserver')
-    data=Portfolio(name='Fixture Leader',projects=[dict(id=id,eyebrow='Public work',title=id,company='Fixture',description='Public description',detail='Public detail',outcome='Public outcome',question='How did this work?') for id in ['mojo','ads']])
+    data=Portfolio(name='Fixture Leader',projects=[dict(id=id,eyebrow='Public work',title=id,company='Fixture',description='Public description',detail='Public detail',outcome='Public outcome',question='How did this work?') for id in ['sample','ads']])
     (store.brain.scope('public')/'portfolio.json').write_text(data.model_dump_json())
     return module,store
 
@@ -72,10 +72,10 @@ def test_custom_profile_link_preview_and_revocation(tmp_path,monkeypatch):
     with TestClient(module.app,base_url='https://testserver') as client:
         config=client.get('/api/admin/config',headers=AUTH).json()
         seed=next(p['value'] for p in config['profiles'] if p['value']['key']=='source:warm')
-        p={**seed,'key':'content:fixture','headline':'Hi Fixture — a personal overview','featured':['mojo'],'system_note':'INTERNAL AUDIENCE GUIDANCE fixture'}
+        p={**seed,'key':'content:fixture','headline':'Hi Fixture — a personal overview','featured':['sample'],'system_note':'INTERNAL AUDIENCE GUIDANCE fixture'}
         assert client.put('/api/admin/profiles/content:fixture',headers=AUTH,json={'revision':0,'value':p}).status_code==200
         assert client.put('/api/admin/profiles/content:fixture',headers=AUTH,json={'revision':0,'value':p}).status_code==409
-        values={'person':'fixture','company':'hex','source':'warm'}
+        values={'person':'fixture','company':'exampleco','source':'warm'}
         preview=client.post('/api/admin/resolve',headers=AUTH,json=values).json()
         assert preview['key']=='content:fixture' and 'system_note' not in preview
         link=client.post('/api/admin/links',headers=AUTH,json=values).json()['url']
@@ -97,7 +97,7 @@ def test_custom_profile_link_preview_and_revocation(tmp_path,monkeypatch):
         assert client.put('/api/admin/links/missing',headers=AUTH,json={'active':False}).status_code==404
         p['enabled']=False
         assert client.put('/api/admin/profiles/content:fixture',headers=AUTH,json={'revision':1,'value':p}).status_code==200
-        assert client.get('/api/personalization',params=tags).json()['key']=='campaign:hex'
+        assert client.get('/api/personalization',params=tags).json()['key']=='campaign:exampleco'
         default=next(p['value'] for p in config['profiles'] if p['value']['key']=='default')
         assert client.put('/api/admin/profiles/default',headers=AUTH,json={'revision':0,'value':{**default,'enabled':False}}).status_code==422
 
@@ -106,14 +106,14 @@ def test_portfolio_edits_and_guide_use_runtime_copy(tmp_path,monkeypatch):
     module,store=admin_app(tmp_path,monkeypatch)
     with TestClient(module.app,base_url='https://testserver') as client:
         config=client.get('/api/admin/config',headers=AUTH).json()
-        data=config['portfolio'];data['intro']='New owner-approved introduction.';data['projects'][0]['description']='New owner-approved Mojo outcome.'
+        data=config['portfolio'];data['intro']='New owner-approved introduction.';data['projects'][0]['description']='New owner-approved Sample Product outcome.'
         assert client.post('/api/admin/portfolio/validate',headers=AUTH,json=data).status_code==200
         assert client.put('/api/admin/portfolio',headers=AUTH,json={'revision':0,'value':data}).status_code==200
         assert client.get('/api/portfolio').json()['intro']=='New owner-approved introduction.'
-        assert 'New owner-approved Mojo outcome.' in client.get('/api/portfolio').text
+        assert 'New owner-approved Sample Product outcome.' in client.get('/api/portfolio').text
         assert 'New owner-approved' not in store.brain.public_portfolio().get('intro','')
         from harness.personalization import guide_context
-        assert 'New owner-approved Mojo outcome.' in guide_context('default')
+        assert 'New owner-approved Sample Product outcome.' in guide_context('default')
         data['projects'].append(data['projects'][0])
         assert client.put('/api/admin/portfolio',headers=AUTH,json={'revision':1,'value':data}).status_code==422
         assert client.put('/api/admin/portfolio',headers=AUTH,json={'revision':0,'value':config['portfolio']}).status_code==422
@@ -158,7 +158,7 @@ def test_dynamic_guide_snapshot_and_legacy_tag_management(tmp_path,monkeypatch):
 def test_delete_link_removes_mappings_counts_and_keeps_other_links(tmp_path,monkeypatch):
     module,_=admin_app(tmp_path,monkeypatch)
     with TestClient(module.app,base_url='https://testserver') as client:
-        urls=[client.post('/api/admin/links',headers=AUTH,json={'source':'warm','company':'hex','person':'chett'}).json()['url'] for _ in range(2)]
+        urls=[client.post('/api/admin/links',headers=AUTH,json={'source':'warm','company':'exampleco','person':'casey'}).json()['url'] for _ in range(2)]
         original_tags=tags_from_url(urls[0])
         for url in urls:
             tags=tags_from_url(url)
@@ -210,20 +210,20 @@ def test_clear_old_links_includes_legacy_but_preserves_newer_links(tmp_path,monk
 def test_readable_url_labels_collisions_and_rename(tmp_path,monkeypatch):
     module,_=admin_app(tmp_path,monkeypatch)
     with TestClient(module.app,base_url='https://testserver') as client:
-        values={'source':'cold','company':'hex','slug':'Hello Hex'}
+        values={'source':'cold','company':'exampleco','slug':'Hello Exampleco'}
         first=client.post('/api/admin/links',headers=AUTH,json=values)
-        assert first.status_code==200 and first.json()['url']=='https://testserver/hi/hello-hex'
-        assert client.get('/hi/hello-hex').status_code==200
-        assert '"key": "campaign:hex"' in client.get('/hi/hello-hex').text
+        assert first.status_code==200 and first.json()['url']=='https://testserver/hi/hello-exampleco'
+        assert client.get('/hi/hello-exampleco').status_code==200
+        assert '"key": "campaign:exampleco"' in client.get('/hi/hello-exampleco').text
         before=client.get('/api/admin/outreach',headers=AUTH).json()
-        assert before['links'][0]['slug']=='hello-hex'
+        assert before['links'][0]['slug']=='hello-exampleco'
         assert client.post('/api/admin/links',headers=AUTH,json=values).status_code==409
         assert client.get('/api/admin/outreach',headers=AUTH).json()==before
         ident=before['links'][0]['id']
         renamed=client.put('/api/admin/links/'+ident+'/slug',headers=AUTH,json={'slug':'intro'})
         assert renamed.status_code==200
-        assert '"key": "default"' in client.get('/hi/hello-hex').text
-        assert '"key": "campaign:hex"' in client.get('/hi/intro').text
+        assert '"key": "default"' in client.get('/hi/hello-exampleco').text
+        assert '"key": "campaign:exampleco"' in client.get('/hi/intro').text
         assert client.put('/api/admin/links/'+ident+'/slug',json={'slug':'unauthorized'}).status_code==401
         client.delete('/api/admin/links/'+ident,headers=AUTH)
         assert '"key": "default"' in client.get('/hi/intro').text

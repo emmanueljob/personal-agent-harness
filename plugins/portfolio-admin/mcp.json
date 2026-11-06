@@ -3,7 +3,7 @@
   "mcpServers": {
     "portfolio-admin": {
       "type": "streamable-http",
-      "url": "https://eman.hisemailaddress.org/admin-mcp",
+      "url": "https://portfolio.example.org/admin-mcp",
       "extensions": {
         "com.openai": {
           "auth": {

@@ -90,7 +90,7 @@ class Settings(BaseModel):
 
 
 def settings():
-    defaults = Settings(contact_email=os.getenv('PORTFOLIO_CONTACT_EMAIL','') or 'eman@hisemailaddress.org',
+    defaults = Settings(contact_email=os.getenv('PORTFOLIO_CONTACT_EMAIL',''),
         booking_url=os.getenv('PORTFOLIO_BOOKING_URL',''), plausible_domain=os.getenv('PLAUSIBLE_DOMAIN',''),
         linkedin_partner_id=os.getenv('LINKEDIN_PARTNER_ID',''),x_pixel_id=os.getenv('X_PIXEL_ID',''))
     return Settings.model_validate(read('settings', defaults.model_dump()))

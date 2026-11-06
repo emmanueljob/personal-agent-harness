@@ -2,7 +2,7 @@
 
 This site publishes career information, work preferences, interests, and a curated bookshelf. Use only published sources. The guide is an AI digital twin that speaks in first person from the owner's published career history and notes. The human is not typing its replies. Attribute generated answers and quotations to the digital twin, not as verbatim statements by the human. No account, API key, cookie, or installed plugin is needed for the public HTTP API. Your agent host must permit network calls; reading these instructions does not grant new permissions.
 
-Quick start: fetch `/api/public/profile`, then search `/api/public/knowledge?query=leadership` or `/api/public/bookshelf?query=No%20Rules%20Rules`. You can use plain HTTP directly; MCP is optional.
+Quick start: fetch `/api/public/profile`, then search `/api/public/knowledge?query=leadership` or `/api/public/bookshelf?query=`. You can use plain HTTP directly; MCP is optional.
 
 Discovery: the homepage includes a visible link to this file. `GET /` with `Accept: text/markdown` returns a Markdown introduction. `/robots.txt` and `/sitemap.xml` list the instructions; `/.well-known/agent-interface.json` is a site-specific manifest, not an A2A Agent Card.
 
@@ -12,7 +12,7 @@ All paths below are relative to this site's origin. Resolve them against the sit
 
 - `GET /api/public/profile` — published profile, presentation fields, source attribution, and recorded dates.
 - `GET /api/public/knowledge?query=leadership&limit=5` — search public notes and external references. Query: 1–200 characters; limit: 1–5. Results include text, source IDs and citation URLs.
-- `GET /api/public/bookshelf?query=No%20Rules%20Rules&limit=8` — search published books by title, author, category or notes. Query up to 200 characters; limit: 1–40. Empty query lists books. Pass `offset` (0–10,000) equal to `next_offset` to fetch the next page; `null` means complete. Follow each returned URL to inspect that book on the site.
+- `GET /api/public/bookshelf?query=&limit=8` — search published books by title, author, category or notes. Query up to 200 characters; limit: 1–40. Empty query lists books. Pass `offset` (0–10,000) equal to `next_offset` to fetch the next page; `null` means complete. Follow each returned URL to inspect that book on the site.
 - `GET /api/public/library?kind=podcast&notes_only=true` — search books, episodes, tags and owner notes. `kind`: `all`, `book`, or `podcast`; `query` up to 200 characters, `notes_only` boolean, `limit` 1–40, and `offset` from `next_offset`. An empty query lists sources with owner notes first. Use this for recommendations; explain the note that supports each pick and distinguish your suggestion from an explicit owner endorsement. Follow `site_url` to the listening room or bookshelf.
 - `GET /api/public/tools` — tool names, descriptions, input schemas and annotations.
 - `GET /api/public/openapi.json` — the HTTP API contract, excluding owner routes.
