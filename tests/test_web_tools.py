@@ -122,6 +122,67 @@ def test_provider_errors_do_not_expose_sensitive_diagnostics(tmp_path):
     assert result['status']=='error' and 'secret-token' not in json.dumps(result)
 
 
+def test_failed_searches_are_durable_cached_and_budgeted(tmp_path):
+    store=Store(tmp_path);calls=[]
+    ctx={'store':store,'turn_id':store.enqueue(store.thread('public')['id'],'A synthetic question')}
+    def fail():
+        calls.append(1)
+        raise RuntimeError('PRIVATE diagnostics must not be persisted')
+    web.cached_call(ctx,'search_web',{'query':'one'},fail)
+    retried=web.cached_call({**ctx,'store':Store(tmp_path)},'search_web',{'query':'one'},fail)
+    assert retried['cached'] and retried['status']=='error' and len(calls)==1
+    for query in ('two','three','four','five'):
+        web.cached_call(ctx,'search_web',{'query':query},fail)
+    assert len(calls)==4
+    saved=store.query('SELECT body FROM tool_results')
+    assert len(saved)==4 and 'PRIVATE' not in json.dumps(saved)
+
+
+def test_openai_search_contract_sources_and_no_personal_context(tmp_path,monkeypatch):
+    monkeypatch.setenv('WEB_SEARCH_PROVIDER','openai')
+    monkeypatch.setenv('OPENAI_API_KEY','synthetic-test-key')
+    monkeypatch.setenv('OPENAI_MODEL','synthetic-search-model')
+    monkeypatch.setenv('OPENAI_SEARCH_MODEL','')
+    monkeypatch.setenv('PUBLIC_ONLY','true')
+    requests=[]
+    def handler(request):
+        requests.append(request)
+        body=json.loads(request.content)
+        assert body['model']=='synthetic-search-model' and body['input']=='public topic'
+        assert body['store'] is False and body['tool_choice']=='required' and body['max_tool_calls']==1
+        assert body['tools']==[{'type':'web_search','search_context_size':'low'}]
+        assert body['max_output_tokens']==1500
+        assert 'PRIVATE' not in request.content.decode()
+        return httpx.Response(200,json={'output':[
+            {'type':'web_search_call','status':'completed','action':{'sources':[
+                {'url':'http://127.0.0.1/secret'}, {'url':'https://publisher.example/article'}]}},
+            {'type':'message','content':[{'type':'output_text','text':'A short search summary.','annotations':[
+                {'type':'url_citation','title':'Original source','url':'https://publisher.example/article'}]}]},
+        ]})
+    original=httpx.Client
+    monkeypatch.setattr(web.httpx,'Client',lambda **kw:original(transport=httpx.MockTransport(handler),**kw))
+    store=Store(tmp_path);store.set_profile('private','PRIVATE profile canary')
+    ctx={'store':store,'turn_id':store.enqueue(store.thread('public')['id'],'public topic'),'mode':'public','web_enabled':True}
+    search=next(t for t in web.web_tools(ctx) if t.name=='search_web')
+    result=json.loads(search.invoke({'query':'public topic'}))
+    assert result['provider']=='openai' and result['sources']==[{'title':'Original source','url':'https://publisher.example/article','snippet':''}]
+    assert result['summary']=='A short search summary.'
+    assert 'synthetic-test-key' not in json.dumps(store.query('SELECT * FROM tool_results'))
+    assert json.loads(search.invoke({'query':'public topic'}))['cached']
+    assert len(requests)==1
+    assert store.query("SELECT count FROM public_usage WHERE bucket='day:model'")[0]['count']==1
+
+
+def test_openai_search_requires_configuration_and_a_completed_search(monkeypatch):
+    monkeypatch.setenv('WEB_SEARCH_PROVIDER','openai')
+    monkeypatch.delenv('OPENAI_API_KEY',raising=False)
+    with pytest.raises(web.WebInputError,match='not configured'):web.search_public_web('public topic')
+    monkeypatch.setenv('OPENAI_API_KEY','synthetic-test-key')
+    original=httpx.Client
+    monkeypatch.setattr(web.httpx,'Client',lambda **kw:original(transport=httpx.MockTransport(lambda r:httpx.Response(200,json={'output':[]})),**kw))
+    with pytest.raises(web.WebInputError,match='did not complete'):web.search_public_web('public topic')
+
+
 def test_web_tools_can_be_disabled(tmp_path,monkeypatch):
     monkeypatch.setenv('WEB_SEARCH_PROVIDER','disabled')
     assert web.web_tools({'store':Store(tmp_path)})==[]
