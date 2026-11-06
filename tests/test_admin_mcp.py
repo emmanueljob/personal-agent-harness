@@ -42,9 +42,18 @@ def connect(client,monkeypatch,private,email='owner@example.test',cookie=True):
     target=response.headers['location'];state=parse_qs(urlsplit(target).query)['state'][0]
     consent=client.get(target)
     assert consent.status_code==200 and 'Synthetic owner client' in consent.text
+    assert '/admin-auth/google?state=' in consent.text and '<form' not in consent.text
     assert 'visit.js' not in consent.text and 'client.example/callback' in consent.text
     assert 'httponly' in consent.headers['set-cookie'].lower() and 'secure' in consent.headers['set-cookie'].lower()
-    google=client.post('/admin-auth/google',data={'state':state},follow_redirects=False)
+    # Opening or reloading the same consent in another browser does not destroy
+    # this browser's session. All browsers still need to visit consent first.
+    second=TestClient(client.app,base_url='https://testserver')
+    assert second.get(target).status_code==200
+    second_cookie=second.cookies.get('portfolio_admin_oauth')
+    assert second_cookie!=client.cookies.get('portfolio_admin_oauth')
+    assert second.get('/admin-auth/google',params={'state':state},follow_redirects=False).status_code==303
+    assert client.get(target).status_code==200
+    google=client.get('/admin-auth/google',params={'state':state},follow_redirects=False)
     assert google.status_code==303
     params=parse_qs(urlsplit(google.headers['location']).query)
     assert params['scope']==['openid email'] and params['code_challenge_method']==['S256']
@@ -139,6 +148,17 @@ def test_admin_mcp_is_disabled_without_google_configuration(tmp_path,monkeypatch
     with TestClient(module.app) as client:
         assert rpc(client,'tools/list').status_code==404
         assert client.get('/.well-known/oauth-authorization-server').status_code==404
+
+
+def test_sign_in_link_still_requires_browser_binding_and_expires(tmp_path,monkeypatch):
+    module,store,private=configure(tmp_path,monkeypatch)
+    oauth=AdminOAuth(lambda:store)
+    oauth.put('pending','synthetic-flow',{'nonce':'fixture','verifier':'fixture','cookie_hashes':[]},time.time()+60)
+    with TestClient(module.app,base_url='https://testserver') as client:
+        assert client.get('/admin-auth/google?state=synthetic-flow',follow_redirects=False).status_code==400
+        assert client.get('/admin-auth/google?state=unknown-flow',follow_redirects=False).status_code==400
+        oauth.put('pending','synthetic-flow',{'cookie_hashes':[]},time.time()-1)
+        assert client.get('/admin-auth/google?state=synthetic-flow',follow_redirects=False).status_code==400
 
 
 @pytest.mark.parametrize('override',[{'aud':'another-client'},{'iss':'https://evil.example'},{'exp':1},
