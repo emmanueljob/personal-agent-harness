@@ -35,6 +35,7 @@
   if (trackingAllowed) {
     analyticsSession();
   }
+  let trackingQueue = Promise.resolve();
   const track = (name, target='') => {
     if (!trackingAllowed) return;
     const url = new URL(location.href);
@@ -42,7 +43,8 @@
     // Do not send conversation text, result tokens or arbitrary query parameters.
     for (const key of [...url.searchParams.keys()]) if (outreachCode || !keys.includes(key)) url.searchParams.delete(key);
     const payload = JSON.stringify({name,target,outreach_code:outreachCode,session_id:analyticsSession(),theme:document.documentElement.dataset.theme==='light'?'light':'dark',url:url.pathname+url.search+url.hash,profile_key:profile.key,utm,referrer:document.referrer});
-    fetch('/api/visit-events',{method:'POST',headers:{'Content-Type':'application/json'},body:payload,keepalive:true}).catch(()=>{});
+    // Serialize the first events so a newly issued browser cookie is reused.
+    trackingQueue = trackingQueue.then(()=>fetch('/api/visit-events',{method:'POST',headers:{'Content-Type':'application/json'},body:payload,keepalive:true})).catch(()=>{});
   };
   window.portfolioTrack = track;
   window.addEventListener('portfolio:book-opened',event=>{if(!event.detail?.error)track('book_opened')});
