@@ -55,7 +55,7 @@ def test_turn_recovery_and_completed_idempotency(tmp_path, monkeypatch):
 
 def test_public_has_no_artifact_tools(tmp_path):
     from harness.agent import plugins
-    assert [t.name for t in plugins.tools({"mode":"public", "store":Store(tmp_path)})] == ["search_knowledge", "search_web", "read_webpage", "browse_bookshelf"]
+    assert [t.name for t in plugins.tools({"mode":"public", "store":Store(tmp_path)})] == ["search_knowledge", "search_web", "read_webpage", "browse_bookshelf", "search_library"]
 
 
 def test_graph_checkpoints_resume_without_second_model_call(tmp_path, monkeypatch):

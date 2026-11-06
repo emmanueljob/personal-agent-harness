@@ -152,6 +152,26 @@ def status():
     return {"public_only": public_only(), "owner_studio": bool(os.getenv("OWNER_STUDIO_TOKEN")) if public_only() else True, "model_configured": config["configured"], "model": config["model"], "provider": config["provider"], "agent_runtime":config['agent_runtime'], "executor": os.getenv("EXECUTOR", "local"), "knowledge_backend": store.brain.backend, "knowledge_fallback_policy":"same-scope-canonical-files-when-index-busy" if store.brain.backend == 'gbrain' else None, "web_search_provider": web_provider(), "profile_configured": not store.profile("public").startswith("Profile not configured")}
 
 
+@app.get('/api/library/{kind}/{ident}')
+def media_item(kind: str, ident: str):
+    from .media_library import catalog
+    if kind not in ('book', 'podcast'):
+        raise HTTPException(422, 'Choose book or podcast.')
+    item = next((r for r in catalog(store.brain) if r['kind']==kind and r['id']==ident), None)
+    if item is None:
+        raise HTTPException(404, 'Published source not found.')
+    return item
+
+
+@app.get('/api/library')
+def media_library(query: str = '', kind: str = 'all', notes_only: bool = False, show: str = '', limit: int = 24, offset: int = 0):
+    from .media_library import search_media
+    try:
+        return search_media(store.brain, query, kind, notes_only, show, limit, offset)
+    except ValueError as error:
+        raise HTTPException(422, 'Use a short query and valid library filters.') from error
+
+
 @app.get("/api/tools")
 def tool_catalog():
     from .agent import plugins
@@ -349,8 +369,8 @@ def disable(ident: str):
 
 @app.get("/api/bookshelf")
 def public_bookshelf():
-    data = Shelf(store.brain).read("public")
-    return {"books": data["books"]}
+    from .media_library import published_books
+    return {"books": published_books(store.brain)}
 
 
 @app.get("/api/owner/bookshelf", dependencies=[Depends(owner)])
