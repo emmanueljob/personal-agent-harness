@@ -319,3 +319,14 @@ with the deployment tools. The portal intentionally does not expose environment
 variables, arbitrary files or private runtime histories. It does not change
 published knowledge when saving presentation copy. Saved changes affect public
 visitors as labeled in the UI; previews remain local to the owner until saved.
+
+In Outreach links, **Delete link** permanently removes its saved entry, all of its
+UTM mappings, and associated outreach count rows. **Delete all links** also clears
+legacy mappings and their outreach counts. Visit reports provides **Delete tag**
+for legacy codes; if a tag belongs to a saved link, that entire link is removed to
+avoid leaving broken entries. The UI asks for confirmation. Revocation remains a
+reversible alternative. Deletion does not affect profile copy, site settings,
+learning notes, conversations, or the separate general UI metrics. Old generated
+URLs fall back to the default experience; existing untagged browser sessions may
+retain their cached profile. API cleanup can supply a `before` cutoff to preserve
+links created after a cleanup snapshot.

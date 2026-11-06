@@ -78,6 +78,13 @@ def record_event(event):
     from datetime import datetime, timezone
     day = datetime.now(timezone.utc).date().isoformat()
     with sqlite3.connect(path, timeout=2) as db:
+        db.execute('BEGIN IMMEDIATE')
+        disabled_table = db.execute("SELECT 1 FROM sqlite_master WHERE name='outreach_disabled_tags'").fetchone()
+        aliases = {field:value for field,value in aliases.items()
+                   if db.execute('SELECT 1 FROM outreach_tags WHERE token=? AND field=?',(value,field)).fetchone()
+                   and not (disabled_table and db.execute('SELECT 1 FROM outreach_disabled_tags WHERE token=?',(value,)).fetchone())}
+        if not aliases:
+            return
         db.execute('CREATE TABLE IF NOT EXISTS outreach_counts (day TEXT, event TEXT, source TEXT, campaign TEXT, content TEXT, target TEXT, count INTEGER NOT NULL, PRIMARY KEY(day,event,source,campaign,content,target))')
         db.execute('INSERT INTO outreach_counts VALUES (?,?,?,?,?,?,1) ON CONFLICT(day,event,source,campaign,content,target) DO UPDATE SET count=count+1',
                    (day, event.name, *[aliases.get(field, '') for field in FIELDS], event.target))
@@ -132,3 +139,70 @@ def set_tag_active(token, active):
             db.execute('DELETE FROM outreach_disabled_tags WHERE token=?',(token,))
         else:
             db.execute('INSERT OR IGNORE INTO outreach_disabled_tags VALUES (?)',(token,))
+
+
+def delete_links(*, ident=None, token=None, before=None):
+    """Permanently remove selected links, private mappings and matching counts.
+
+    A cutoff is for a cleanup snapshot: links created afterward survive. No other
+    application data or site configuration is touched. All removal is atomic.
+    """
+    empty = {'links_deleted':0,'tags_deleted':0,'count_rows_deleted':0}
+    target = database_path()
+    if not target.is_file():
+        if ident is not None or token is not None:
+            raise KeyError('Link not found')
+        return empty
+    with sqlite3.connect(target, timeout=5) as db:
+        db.execute('BEGIN IMMEDIATE')
+        tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if 'outreach_tags' not in tables:
+            if ident is not None or token is not None:
+                raise KeyError('Link not found')
+            return empty
+        groups = [(row[0],set(json.loads(row[1]).values()),row[2]) for row in db.execute('SELECT id,tokens,created FROM outreach_links')] if 'outreach_links' in tables else []
+        ids = set()
+        if ident is not None:
+            matching = [row for row in groups if row[0] == ident]
+            if not matching:
+                raise KeyError('Link not found')
+            ids.add(ident)
+            tokens = set(matching[0][1])
+        elif token is not None:
+            if not TOKEN.fullmatch(token) or not db.execute('SELECT 1 FROM outreach_tags WHERE token=?',(token,)).fetchone():
+                raise KeyError('Tag not found')
+            tokens = {token}
+        else:
+            tokens = {row[0] for row in (db.execute('SELECT token FROM outreach_tags') if before is None else db.execute('SELECT token FROM outreach_tags WHERE created<=?',(before,)))}
+            ids = {row[0] for row in groups if before is None or row[2] <= before}
+            for gid, members, _ in groups:
+                if gid in ids:
+                    tokens.update(members)
+        # A tag belonging to a saved link removes the full link, not a broken row.
+        while True:
+            old_size = len(tokens),len(ids)
+            for gid, members, _ in groups:
+                if members & tokens:
+                    ids.add(gid)
+                    tokens.update(members)
+            if old_size == (len(tokens),len(ids)):
+                break
+        result = dict(empty)
+        values = list(tokens)
+        for start in range(0,len(values),250):
+            batch = values[start:start+250]
+            marks = ','.join('?' for _ in batch)
+            if 'outreach_counts' in tables:
+                result['count_rows_deleted'] += db.execute(f'DELETE FROM outreach_counts WHERE source IN ({marks}) OR campaign IN ({marks}) OR content IN ({marks})',batch*3).rowcount
+            result['tags_deleted'] += db.execute(f'DELETE FROM outreach_tags WHERE token IN ({marks})',batch).rowcount
+            if 'outreach_disabled_tags' in tables:
+                db.execute(f'DELETE FROM outreach_disabled_tags WHERE token IN ({marks})',batch)
+        for gid in ids:
+            result['links_deleted'] += db.execute('DELETE FROM outreach_links WHERE id=?',(gid,)).rowcount
+        if ident is None and token is None and before is None:
+            # Clear any historical orphan count/disabled rows as well.
+            if 'outreach_counts' in tables:
+                result['count_rows_deleted'] += db.execute('DELETE FROM outreach_counts').rowcount
+            if 'outreach_disabled_tags' in tables:
+                db.execute('DELETE FROM outreach_disabled_tags')
+        return result
