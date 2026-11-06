@@ -1,4 +1,4 @@
-"""Generate outreach links with random codes instead of names in their UTMs."""
+"""Generate clean outreach links with no query parameters or names in the URL."""
 import argparse
 import json
 import os

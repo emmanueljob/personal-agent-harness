@@ -6,7 +6,7 @@ const fallback:Personalization={key:'default',headline:'',pitch:'',featured:[],q
 export function initialProfile():Personalization {
  let value:Personalization|undefined;
  try { value=JSON.parse(document.getElementById('personalization')?.textContent || 'null') || undefined; } catch {}
- const tagged=['utm_content','utm_campaign','utm_source','utm_medium','utm_term'].some(k=>new URLSearchParams(location.search).has(k));
+ const tagged=location.pathname.startsWith('/r/') || ['utm_content','utm_campaign','utm_source','utm_medium','utm_term'].some(k=>new URLSearchParams(location.search).has(k));
  if (!tagged) {
    try { const saved=JSON.parse(sessionStorage.getItem('portfolio-profile') || 'null');if(saved?.key&&saved.key!==value?.key)value=saved; } catch {}
  }

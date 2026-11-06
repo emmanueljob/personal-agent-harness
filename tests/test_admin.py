@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from test_agent_surfaces import fixture_app
 from harness.portfolio import Portfolio
 from harness.site_config import records
+from test_personalization import tags_from_url
 
 AUTH={'Authorization':'Bearer synthetic-owner-access'}
 
@@ -81,7 +82,7 @@ def test_custom_profile_link_preview_and_revocation(tmp_path,monkeypatch):
         assert 'fixture' not in link and 'hex' not in link and 'warm' not in link
         assert 'Hi Fixture' in client.get(link).text
         assert 'INTERNAL AUDIENCE GUIDANCE' not in client.get(link).text
-        tags={k:v[0] for k,v in parse_qs(urlsplit(link).query).items()}
+        tags=tags_from_url(link)
         event={'name':'pageview','url':'/?'+urlsplit(link).query,'utm':tags,'profile_key':'content:fixture'}
         assert client.post('/api/visit-events',json=event).status_code==204
         report=client.get('/api/admin/outreach',headers=AUTH).json()
@@ -125,7 +126,7 @@ def test_global_tracking_disable_stops_local_counts(tmp_path,monkeypatch):
         config=client.get('/api/admin/config',headers=AUTH).json()
         edit={**config['settings'],'tracking_enabled':False}
         assert client.put('/api/admin/settings',headers=AUTH,json={'revision':0,'value':edit}).status_code==200
-        event={'name':'pageview','url':'/?'+urlsplit(url).query,'utm':{k:v[0] for k,v in parse_qs(urlsplit(url).query).items()}}
+        event={'name':'pageview','url':'/?'+urlsplit(url).query,'utm':tags_from_url(url)}
         assert client.post('/api/visit-events',json=event).status_code==204
         assert client.get('/api/admin/outreach',headers=AUTH).json()['counts']==[]
 
@@ -146,7 +147,7 @@ def test_dynamic_guide_snapshot_and_legacy_tag_management(tmp_path,monkeypatch):
         _,retry=prepare_turn(store,store.query('SELECT * FROM turns WHERE id=?',(ident,))[0])
         assert retry==snapshot
         url=client.post('/api/admin/links',headers=AUTH,json={'source':'warm'}).json()['url']
-        tags={key:value[0] for key,value in parse_qs(urlsplit(url).query).items()}
+        tags=tags_from_url(url)
         assert client.put('/api/admin/tags/'+tags['utm_source'],headers=AUTH,json={'active':False}).status_code==200
         assert client.get('/api/personalization',params=tags).json()['key']=='default'
         assert not client.get('/api/admin/outreach',headers=AUTH).json()['tags'][0]['active']
@@ -158,11 +159,12 @@ def test_delete_link_removes_mappings_counts_and_keeps_other_links(tmp_path,monk
     module,_=admin_app(tmp_path,monkeypatch)
     with TestClient(module.app,base_url='https://testserver') as client:
         urls=[client.post('/api/admin/links',headers=AUTH,json={'source':'warm','company':'hex','person':'chett'}).json()['url'] for _ in range(2)]
+        original_tags=tags_from_url(urls[0])
         for url in urls:
-            tags={k:v[0] for k,v in parse_qs(urlsplit(url).query).items()}
+            tags=tags_from_url(url)
             assert client.post('/api/visit-events',json={'name':'pageview','url':'/?'+urlsplit(url).query,'utm':tags}).status_code==204
         state=client.get('/api/admin/outreach',headers=AUTH).json()
-        selected=next(link for link in state['links'] if link['tokens']['utm_source'] in urls[0])
+        selected=next(link for link in state['links'] if link['id']==urlsplit(urls[0]).path.rsplit('/',1)[-1])
         assert client.delete('/api/admin/links/'+selected['id']).status_code==401
         assert client.delete('/api/admin/links/'+selected['id'],headers={**AUTH,'Origin':'https://untrusted.example'}).status_code==403
         before=client.get('/api/admin/config',headers=AUTH).json()
@@ -171,7 +173,7 @@ def test_delete_link_removes_mappings_counts_and_keeps_other_links(tmp_path,monk
         assert result.json()=={'links_deleted':1,'tags_deleted':3,'count_rows_deleted':1}
         state=client.get('/api/admin/outreach',headers=AUTH).json()
         assert len(state['links'])==1 and len(state['tags'])==3 and len(state['counts'])==1
-        tags={k:v[0] for k,v in parse_qs(urlsplit(urls[0]).query).items()}
+        tags=original_tags
         assert client.get('/api/personalization',params=tags).json()['key']=='default'
         assert client.post('/api/visit-events',json={'name':'pageview','url':'/?'+urlsplit(urls[0]).query,'utm':tags}).status_code==204
         assert len(client.get('/api/admin/outreach',headers=AUTH).json()['counts'])==1
@@ -185,7 +187,7 @@ def test_clear_old_links_includes_legacy_but_preserves_newer_links(tmp_path,monk
     from harness.outreach import database_path
     with TestClient(module.app,base_url='https://testserver') as client:
         old=client.post('/api/admin/links',headers=AUTH,json={'source':'warm'}).json()['url']
-        oldtoken=parse_qs(urlsplit(old).query)['utm_source'][0]
+        oldtoken=tags_from_url(old)['utm_source']
         with sqlite3.connect(database_path()) as db:
             db.execute('DELETE FROM outreach_links')  # Reproduce pre-portal legacy tags.
         cutoff=time.time()
@@ -195,7 +197,7 @@ def test_clear_old_links_includes_legacy_but_preserves_newer_links(tmp_path,monk
         assert result['tags_deleted']==1 and result['links_deleted']==0
         state=client.get('/api/admin/outreach',headers=AUTH).json()
         assert len(state['links'])==1 and len(state['tags'])==1 and oldtoken not in str(state)
-        newtags={k:v[0] for k,v in parse_qs(urlsplit(newer).query).items()}
+        newtags=tags_from_url(newer)
         assert client.get('/api/personalization',params=newtags).json()['key']=='source:cold'
         token=newtags['utm_source']
         result=client.delete('/api/admin/tags/'+token,headers=AUTH).json()

@@ -110,6 +110,7 @@ class RoutineInput(TurnInput):
     interval_seconds: int = Field(ge=60, le=31536000)
 
 
+@app.get("/r/{code}", include_in_schema=False)
 @app.get("/admin", include_in_schema=False)
 @app.get("/")
 def index(request: Request):
@@ -124,7 +125,7 @@ def index(request: Request):
         html = html.replace(AGENT_NOTICE, '')
         return HTMLResponse(html, headers={'Cache-Control':'private, no-store','X-Robots-Tag':'noindex, nofollow'})
     import json
-    bootstrap = public_profile(resolve(request.query_params))
+    bootstrap = visitor_profile(request)
     payload = json.dumps(bootstrap).replace('<', '\\u003c')
     html = html.replace('</head>', '<script id="personalization" type="application/json">'+payload+'</script></head>')
     return HTMLResponse(html, headers={'Cache-Control': 'private, no-store'})
@@ -161,10 +162,19 @@ def portfolio():
     return position_portfolio(Portfolio.model_validate(store.brain.public_portfolio()))
 
 
+def visitor_profile(request):
+    code = request.path_params.get('code') or request.headers.get('x-outreach-link','')
+    if code:
+        from .outreach import link_tags
+        # Explicit invalid/revoked/deleted links must not restore a saved profile.
+        params = link_tags(code) or {'utm_content':''}
+        return {**public_profile(resolve(params)), 'outreach_code':code}
+    return public_profile(resolve(request.query_params, request.headers.get('x-portfolio-profile','')))
+
+
 @app.get('/api/personalization')
 def personalization(request: Request):
-    profile = resolve(request.query_params, request.headers.get('x-portfolio-profile', ''))
-    return JSONResponse(public_profile(profile), headers={'Cache-Control': 'private, no-store'})
+    return JSONResponse(visitor_profile(request), headers={'Cache-Control': 'private, no-store'})
 
 
 @app.post("/api/threads")

@@ -1,4 +1,4 @@
-"""Opaque outreach tags; the mapping lives in private runtime state, never Git."""
+"""Clean outreach links and private attribution, stored outside Git."""
 import os
 import json
 import re
@@ -6,12 +6,13 @@ import secrets
 import sqlite3
 import time
 from pathlib import Path
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import urlsplit
 
 from .paths import data_directory
 
 FIELDS = ('utm_source', 'utm_campaign', 'utm_content')
 TOKEN = re.compile(r't_[0-9a-f]{32}')
+LINK_CODE = re.compile(r'[A-Za-z0-9_-]{16,64}')
 
 
 def database_path():
@@ -35,13 +36,14 @@ def lookup(value, field):
 
 
 def build_link(base, person='', company='', source='outreach'):
-    """Generate fresh random aliases; names are private labels, never URL values."""
+    """Generate a clean path; names and attribution fields stay in private storage."""
     from .personalization import resolve
     url = urlsplit(base)
     if url.scheme != 'https' or not url.netloc or url.username or url.password or url.query or url.fragment or url.path not in ('','/'):
         raise ValueError('Base must be an HTTPS origin without path, query or fragment')
     values = {'utm_source':source, 'utm_campaign':company, 'utm_content':person}
     aliases = {field:'t_'+secrets.token_hex(16) for field, value in values.items() if value}
+    code = secrets.token_urlsafe(16)
     path = database_path()
     if path.resolve().is_relative_to(Path(__file__).resolve().parents[1]):
         raise ValueError('Outreach mappings must be stored outside the source repository')
@@ -58,8 +60,8 @@ def build_link(base, person='', company='', source='outreach'):
             profile = resolve({field: values[field]})
             db.execute('INSERT INTO outreach_tags VALUES (?,?,?,?,?)', (token, field, profile.key, values[field][:160], time.time()))
         ensure_links(db)
-        db.execute('INSERT INTO outreach_links VALUES (?,?,?,?,1)', (secrets.token_hex(16), json.dumps(aliases), json.dumps(values), time.time()))
-    return base.rstrip('/')+'/?'+urlencode(aliases)
+        db.execute('INSERT INTO outreach_links VALUES (?,?,?,?,1)', (code, json.dumps(aliases), json.dumps(values), time.time()))
+    return base.rstrip('/')+'/r/'+code
 
 
 def record_event(event):
@@ -206,3 +208,23 @@ def delete_links(*, ident=None, token=None, before=None):
             if 'outreach_disabled_tags' in tables:
                 db.execute('DELETE FROM outreach_disabled_tags')
         return result
+
+
+def link_tags(code):
+    """Resolve a public clean-link code into private attribution fields."""
+    if not LINK_CODE.fullmatch(code):
+        return {}
+    target = database_path()
+    if not target.is_file():
+        return {}
+    try:
+        with sqlite3.connect(target.as_uri()+'?mode=ro',uri=True,timeout=2) as db:
+            db.execute('BEGIN')
+            row = db.execute('SELECT tokens FROM outreach_links WHERE id=?',(code,)).fetchone()
+            if not row:
+                return {}
+            disabled = {r[0] for r in db.execute('SELECT token FROM outreach_disabled_tags')}
+            return {field:token for field,token in json.loads(row[0]).items() if field in FIELDS and token not in disabled
+                    and db.execute('SELECT 1 FROM outreach_tags WHERE token=? AND field=?',(token,field)).fetchone()}
+    except sqlite3.Error:
+        return {}

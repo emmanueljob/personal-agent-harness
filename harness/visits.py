@@ -16,6 +16,7 @@ router = APIRouter()
 class VisitEvent(BaseModel):
     name: Literal['pageview', 'profile_resolved', 'cta_click', 'guide_question_asked', 'theme_changed', 'book_opened', 'suggestion_used', 'turn_retried']
     url: str = Field(max_length=3000)
+    outreach_code: str = Field(default='', pattern=r'^(?:[A-Za-z0-9_-]{16,64})?$')
     profile_key: str = Field(default='default', max_length=80)
     referrer: str = Field(default='', max_length=2000)
     utm: dict[str, str] = Field(default_factory=dict, max_length=5)
@@ -63,6 +64,11 @@ def visit_event(event: VisitEvent, request: Request, tasks: BackgroundTasks):
         raise HTTPException(422, 'Expected a relative page URL')
     if not settings().tracking_enabled:
         return Response(status_code=204)
+    if event.outreach_code:
+        from .outreach import link_tags
+        from .personalization import resolve
+        event.utm = link_tags(event.outreach_code)
+        event.profile_key = resolve(event.utm or {'utm_content':''}).key
     if event.profile_key not in active_profiles():
         event.profile_key = 'default'
     if request.headers.get('dnt') == '1' or request.headers.get('sec-gpc') == '1':
