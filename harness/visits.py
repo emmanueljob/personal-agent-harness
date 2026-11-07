@@ -22,7 +22,7 @@ class VisitEvent(BaseModel):
     utm: dict[str, str] = Field(default_factory=dict, max_length=5)
     target: Literal['email', 'booking', ''] = ''
     session_id: str = Field(default='', pattern=r'^(?:[a-f0-9]{32})?$')
-    theme: Literal['light', 'dark', ''] = ''
+    theme: Literal['alpine', 'light', 'dark', ''] = ''
 
 
 def referrer_origin(value):

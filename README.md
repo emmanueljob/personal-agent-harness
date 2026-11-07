@@ -63,7 +63,7 @@ The Temporal integration test kills a worker mid-activity, starts a replacement,
 
 ## Interface development
 
-The frontend is React + TypeScript + Vite, with Motion transitions and locally bundled DM Sans and DM Serif Display fonts. The portfolio uses separate tabs for conversation, work, background, bookshelf and the technical walkthrough. Dark charcoal/amber and warm light themes are available; the theme preference persists locally. Personal presentation fields come from `/api/portfolio`, not the frontend bundle.
+The frontend is React + TypeScript + Vite, with Motion transitions and locally bundled DM Sans and DM Serif Display fonts. The portfolio has conversation, resume, background, bookshelf, podcast and architecture navigation. The architecture page provides a labeled logical diagram, component/source links, execution flow, design principles and deployment limits. Alpine glass is the default appearance; dark charcoal/amber and warm light themes remain available, and the theme preference persists locally. Personal presentation fields come from `/api/portfolio`, not the frontend bundle.
 
 FastAPI serves frontend/dist at the existing localhost:8000 URL after a frontend build:
 
@@ -71,7 +71,7 @@ FastAPI serves frontend/dist at the existing localhost:8000 URL after a frontend
 PATH="$PWD/.runtime/tools/node/bin:$PATH" npm --prefix frontend run build
 ```
 
-Restart the local stack after the first build (FastAPI registers the asset directory on startup). Further frontend builds update the served files; refresh the browser. For hot reloading, run `npm --prefix frontend run dev` with the same PATH setting; Vite proxies /api to FastAPI.
+Restart the local stack after the first build (FastAPI registers the asset directory on startup). Further frontend builds update the served files; refresh the browser. For hot reloading, run `npm --prefix frontend run dev` with the same PATH setting; Vite proxies `/api` and `/resume` (including its stylesheet and PDF) to FastAPI. To preview against a separate current-code backend, set `PORTFOLIO_API_ORIGIN=http://127.0.0.1:8012` when starting Vite. The default remains port 8000. A frontend-only restart cannot add missing resume routes to an older backend.
 
 The working animation reflects queued/running state and persisted LangChain model/tool callbacks, not private reasoning. No invented research/review stages or token stream are displayed. Public API event results are scoped to the authorized thread. Desktop/mobile layouts, native modal focus handling and reduced-motion preferences are supported. The owner's token is held only in browser memory and sent only to the local API.
 
