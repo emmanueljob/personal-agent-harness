@@ -14,6 +14,11 @@ Gitleaks uses its default credential rules through the explicit `security/gitlea
 
 No scanner proves the absence of all sensitive or proprietary information. Review the source and documentation before publishing. Git hooks can be bypassed by `--no-verify`, changed local configuration or altered scripts; they are an accidental-leak guard, not a security boundary against a malicious committer. Hooks are not automatically enabled on other clones. Local PR checks run after upload, so they are a backstop rather than a substitute for pre-push checks.
 
+The reviewed text source patch at
+`integrations/whatsapp-muse/companion.patch` is allowed at that exact path.
+It receives the same credential and private-knowledge scans as source code.
+Other patch exports remain blocked as unreviewed file types.
+
 Manual commands:
 
 ```sh

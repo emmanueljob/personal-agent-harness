@@ -36,18 +36,31 @@ The proof uses https://github.com/StephanMeijer/whatsapp-mcp at commit
 `whatsmeow` version with explicit Muse send support. The original lharries
 implementation's older dependency pin predates that support.
 
-Build the reviewed upstream source outside this repository with Go 1.27.3:
+The upstream archive skips Muse rich replies. Apply the reviewed local source
+patch at `integrations/whatsapp-muse/companion.patch` before building. It uses the
+already pinned `whatsmeow` rich-response types, extracts visible Markdown/text
+primitives, and ignores metadata, unknown types and malformed payloads. It adds
+no dependency, send capability, app-state resync or background check.
+
+Build the reviewed upstream source outside this repository with Go 1.27.3
+(replace `/absolute/path/to/harness` with this source checkout):
 
 ```sh
 git clone https://github.com/StephanMeijer/whatsapp-mcp /absolute/private/tools/whatsapp-mcp-source
 git -C /absolute/private/tools/whatsapp-mcp-source checkout 9b21e52d135576220bc5d5609738967ad792e4eb
 cd /absolute/private/tools/whatsapp-mcp-source
+git apply --check /absolute/path/to/harness/integrations/whatsapp-muse/companion.patch
+git apply /absolute/path/to/harness/integrations/whatsapp-muse/companion.patch
+go test ./...
 go build -o /absolute/private/tools/whatsapp-mcp ./cmd/whatsapp-mcp
 ```
 
 This is an external runtime tool; its source, binaries, Go caches and dependencies
 are not vendored into the application or container image. The application adds
-no Python dependencies. Re-review an upstream update before changing this pin.
+no Python dependencies. Re-review an upstream update before changing this pin. The patch is an audited
+source delta, not an upstream release; apply it once to the exact clean pin.
+Its Go tests cover visible text, legacy replies, multiline sections, archive
+sender identity, and rejection of metadata, malformed and oversized payloads.
 
 ## Initialize and pair
 
@@ -102,14 +115,14 @@ response decoding depends on the upstream bridge: lack of a matching archived
 response is not proof that Muse did not receive or answer the message. Check the
 phone's actual Muse conversation before diagnosing a parsing problem.
 
-The live proof confirmed delivery through MCP and an exact nonce response in
-Muse's WhatsApp side chat. The pinned companion did not archive the incoming
-response, so the MCP read tool still reported `verified: false`. Its text
-extractor does not handle `RichResponseMessage` and drops unrecognized message
-types. This is an identified compatibility gap, not evidence that this specific
-reply reached that extractor: receipt/decryption also needs diagnosis. Do not
-treat this version as a complete inbound results channel or import existing
-knowledge through it until a reply has passed the MCP verification path.
+The live proof initially confirmed delivery and an exact response in Muse's
+WhatsApp side chat, while the unpatched companion failed to archive that reply.
+After applying the decoder patch, a new synthetic test completed the actual
+stdio-to-HTTP MCP round trip: sent receipt, incoming reply archived as Muse, and
+`verified: true` with the exact nonce returned by `read_muse_connection_test`.
+No key resync or re-pairing was needed. No existing knowledge was imported.
+This verifies the local messaging proof; hosted delivery, ingestion and durable
+result push into the application remain separate work.
 
 Request IDs are persisted before sending. Concurrent/repeated IDs do not send
 again. A timeout, cancellation or rejected operation conservatively becomes

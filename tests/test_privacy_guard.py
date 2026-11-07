@@ -136,3 +136,15 @@ def test_reviewed_public_asset_requires_exact_content(repo, monkeypatch):
         guard.scan(guard.index_entries())
     with pytest.raises(guard.Blocked, match='unreviewed file type'):
         guard.check_path('frontend/public/images/other.jpeg', '100644')
+
+
+def test_companion_source_patch_is_scanned_without_allowing_other_exports(repo):
+    path = 'integrations/whatsapp-muse/companion.patch'
+    stage(repo, path, 'diff --git a/example.go b/example.go\n+package synthetic\n')
+    guard.scan(guard.index_entries())
+    with pytest.raises(guard.Blocked, match='unreviewed file type'):
+        guard.check_path('exports/history.patch', '100644')
+    secret = 'gh'+'p_'+hashlib.sha256(b'nonfunctional-patch-credential').hexdigest()[:36]
+    stage(repo, path, '+token = "'+secret+'"\n')
+    with pytest.raises(guard.Blocked, match='Credential scanner'):
+        guard.scan(guard.index_entries())
