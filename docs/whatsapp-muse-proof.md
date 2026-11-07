@@ -102,6 +102,15 @@ response decoding depends on the upstream bridge: lack of a matching archived
 response is not proof that Muse did not receive or answer the message. Check the
 phone's actual Muse conversation before diagnosing a parsing problem.
 
+The live proof confirmed delivery through MCP and an exact nonce response in
+Muse's WhatsApp side chat. The pinned companion did not archive the incoming
+response, so the MCP read tool still reported `verified: false`. Its text
+extractor does not handle `RichResponseMessage` and drops unrecognized message
+types. This is an identified compatibility gap, not evidence that this specific
+reply reached that extractor: receipt/decryption also needs diagnosis. Do not
+treat this version as a complete inbound results channel or import existing
+knowledge through it until a reply has passed the MCP verification path.
+
 Request IDs are persisted before sending. Concurrent/repeated IDs do not send
 again. A timeout, cancellation or rejected operation conservatively becomes
 `unknown`; crashes can leave `sending`. Neither state is automatically retried.
