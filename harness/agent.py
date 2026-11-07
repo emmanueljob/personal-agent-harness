@@ -7,7 +7,7 @@ from langchain_core.messages import ToolMessage, SystemMessage, HumanMessage
 from langchain.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.sqlite import SqliteSaver
-from .models import settings, local_model, openai_options
+from .models import settings, local_model, openai_options, context_window
 from .retrieval import evidence, grounding_query
 from .web_tools import web_tools, provider as web_provider
 from .bookshelf_tools import bookshelf_tools
@@ -119,7 +119,7 @@ def conversation_input(profile, previous, prompt, config, extra_context=""):
     messages = [{"role": "user", "content": prompt}]
     if config["provider"] == "ollama" or config.get("public_deployment"):
         from langchain_core.messages.utils import count_tokens_approximately
-        budget = int(config.get("context_window", os.getenv("OLLAMA_CONTEXT", "8192"))) - 2048 - int((len(profile) + len(extra_context)) / 3) - 1600
+        budget = context_window(config) - 2048 - int((len(profile) + len(extra_context)) / 3) - 1600
         if config.get("web_enabled"):
             budget -= 2500  # Leave room for bounded web-tool evidence.
         if count_tokens_approximately(messages, chars_per_token=3) > budget:
@@ -143,6 +143,33 @@ def final_answer(content, provider):
     return text
 
 
+def fit_turn_evidence(profile, prompt, config, voice, perspectives, knowledge):
+    """Fit serialized retrieval to the turn budget without cutting provenance.
+
+    Profile, voice and the current question are required. Retrieved records are
+    optional and kept whole, with owner perspectives taking priority. Counting
+    their JSON representation includes metadata and escaped structured notes.
+    """
+    def fits(views, notes):
+        try:
+            conversation_input(profile, [], prompt, config,
+                               voice + json.dumps(notes) + json.dumps(views))
+        except ValueError:
+            return False
+        return True
+
+    # Retain the existing error for genuinely oversized required input.
+    conversation_input(profile, [], prompt, config, voice + '[][]')
+    views, notes = [], []
+    for hit in perspectives:
+        if fits(views + [hit], notes):
+            views.append(hit)
+    for hit in knowledge:
+        if fits(views, notes + [hit]):
+            notes.append(hit)
+    return views, notes
+
+
 def prepare_turn(store, turn):
     mode = store.query("SELECT mode FROM threads WHERE id=?", (turn["thread_id"],))[0]["mode"]
     saved = store.query("SELECT body FROM execution_context WHERE turn_id=?", (turn["id"],))
@@ -152,7 +179,7 @@ def prepare_turn(store, turn):
         choice = store.query("SELECT choice FROM turn_model_choice WHERE turn_id=?", (turn["id"],))
         config = settings(choice[0]["choice"] if choice else "default")
         config["agent_runtime"] = store.runtime_for(turn["id"])
-        config["context_window"] = int(os.getenv("OLLAMA_CONTEXT", "8192"))
+        config["context_window"] = context_window(config)
         config["web_enabled"] = web_provider() != "disabled"
         from .public_access import public_only
         config['public_deployment'] = public_only()
@@ -198,6 +225,7 @@ def prepare_turn(store, turn):
                 break
             knowledge.append(evidence(hit, text))
             remaining -= len(text)
+        perspectives, knowledge = fit_turn_evidence(profile, turn['prompt'], config, voice, perspectives, knowledge)
         store.event(turn["id"], "knowledge_end", f"Knowledge search complete · {len(knowledge)} sources")
         messages = conversation_input(profile, previous, turn["prompt"], config, voice + json.dumps(knowledge) + json.dumps(perspectives))
         with store.connect() as db:

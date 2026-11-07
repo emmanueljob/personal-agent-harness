@@ -28,6 +28,8 @@ To download another model using the running local server:
 
 Set OLLAMA_MODEL to the desired installed model in .env and restart the web/worker processes. Existing turns retain their original model/profile/history snapshot on retries; new turns use the new configuration. For OpenAI, set MODEL_PROVIDER=openai and configure OPENAI_API_KEY. Keep .env private; it is excluded from version control.
 
+OpenAI turns use a separate application context allowance, `OPENAI_CONTEXT=131072` (128K tokens by default). `OLLAMA_CONTEXT` remains the laptop model's memory limit and does not constrain OpenAI. Set the OpenAI allowance within the selected model's supported window. These are approximate prompt budgets with space reserved for output and tools; they do not preload that many tokens. Optional retrieved evidence is fitted to the remaining allowance. Saved turns keep their original allowance on retry; new turns use updated settings.
+
 ## Durable turns
 
 1. The API commits a queued turn in SQLite before acknowledging it. Clients can supply request_id for idempotent submissions within a thread. Reusing it with different text returns 409.

@@ -6,6 +6,40 @@ from harness.agent import prepare_turn
 from test_agent_surfaces import fixture_app
 
 
+def test_provider_context_allowances_are_independent_and_saved_limits_win(monkeypatch):
+    monkeypatch.setenv('OLLAMA_CONTEXT', '16384')
+    monkeypatch.delenv('OPENAI_CONTEXT', raising=False)
+    assert models.context_window(dict(provider='openai')) == 131072
+    assert models.context_window(dict(provider='ollama')) == 16384
+    monkeypatch.setenv('OPENAI_CONTEXT', '262144')
+    assert models.context_window(dict(provider='openai')) == 262144
+    assert models.context_window(dict(provider='ollama')) == 16384
+    assert models.context_window(dict(provider='openai', context_window=16384)) == 16384
+
+
+def test_new_openai_turns_have_more_room_and_retries_keep_saved_allowance(tmp_path, monkeypatch):
+    from harness.agent import conversation_input
+    _, store = fixture_app(tmp_path, monkeypatch)
+    monkeypatch.setenv('MODEL_PROVIDER', 'openai')
+    monkeypatch.setenv('OLLAMA_CONTEXT', '16384')
+    monkeypatch.delenv('OPENAI_CONTEXT', raising=False)
+    thread = store.thread('public')['id']
+    ident = store.enqueue(thread, 'A short question')
+    turn = store.query('SELECT * FROM turns WHERE id=?', (ident,))[0]
+    _, snapshot = prepare_turn(store, turn)
+    assert snapshot['config']['context_window'] == 131072
+    config = {**snapshot['config'], 'public_deployment': True}
+    # A large background fits OpenAI while the laptop allowance still rejects it.
+    background = 'Synthetic published evidence. ' * 3000
+    assert conversation_input('Profile', [], 'Why?', config, background)
+    with pytest.raises(ValueError, match='configured model context'):
+        conversation_input('Profile', [], 'Why?', {**config, 'context_window': 16384}, background)
+    monkeypatch.setenv('OPENAI_CONTEXT', '262144')
+    assert prepare_turn(store, turn)[1] == snapshot
+    new = store.enqueue(thread, 'Another short question')
+    assert prepare_turn(store, store.query('SELECT * FROM turns WHERE id=?', (new,))[0])[1]['config']['context_window'] == 262144
+
+
 def test_openai_default_is_not_overridden_by_online_mac(monkeypatch):
     monkeypatch.setenv('MODEL_PROVIDER','openai')
     monkeypatch.setenv('OPENAI_API_KEY','synthetic-openai-key')
