@@ -46,7 +46,7 @@ Temporal keeps timers while the web app is down. A worker is required to materia
 
 ## Tools and profiles
 
-Public runs load only the published profile and public voice guidance, and can search public knowledge. Private runs load a separate private profile and can search both scopes and save Markdown artifacts. Biography and presentation data are loaded at runtime. Publishing profile changes applies to future turns; existing conversations retain their history/snapshots.
+Public runs load only the published profile and public voice guidance, and can search public knowledge. Short follow-ups resolve against recent user questions for retrieval; generated answers are not used as search facts. Relevant personal notes retain a place beside external references, and retrieved evidence keeps its title, attribution and supplied citation URL. Answers should cite the brain evidence they actually use, with note titles in prose when there is no source URL. Private runs load a separate private profile and can search both scopes and save Markdown artifacts. Biography and presentation data are loaded at runtime. Publishing profile changes applies to future turns; existing conversations retain their history/snapshots.
 
 Register trusted tool factories in harness/agent.py. They receive mode, thread ID, turn ID and storage. MCP is a future adapter: connection lifecycle, credentials, tool allowlists, approvals and external-write idempotency still need implementation.
 
