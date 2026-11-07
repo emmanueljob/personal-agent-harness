@@ -143,6 +143,33 @@ def final_answer(content, provider):
     return text
 
 
+def fit_turn_evidence(profile, prompt, config, voice, perspectives, knowledge):
+    """Fit serialized retrieval to the turn budget without cutting provenance.
+
+    Profile, voice and the current question are required. Retrieved records are
+    optional and kept whole, with owner perspectives taking priority. Counting
+    their JSON representation includes metadata and escaped structured notes.
+    """
+    def fits(views, notes):
+        try:
+            conversation_input(profile, [], prompt, config,
+                               voice + json.dumps(notes) + json.dumps(views))
+        except ValueError:
+            return False
+        return True
+
+    # Retain the existing error for genuinely oversized required input.
+    conversation_input(profile, [], prompt, config, voice + '[][]')
+    views, notes = [], []
+    for hit in perspectives:
+        if fits(views + [hit], notes):
+            views.append(hit)
+    for hit in knowledge:
+        if fits(views, notes + [hit]):
+            notes.append(hit)
+    return views, notes
+
+
 def prepare_turn(store, turn):
     mode = store.query("SELECT mode FROM threads WHERE id=?", (turn["thread_id"],))[0]["mode"]
     saved = store.query("SELECT body FROM execution_context WHERE turn_id=?", (turn["id"],))
@@ -198,6 +225,7 @@ def prepare_turn(store, turn):
                 break
             knowledge.append(evidence(hit, text))
             remaining -= len(text)
+        perspectives, knowledge = fit_turn_evidence(profile, turn['prompt'], config, voice, perspectives, knowledge)
         store.event(turn["id"], "knowledge_end", f"Knowledge search complete · {len(knowledge)} sources")
         messages = conversation_input(profile, previous, turn["prompt"], config, voice + json.dumps(knowledge) + json.dumps(perspectives))
         with store.connect() as db:

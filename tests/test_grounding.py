@@ -1,7 +1,8 @@
 """Synthetic evidence-selection regressions: no personal corpus or model calls."""
 import json
+import pytest
 
-from harness.agent import prepare_turn, knowledge_tools, build_system_prompt
+from harness.agent import prepare_turn, knowledge_tools, build_system_prompt, conversation_input
 from harness.retrieval import evidence, grounding_query, rank_knowledge
 from harness.store import Store
 
@@ -74,3 +75,53 @@ def test_tool_preserves_source_metadata(tmp_path):
     hits=json.loads(knowledge_tools(dict(store=store,mode='public'))[0].invoke(dict(query='testing')))
     assert hits and hits[0]['citation']['label']
     assert hits[0]['knowledge_role']=='published_note'
+
+
+@pytest.mark.parametrize('provider', ['openai', 'ollama'])
+def test_short_followup_fits_large_serialized_evidence(tmp_path, monkeypatch, provider):
+    monkeypatch.setenv('DATA_DIR', str(tmp_path))
+    monkeypatch.setenv('MODEL_PROVIDER', provider)
+    monkeypatch.setenv('PUBLIC_ONLY', 'true')
+    monkeypatch.setenv('OLLAMA_CONTEXT', '16384')
+    monkeypatch.setenv('WEB_SEARCH_PROVIDER', 'disabled')
+    store = Store(tmp_path)
+    store.set_profile('public', 'Verified career facts. ' * 350)
+    voice = 'Use a conversational tone. ' * 180
+    monkeypatch.setattr(store.brain, 'voice', lambda mode: voice)
+    # Escaping structured non-ASCII notes consumes much more space than their
+    # raw text. Keep the basis, limits and original citations intact.
+    perspectives = [dict(source='public/perspectives.json#view', score=100,
+                         knowledge_role='owner_perspective', basis='inferred',
+                         text=json.dumps(dict(view='Consider small experiments.',
+                                              limits='Tentative interpretation.',
+                                              url='https://example.org/idea')))]
+    hits = [dict(source=f'public/wiki/note-{i}.md', score=5-i,
+                 text='Evidence with attribution. ' + '漢' * 3500) for i in range(5)]
+    hits.insert(0, dict(source='public/wiki/short.md', score=6, text='A small relevant note.'))
+    monkeypatch.setattr(store.brain, 'perspectives', lambda query, mode: perspectives)
+    monkeypatch.setattr(store.brain, 'search', lambda query, mode: hits)
+    ident = store.enqueue(store.thread('public')['id'], 'try again')
+    turn = store.query('SELECT * FROM turns WHERE id=?', (ident,))[0]
+    config = dict(provider=provider, public_deployment=True, context_window=16384)
+    with pytest.raises(ValueError, match='configured model context'):
+        conversation_input(store.profile('public'), [], turn['prompt'], config,
+                           voice + json.dumps(hits) + json.dumps(perspectives))
+    _, snapshot = prepare_turn(store, turn)
+    from harness.personalization import guide_context
+    assert snapshot['profile'] == store.profile('public') + guide_context('default')
+    assert snapshot['voice'] == voice
+    assert snapshot['messages'][-1]['content'] == 'try again'
+    assert snapshot['perspectives'] == perspectives
+    assert len(snapshot['knowledge']) < len(hits)
+    assert any(hit['text'] == 'A small relevant note.' for hit in snapshot['knowledge'])
+    conversation_input(snapshot['profile'], [], turn['prompt'], snapshot['config'],
+                       voice + json.dumps(snapshot['knowledge']) + json.dumps(snapshot['perspectives']))
+    monkeypatch.setattr(store.brain, 'search', lambda *args: pytest.fail('Retry re-ran retrieval'))
+    assert prepare_turn(store, turn)[1] == snapshot
+
+
+def test_required_input_still_rejects_oversized_question():
+    from harness.agent import fit_turn_evidence
+    with pytest.raises(ValueError, match='configured model context'):
+        fit_turn_evidence('Required profile', 'large question ' * 5000,
+                          dict(provider='ollama', context_window=8192), '', [], [])
