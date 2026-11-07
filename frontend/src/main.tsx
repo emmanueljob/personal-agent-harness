@@ -13,7 +13,7 @@ import {LearningStudio,type FeedbackSeed} from './learning';
 import {registerPortfolioTools} from './webmcp';
 
 type Mode='public'|'private';
-const sections=[['conversation','Conversation'],['person','The person'],['bookshelf','The bookshelf'],['podcasts','Podcasts'],['behind-the-curtain','The machinery']] as const;
+const sections=[['conversation','Conversation'],['bookshelf','The bookshelf'],['podcasts','Podcasts'],['behind-the-curtain','The machinery']] as const;
 type Section=typeof sections[number][0];
 const sectionFromHash=():Section=>sections.find(([id])=>'#'+id===location.hash)?.[0]||'conversation';
 type Turn={provider?:string;model?:string;model_choice?:string;id:string;prompt:string;status:string;result:string|null;error:string|null;created:number};
@@ -60,7 +60,6 @@ function App(){
  useEffect(()=>{void reloadBooks()},[]);
  const [portfolio,setPortfolio]=useState<Portfolio>(emptyPortfolio);
  const [theme,setTheme]=useState<'alpine'|'dark'|'light'>(()=>{try{const saved=localStorage.getItem('afterhours-theme');return saved==='light'||saved==='dark'||saved==='alpine'?saved:'alpine'}catch{return 'alpine'}});
- const context=activeTab==='person'?'person':null;
  useEffect(()=>{document.documentElement.dataset.theme=theme;try{localStorage.setItem('afterhours-theme',theme)}catch{};document.querySelector('meta[name="theme-color"]')?.setAttribute('content',theme==='dark'?'#151616':theme==='light'?'#f7f5ee':'#e4ede7')},[theme]);
  const [mode,setMode]=useState<Mode>('public');
  const [threadId,setThreadId]=useState<string|null>(()=>sessionStorage.getItem('afterhours-thread-public'));
@@ -134,7 +133,7 @@ function App(){
  const download=(a:Artifact)=>{const url=URL.createObjectURL(new Blob([a.body],{type:'text/markdown'}));const link=document.createElement('a');link.href=url;link.download=a.title.replace(/[^\p{L}\p{N} _-]/gu,'').slice(0,80)+'.md';link.click();URL.revokeObjectURL(url)};
  return <MotionConfig reducedMotion="user"><div className="afterhours-app" data-theme={theme}>
  <header className="topbar"><a className="identity" href="#conversation" onClick={e=>{e.preventDefault();navigate('conversation')}} aria-label={portfolio.name+'’s AI portfolio'}><span className="identity-orb"/><span>{portfolio.name} <span className="identity-divider">/</span> <span className="identity-edition">portfolio</span></span></a><nav aria-label="Portfolio navigation"><div className="section-tabs" aria-label="Portfolio sections">{sections.map(([id,label],i)=><React.Fragment key={id}><button id={'tab-'+id} aria-current={activeTab===id?'page':undefined} aria-controls={'panel-'+id} onClick={()=>navigate(id)} onKeyDown={e=>tabKey(e,i)}>{label}</button>{id==='conversation'&&<a className="resume-nav" href={resumeUrl||'/resume'}>Resume</a>}</React.Fragment>)}</div><label className="theme-picker"><span className="sr-only">Site theme</span><select aria-label="Site theme" value={theme} onChange={e=>{setTheme(e.target.value as typeof theme);requestAnimationFrame(()=>trackUI('theme_changed'))}}><option value="alpine">Alpine</option><option value="light">Light</option><option value="dark">Dark</option></select></label></nav></header>
- <div hidden={activeTab==='bookshelf'||activeTab==='podcasts'||activeTab==='behind-the-curtain'} className={'app-body portfolio-panel '+(context?'with-context':'')}>
+ <div hidden={activeTab==='bookshelf'||activeTab==='podcasts'||activeTab==='behind-the-curtain'} className="app-body portfolio-panel">
  <main id="panel-conversation" role="region" aria-labelledby="tab-conversation" tabIndex={0} hidden={activeTab!=='conversation'} className={'agent-stage '+(thread?.turns.length?'has-conversation':'')}>
  <div className="conversation-bar"><span className="mode-caption"><span className="status-dot"/>{mode==='public'?portfolio.shortName.toUpperCase()+' · AI GUIDE':'YOUR PRIVATE STUDIO'}</span><button className="fresh-button" onClick={()=>{viewVersion.current++;void perform(()=>newThread())}}><span>↺</span> Start fresh</button></div>
  <div className={'presence '+(pending.length?'presence-busy':'')}><Orb busy={pending.length>0}/></div>
@@ -151,9 +150,7 @@ function App(){
  </div>
  {Boolean(thread?.artifacts.length)&&<section className="artifact-shelf" aria-label="Generated documents"><span className="eyebrow">MADE IN THIS CONVERSATION</span><div className="artifact-grid">{thread?.artifacts.map(a=><motion.button key={a.id} className="artifact-card" whileHover={{y:-3}} onClick={()=>setArtifact(a)}><span className="document-mark">↗</span><span><strong>{a.title}</strong><small>Open document</small></span></motion.button>)}</div></section>}
  </main>
- {context&&<aside id="panel-person" aria-labelledby="tab-person" tabIndex={0} className="context-panel" aria-label={'About '+portfolio.name}><div className="context-heading"><span className="eyebrow">THE PERSON</span></div>
- <><span className="eyebrow accent">{portfolio.role}</span><h2>{portfolio.shortName}<br/><em>{portfolio.surname}{portfolio.surname?'.':''}</em></h2><p className="person-focus">{portfolio.focusLines.map((line,i)=><React.Fragment key={line}>{i>0&&<br/>}{line}</React.Fragment>)}</p><p>{portfolio.summary}</p><p className="location">{portfolio.location}</p><a className="inline-button" href={portfolio.linkedin} target="_blank" rel="noreferrer">LinkedIn ↗</a><div className="career-list">{portfolio.career.map(c=><div className="career-item" key={c.company}><span className="eyebrow">{c.dates}</span><h3>{c.company}</h3><strong>{c.role}</strong><p>{c.note}</p></div>)}</div><div className="skills">{portfolio.skills.map(s=><span key={s}>{s}</span>)}</div><div className="education"><span className="eyebrow">EDUCATION</span><p>{portfolio.education}</p></div><button className="inline-button" onClick={()=>ask(portfolio.careerQuestion)}>Explore the background ↗</button><small className="source-note">Source: {portfolio.source||'Published profile'} · {portfolio.sourceDate}</small></>
- </aside>}
+
  </div>
  <div className="portfolio-panel" id="panel-bookshelf" role="region" aria-labelledby="tab-bookshelf" tabIndex={0} hidden={activeTab!=='bookshelf'}><Bookshelf books={books} ask={ask} enabled={activeTab==='bookshelf'} selection={shelfSelection} clearSelection={()=>setShelfSelection(null)}/></div>
  <div className="portfolio-panel" id="panel-podcasts" role="region" aria-labelledby="tab-podcasts" tabIndex={0} hidden={activeTab!=='podcasts'}>{activeTab==='podcasts'&&<Podcasts ask={ask}/>}</div>
