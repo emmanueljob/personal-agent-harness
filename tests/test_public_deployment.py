@@ -105,6 +105,9 @@ def test_container_build_context_has_no_personal_or_runtime_inputs():
     dockerfile=(root/'Dockerfile').read_text()
     assert 'COPY . ' not in dockerfile
     assert 'sha256sum -c' in dockerfile
+    assert '!frontend/public/images/alpine-panorama.jpeg' in rules
+    assert '!frontend/public/**' not in rules
+    assert 'COPY frontend/public/images/alpine-panorama.jpeg ./public/images/alpine-panorama.jpeg' in dockerfile
 
 
 def test_public_theme_background_is_served_from_frontend_build(tmp_path, monkeypatch):
