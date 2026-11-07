@@ -3,6 +3,8 @@ import SwiftUI
 struct ImportView: View {
     @StateObject private var model = ImportModel()
     @State private var showAccess = false
+    @State private var showMemory = false
+    @StateObject private var memory = MemoryModel()
     @StateObject private var access = AccessModel()
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -13,6 +15,7 @@ struct ImportView: View {
                     Text("Selected sources. Local evidence. Your control.").foregroundStyle(.secondary)
                 }
                 Spacer()
+                Button("Memory & dreaming") { showMemory = true }
                 Button("Access settings") { showAccess = true }
             }
             HStack {
@@ -51,11 +54,15 @@ struct ImportView: View {
             }
             Text(model.notice).font(.callout).textSelection(.enabled).accessibilityIdentifier("import-status")
             ForEach(model.coverage, id: \.self) { Text($0).font(.caption).foregroundStyle(.secondary) }
-            Text("Messages rich-body text decoding and attachments are pending; original rich-body bytes are retained locally. Records are evidence, not proof of attendance, agreement or preference. Quit pauses work at the last committed batch.").font(.caption).foregroundStyle(.secondary)
+            Text("Rich message text is decoded where supported; original bytes are retained locally. Attachments are not downloaded. Records are evidence, not proof of attendance, agreement or preference. Quit pauses work at the last committed batch.").font(.caption).foregroundStyle(.secondary)
         }
         .padding(24).frame(minWidth: 920, minHeight: 650)
         .sheet(isPresented: $showAccess) { VStack { ContentView(model: access); Button("Done") { showAccess = false }.padding() }.frame(width: 780, height: 750) }
         .sheet(isPresented: $model.showBrowser) { browser }
+        .sheet(isPresented: $showMemory) { VStack { MemoryView(model: memory); Button("Done") { showMemory = false }.padding() } }
+        .onChange(of: model.running) { _, running in
+            if !running && model.plan?.complete == true { Task { await memory.run("index") } }
+        }
     }
     func selection(_ item: SourceChoice, selected: Binding<Set<String>>) -> some View {
         Toggle(isOn: Binding(get: { selected.wrappedValue.contains(item.id) }, set: { value in

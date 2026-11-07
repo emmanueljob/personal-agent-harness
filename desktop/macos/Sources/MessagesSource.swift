@@ -26,8 +26,13 @@ enum MessagesSource {
         // Both historical seconds and newer nanoseconds are compared in Apple epoch seconds.
         let seconds = "(CASE WHEN abs(m.date)>100000000000 THEN m.date/1000000000.0 ELSE m.date END)"
         let rows = try db.rows("SELECT m.ROWID AS row_id,m.guid,m.text,m.date,m.is_from_me,h.id AS sender\(extra)\(rawBody) FROM message m JOIN chat_message_join j ON j.message_id=m.ROWID JOIN chat c ON c.ROWID=j.chat_id LEFT JOIN handle h ON h.ROWID=m.handle_id WHERE c.guid=? AND m.ROWID>? AND \(seconds)>=CAST(? AS REAL) AND \(seconds)<CAST(? AS REAL) ORDER BY m.ROWID LIMIT 200", [thread.id, String(after), String(start - 978307200), String(end - 978307200)])
+        let richBodies = rows.map { row -> String in
+            let retracted = Double(row["date_retracted"] ?? "0") ?? 0
+            return (row["text"] ?? "").isEmpty && retracted == 0 ? (row["attributed_hex"] ?? "") : ""
+        }
+        let decoded = MemoryWorker.decode(richBodies)
         var records = [Evidence](); var skipped = 0
-        for row in rows {
+        for (rowIndex, row) in rows.enumerated() {
             guard let guid = row["guid"], !guid.isEmpty, let date = Double(row["date"] ?? "") else { skipped += 1; continue }
             let timestamp = (abs(date) > 100000000000 ? date / 1_000_000_000 : date) + 978307200
             var metadata = row
@@ -41,9 +46,10 @@ enum MessagesSource {
                 continue
             }
             let plain = row["text"] ?? ""
-            // Preserve unsupported rich bodies as evidence, never guess text from arbitrary bytes.
-            metadata["body_status"] = plain.isEmpty ? "rich_body_or_attachment_not_decoded" : "plain_text"
-            records.append(Evidence(id: "messages:\(thread.id):\(guid)", source: "messages:\(thread.id)", kind: "message", title: thread.title, body: plain.isEmpty ? "[Rich message or attachment; text decoding pending]" : plain, occurred: timestamp, metadata: metadata))
+            let rich = decoded.indices.contains(rowIndex) ? decoded[rowIndex] : nil
+            metadata["body_status"] = !plain.isEmpty ? "plain_text" : rich != nil ? "decoded_rich_text" : "rich_body_or_attachment_not_decoded"
+            if rich != nil { metadata["decoder_version"] = "pytypedstream-0.1.0/v1" }
+            records.append(Evidence(id: "messages:\(thread.id):\(guid)", source: "messages:\(thread.id)", kind: "message", title: thread.title, body: !plain.isEmpty ? plain : rich ?? "[Rich message or attachment; unsupported format]", occurred: timestamp, metadata: metadata))
         }
         return MessageBatch(records: records, cursor: Int64(rows.last?["row_id"] ?? "") ?? after, scanned: rows.count, skipped: skipped)
     }
