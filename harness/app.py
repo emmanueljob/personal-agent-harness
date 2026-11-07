@@ -224,6 +224,12 @@ def resume_download():
     })
 
 
+@app.get('/api/brain-map')
+def brain_map():
+    from .brain_map import public_map
+    return JSONResponse(public_map(store.brain), headers={'Cache-Control': 'no-store'})
+
+
 @app.get("/api/portfolio", response_model=Portfolio)
 def portfolio():
     return position_portfolio(Portfolio.model_validate(store.brain.public_portfolio()))

@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS visitor_arrivals(
 CREATE INDEX IF NOT EXISTS visitor_arrivals_browser ON visitor_arrivals(visitor_hash,last_seen);
 
 """
-SECTIONS = {'conversation', 'work', 'person', 'bookshelf', 'podcasts', 'behind-the-curtain'}
+SECTIONS = {'conversation', 'work', 'person', 'bookshelf', 'podcasts', 'brain', 'behind-the-curtain'}
 POSTHOG_HOSTS = {'us': 'https://us.i.posthog.com', 'eu': 'https://eu.i.posthog.com'}
 
 
