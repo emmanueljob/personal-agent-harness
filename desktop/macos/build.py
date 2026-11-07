@@ -27,7 +27,8 @@ def main():
                     '-lsqlite3', '-o', str(executable)], check=True)
     resources = contents / 'Resources'
     resources.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source / 'Worker' / 'memory_worker.py', resources / 'memory_worker.py')
+    for worker in ('memory_worker.py', 'dream_cycle.py'):
+        shutil.copy2(source / 'Worker' / worker, resources / worker)
     dependencies = [
         ('pytypedstream.whl', 'https://files.pythonhosted.org/packages/0d/1a/dbbbad9690c24506aec4571bc6613a5625b163b1607777109c9dabdbec07/pytypedstream-0.1.0-py3-none-any.whl', '499920d4cb8bec8fd9d9cdd4c6312765eb418c398c10371ab1c9c0051104d278'),
         ('pytypedstream-source.tar.gz', 'https://files.pythonhosted.org/packages/47/d2/4632904c21890b1f397e6e9ef823b216f6f0a3a767897b092f592f16b90e/pytypedstream-0.1.0.tar.gz', 'c3b01790e667189966e98fcfeb638cc0541358ea7348745619fe58e3e8c9fd51'),
@@ -53,7 +54,7 @@ def main():
             'CFBundleIdentifier': 'local.personalbrain.mac',
             'CFBundleName': 'Personal Brain', 'CFBundleDisplayName': 'Personal Brain',
             'CFBundleExecutable': 'PersonalBrain', 'CFBundlePackageType': 'APPL',
-            'CFBundleShortVersionString': '0.3.0', 'CFBundleVersion': '3',
+            'CFBundleShortVersionString': '0.4.0', 'CFBundleVersion': '4',
             'LSMinimumSystemVersion': '14.0', 'NSHighResolutionCapable': True,
             'NSCalendarsFullAccessUsageDescription': 'Read calendars you select to import events into your local personal brain. This app does not modify your calendars.',
         }, file)

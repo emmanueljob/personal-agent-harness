@@ -3,6 +3,8 @@ import importlib.util
 import json
 from pathlib import Path
 import sqlite3
+import sys
+sys.path.insert(0, str(Path(__file__).parents[1] / "desktop/macos/Worker"))
 
 import pytest
 

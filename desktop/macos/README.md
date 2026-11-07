@@ -3,7 +3,7 @@
 A native SwiftUI app for selecting Calendar sources and Messages conversations,
 importing a chosen date range into a local evidence store, and browsing provenance.
 No source writes, cloud uploads or network listener. Optional local learning and
-GBrain indexing are described in the 0.3 section below. The portfolio is unchanged.
+GBrain indexing are described below, including the full 0.4 local cycle. The portfolio is unchanged.
 
 Requires Apple Silicon, macOS 14+, Python 3 and Apple Command Line Tools.
 
@@ -149,18 +149,49 @@ Open **Memory & dreaming**:
    still-current proposals become reviewed memory pages on the next index. Previously
    indexed stale/rejected pages are excluded immediately from in-app search, and removed
    from GBrain by the next index. There is no external GBrain/MCP access in this version.
-6. Optionally enable a five-record learning batch every 30 minutes while the memory
-   sheet remains open. It is off by default, not persistent, and starts no new work while
-   the sheet is closed, app is quit or Mac sleeps. In-flight work may finish when the
-   sheet closes. One bounded worker job runs at a time; no daemon/cron/global hooks.
+### Full local dreaming (0.4)
 
-GBrain does have broader native dreaming: `synthesize`, `patterns`, extraction and
-`consolidate` (hot facts to takes), among other phases. A full dream can call models;
-`dream --dry-run` is not a universal no-inference guarantee. This app therefore uses
-explicit non-model phases plus its own bounded local suggestion/review step. It does
-not pretend that indexing alone learns preferences or that canonical memory is a
-GBrain hot-facts table. Native synthesis/local tool-loop compatibility and accepted
-memory promotion are future, separately measured steps.
+Choose an installed Ollama model in **Memory & dreaming**, then **Start / resume full
+local dream**. The cycle processes every currently imported record, not the old
+five-record sample:
+
+1. Drain all pending supported rich-message repairs in bounded batches.
+2. Reconcile the isolated GBrain evidence projection.
+3. Extract sourced observations from chronological batches of every textual record.
+   Long records are split into 3,000-character chunks, with no silent truncation.
+   Unsupported/retracted/empty records are explicitly counted as unprocessed text.
+   Other-party messages provide context but cannot ground owner claims.
+4. Synthesize tentative patterns supported by at least two distinct evidence IDs.
+   Further bounded hierarchical passes connect candidate themes across batches.
+5. Deduplicate by normalized claim and source hashes, preserving review decisions.
+   Candidates retain exact quotes and source IDs, hashes and attribution.
+6. Reconcile GBrain again and run its native deterministic extract/orphan maintenance.
+
+The UI shows phase, completed source count, batch progress and current pattern count.
+Pause finishes the current local step and preserves checkpoints; resume reuses model
+outputs with matching phase, model, input and source versions. Quitting the app
+interrupts its worker. A parent-process watchdog also stops the worker after an app
+crash. An interrupted current unit may be repeated; committed units are reusable.
+A cycle is marked outdated if imports changed while it ran. Re-run to cover changes.
+No new run starts automatically on launch. Optional 30-minute full cycles run only
+while the memory panel is open, off by default, with unchanged model work cached.
+
+Patterns are tentative until reviewed. Inspect quotes, then confirm or reject.
+Only current, confirmed candidates become reviewed GBrain pattern pages on the next
+index. Changed/missing source hashes immediately exclude stale candidates from review,
+projection and in-app search. Calendar-only candidates are labeled as scheduled plans,
+with attendance unverified. Review is necessary: exact quote matching establishes
+provenance, not that a model's interpretation logically follows.
+
+**GBrain compatibility:** pinned 0.60.530.0's synthesis subagent uses Anthropic-direct;
+its Ollama chat recipe is not tool-capable. This is an app-owned local dream pipeline,
+not a claim that the full native GBrain dream tool loop runs locally. The app never
+calls native cloud-dependent synthesis/pattern/consolidation phases. See the pinned
+[provider documentation](https://github.com/garrytan/gbrain/blob/v0.60.530.0/docs/integrations/embedding-providers.md).
+The Mac pipeline supplies local equivalents and uses GBrain for derived indexing,
+links and deterministic maintenance. Four hierarchical passes are a bounded heuristic,
+not an exhaustive comparison of every pair of records. No autonomous actions or
+personality/diagnosis profile are produced.
 
 ### Boundaries, resources and schema
 
@@ -178,7 +209,10 @@ output is suppressed. Decoder batches are capped at 16 MB and 200 bodies, with a
 15-second timeout. Rich bodies are capped at 1 MB decoded input each. Stored repair
 is capped at 200 records. Local learning runs at most five records per action, with
 8,000 characters per input, 1,200 output tokens per call and a 90-second HTTP timeout.
-Malformed model output leaves the record pending for retry. Exact quotes constrain
+Full-cycle inference uses a 14,000-character input budget, 16,384-token context,
+3,000 output tokens and a 180-second local HTTP timeout per unit. Full cycles have
+a four-hour worker deadline; longer corpora can be resumed. Malformed model output
+leaves the current unit pending for retry. Exact quotes constrain
 provenance but do not prove entailment; owner review is still necessary.
 
 The GBrain subprocess gets a minimal environment, its own HOME/GBRAIN_HOME and working
@@ -186,12 +220,15 @@ folder, no provider secrets, and a macOS sandbox-exec egress-denial profile. Thi
 network containment, not a general filesystem sandbox. It never opens the serving
 Afterhours GBrain indexes or changes their config. No GBrain autopilot, global hooks,
 Git synchronization or model phases are enabled. GBrain command timeouts are 120
-seconds; the app worker has a 10-minute action deadline. Interrupted indexing resumes
+seconds; ordinary actions have a 10-minute deadline. Interrupted indexing resumes
 changed pages from its receipts. `/usr/bin/sandbox-exec` is a development dependency;
 if it is unavailable, indexing fails closed rather than dropping egress protection.
 
-New additive SQLite tables store projection receipts, per-source learning receipts
-and reviewable proposals. Current-hash joins hide proposals based on changed evidence.
+New additive SQLite tables store projection receipts, per-source learning receipts,
+reviewable proposals, dream runs, cached dream units and pattern candidates. No
+existing evidence schema or workflow payload is rewritten. Dream tables are private
+runtime data inside the existing brain database; they are never bundled in the app.
+An exclusive local file lock prevents concurrent mutating memory workers. Current-hash joins hide proposals based on changed evidence.
 Reprocessing does not automatically confirm a proposal. Source groups and accepted
 memories link to evidence pages; raw rich-body bytes are never indexed or sent to a
 model. Keyword search validates GBrain hits against the current canonical projection.
@@ -205,5 +242,5 @@ uses only a temporary synthetic database with all GBrain network access denied:
 
 ```sh
 DESKTOP_MEMORY_RESOURCES="$PWD/.runtime/personal-brain-macos/Personal Brain.app/Contents/Resources" \
-  python3 -m pytest tests/test_desktop_memory.py -q
+  python3 -m pytest tests/test_desktop_memory.py tests/test_desktop_dream.py -q
 ```

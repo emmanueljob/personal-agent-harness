@@ -7,14 +7,14 @@ enum MemoryWorker {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
         process.arguments = ["-I", resources.appendingPathComponent("memory_worker.py").path, "--resources", resources.path, "--home", home.path, action]
-        process.environment = ["PATH": "/usr/bin:/bin", "HOME": home.path, "LANG": "en_US.UTF-8", "PYTHONDONTWRITEBYTECODE": "1"]
+        process.environment = ["PATH": "/usr/bin:/bin", "HOME": home.path, "LANG": "en_US.UTF-8", "PYTHONDONTWRITEBYTECODE": "1", "PARENT_APP_PID": String(ProcessInfo.processInfo.processIdentifier)]
         process.currentDirectoryURL = resources
         let incoming = Pipe(), outgoing = Pipe()
         process.standardInput = incoming; process.standardOutput = outgoing
         process.standardError = FileHandle.nullDevice
         try process.run()
         let timeout = DispatchWorkItem { if process.isRunning { process.terminate() } }
-        DispatchQueue.global().asyncAfter(deadline: .now() + (action == "decode" ? 15 : 600), execute: timeout)
+        DispatchQueue.global().asyncAfter(deadline: .now() + (action == "decode" ? 15 : (action == "full_dream" ? 14400 : 600)), execute: timeout)
         defer { timeout.cancel() }
         let data = try JSONSerialization.data(withJSONObject: input)
         guard data.count <= 16 * 1024 * 1024 else { process.terminate(); throw BrainFailure(message: "Memory batch exceeds size limit.") }
@@ -43,6 +43,11 @@ struct MemoryProposal: Identifiable {
     let id: String; let evidenceID: String; let claim: String; let quote: String; let kind: String; let state: String
 }
 
+struct DreamPattern: Identifiable {
+    let id: String; let claim: String; let explanation: String; let state: String
+    let citations: [[String: String]]
+}
+
 @MainActor
 final class MemoryModel: ObservableObject {
     @Published var busy = false
@@ -52,16 +57,70 @@ final class MemoryModel: ObservableObject {
     @Published var searchQuery = ""
     @Published var searchResults = ""
     @Published var automaticLearning = false
-    init() { refresh() }
+    @Published var dreamProgress = "No full cycle has run yet."
+    @Published var patterns: [DreamPattern] = []
+    @Published var dreaming = false
+    private var dreamID: String?
+    func pauseDream() {
+        guard let dreamID else { return }
+        do {
+            let store = try BrainStore()
+            try store.sql.run("UPDATE dream_runs SET pause_requested=1 WHERE id=?", [dreamID])
+            status = "Pause requested. The current local step will finish and save its checkpoint."
+        } catch { status = "Could not request pause; retry." }
+    }
+    func refreshDream() {
+        do {
+            let store = try BrainStore()
+            guard !(try store.sql.rows("SELECT name FROM sqlite_master WHERE name='dream_runs'")).isEmpty else { return }
+            if let row = try store.sql.rows("SELECT * FROM dream_runs ORDER BY updated DESC LIMIT 1").first {
+                dreamID = row["id"]
+                let state = row["state"] ?? ""
+                dreamProgress = "\(state) · \(row["phase"] ?? "") · \(row["completed"] ?? "0")/\(row["total"] ?? "0") source records · step \(row["units_done"] ?? "0")/\(row["units_total"] ?? "0") · \(row["patterns"] ?? "0") patterns"
+                if let detail = row["detail"], let data = detail.data(using: .utf8),
+                   let report = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    dreamProgress += " · \(report["unsupported_or_empty"] ?? 0) unsupported/empty"
+                }
+            }
+            patterns = try store.sql.rows("SELECT * FROM dream_patterns WHERE state<>'rejected' ORDER BY created DESC LIMIT 500").compactMap { row in
+                guard let data = row["citations"]?.data(using: .utf8),
+                      let cites = try? JSONSerialization.jsonObject(with: data) as? [[String: String]],
+                      !cites.isEmpty else { return nil }
+                for cite in cites {
+                    guard let id = cite["id"], let hash = cite["hash"],
+                          try store.sql.rows("SELECT id FROM evidence WHERE id=? AND hash=?", [id,hash]).count == 1 else { return nil }
+                }
+                return DreamPattern(id: row["id"]!, claim: row["claim"]!, explanation: row["explanation"]!, state: row["state"]!, citations: cites)
+            }
+        } catch { dreamProgress = "Could not read dream progress." }
+    }
+    func reviewPattern(_ pattern: DreamPattern, confirm: Bool) {
+        do {
+            let store = try BrainStore()
+            try store.sql.run("UPDATE dream_patterns SET state=? WHERE id=?", [confirm ? "confirmed" : "rejected", pattern.id])
+            refreshDream()
+            status = "Pattern review saved. Index imports to refresh GBrain's reviewed patterns."
+        } catch { status = "Could not save pattern review." }
+    }
+    init() { refresh(); refreshDream() }
     func run(_ action: String) async {
         guard !busy else { return }
         busy = true
+        dreaming = action == "full_dream"
+        let poller = Task { [weak self] in
+            while !Task.isCancelled {
+                self?.refreshDream()
+                do { try await Task.sleep(nanoseconds: 1_000_000_000) } catch { break }
+            }
+        }
         status = action == "learn" ? "Learning locally from up to five eligible records…" : "Running \(action) locally. You can keep using the app…"
-        defer { busy = false; refresh() }
+        defer { poller.cancel(); busy = false; dreaming = false; refresh(); refreshDream() }
         do {
             let input: [String: Any] = ["model": modelName, "query": searchQuery]
             let result = try await Task.detached { try MemoryWorker.call(action, input: input) }.value
             switch action {
+            case "full_dream":
+                status = "Local dream cycle \(result["state"] ?? "finished"). Patterns below remain tentative until you review their source quotes."
             case "repair": status = "Decoded \(result["decoded"] ?? 0) stored rich messages; \(result["unsupported"] ?? 0) unsupported. Re-run for the next batch."
             case "index": status = "GBrain: \(result["indexed"] ?? 0) pages current; \(result["changed"] ?? 0) changed."
             case "learn": status = "Reviewed \(result["processed"] ?? 0) eligible records locally; \(result["proposed"] ?? 0) memory suggestions. Confirm useful ones below."
@@ -100,7 +159,7 @@ struct MemoryView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Memory & dreaming").font(.title2.bold())
-            Text("GBrain maintains an isolated local index. Learning uses only your selected local Ollama model. Suggestions are not confirmed facts until you review them.").foregroundStyle(.secondary)
+            Text("Process every import locally: decode → index → extract → find patterns → consolidate → maintain. Completed model work is saved for resume. Review suggestions before treating them as facts.").foregroundStyle(.secondary)
             HStack {
                 Button("Decode stored rich messages") { Task { await model.run("repair") } }
                 Button("Index imports in GBrain") { Task { await model.run("index") } }
@@ -108,10 +167,12 @@ struct MemoryView: View {
             }.disabled(model.busy)
             HStack {
                 TextField("Installed Ollama model", text: $model.modelName)
-                Button("Learn from next 5 records") { Task { await model.run("learn") } }.disabled(model.busy)
+                Button("Start / resume full local dream") { Task { await model.run("full_dream") } }.disabled(model.busy)
+                if model.dreaming { Button("Pause") { model.pauseDream() } }
             }
-            Toggle("Learn a small batch every 30 minutes while this window is open", isOn: $model.automaticLearning)
-            Text("GBrain has model-based synthesis/pattern phases too. This app runs explicit non-model maintenance phases only; broad native dream/autopilot is not enabled. No new scheduled run starts while this window is closed or the Mac sleeps; a running batch may finish. Quit stops it.").font(.caption).foregroundStyle(.secondary)
+            Toggle("Run a full cycle every 30 minutes while this window is open", isOn: $model.automaticLearning)
+            Text("This app runs local synthesis with Ollama; GBrain handles indexing and deterministic maintenance. Its native cloud-dependent synthesis is not used. Closing this panel allows the current run to finish; quitting the app interrupts it with checkpoints preserved. Calendar patterns describe scheduled plans, not attendance.").font(.caption).foregroundStyle(.secondary)
+            Text(model.dreamProgress).font(.caption).textSelection(.enabled)
             HStack { if model.busy { ProgressView().controlSize(.small) }; Text(model.status).font(.callout).textSelection(.enabled) }
             HStack {
                 TextField("Search GBrain keywords", text: $model.searchQuery)
@@ -120,6 +181,22 @@ struct MemoryView: View {
             if !model.searchResults.isEmpty { ScrollView { Text(model.searchResults).font(.caption).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(height: 120) }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
+                    if model.patterns.isEmpty { Text("No current patterns yet. Run the full cycle to analyze all imports.").foregroundStyle(.secondary) }
+                    ForEach(model.patterns) { pattern in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(pattern.claim).font(.headline).textSelection(.enabled)
+                            Text(pattern.explanation).textSelection(.enabled)
+                            ForEach(Array(pattern.citations.enumerated()), id: \.offset) { _, cite in
+                                Text("\(cite["basis"] ?? "evidence") · \(cite["id"] ?? ""): “\(cite["quote"] ?? "")”").font(.caption).textSelection(.enabled)
+                            }
+                            HStack {
+                                Text("Tentative pattern · \(pattern.state)").foregroundStyle(.secondary)
+                                if pattern.state == "proposed" { Button("Confirm pattern") { model.reviewPattern(pattern, confirm: true) } }
+                                Button("Reject / remove pattern") { model.reviewPattern(pattern, confirm: false) }
+                            }.disabled(model.busy)
+                        }
+                        Divider()
+                    }
                     ForEach(model.proposals) { proposal in
                         VStack(alignment: .leading, spacing: 6) {
                             Text(proposal.claim).font(.headline)
@@ -139,7 +216,7 @@ struct MemoryView: View {
         .task {
             while !Task.isCancelled {
                 do { try await Task.sleep(nanoseconds: 1_800_000_000_000) } catch { break }
-                if model.automaticLearning && !model.busy { await model.run("learn") }
+                if model.automaticLearning && !model.busy { await model.run("full_dream") }
             }
         }
     }
