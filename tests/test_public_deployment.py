@@ -126,3 +126,20 @@ def test_public_theme_background_is_served_from_frontend_build(tmp_path, monkeyp
         assert client.get('/images/unreviewed.jpeg').status_code == 404
         image.unlink()
         assert client.get('/images/alpine-panorama.jpeg').status_code == 404
+
+
+def test_brain_map_endpoint_is_public_only_even_with_private_query(tmp_path, monkeypatch):
+    module, store = configure(tmp_path, monkeypatch)
+    public = store.brain.scope('public') / 'wiki'
+    private = store.brain.scope('private') / 'wiki'
+    public.mkdir(parents=True)
+    private.mkdir(parents=True)
+    (public/'idea.md').write_text('# Public AI idea\n\nProduct engineering.')
+    (private/'secret.md').write_text('# PRIVATE_MAP_CANARY\n\nDo not publish.')
+    with TestClient(module.app, base_url='https://portfolio.test') as client:
+        response = client.get('/api/brain-map?mode=private')
+        assert response.status_code == 200
+        assert response.json()['scope'] == 'public'
+        assert response.json()['totals']['note'] == 1
+        assert 'PRIVATE_MAP_CANARY' not in response.text
+        assert response.headers['cache-control'] == 'no-store'
