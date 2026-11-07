@@ -40,6 +40,7 @@ async def lifespan(app):
         async with contextlib.AsyncExitStack() as stack:
             await stack.enter_async_context(app.state.agent_mcp_manager().run())
             await stack.enter_async_context(app.state.admin_mcp_lifespan())
+            await stack.enter_async_context(app.state.grok_mcp_lifespan())
             yield
     finally:
         task.cancel()
@@ -92,6 +93,8 @@ from .observability import install as install_observability
 install_observability(app, studio_owner)
 from .admin import mount_admin
 mount_admin(app, lambda:store, studio_owner)
+from .grok_connection import mount_grok
+mount_grok(app, lambda:store, studio_owner)
 
 
 def access(ident, authorization):
