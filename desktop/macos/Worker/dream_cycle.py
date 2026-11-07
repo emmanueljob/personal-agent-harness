@@ -261,6 +261,7 @@ def run(db, model, model_fn, repair_fn, index_fn, maintenance_fn):
     except Paused:
         update(db,run_id,state='paused',detail='Paused at a durable boundary; resume reuses completed model work')
         return latest(db)
-    except BaseException:
-        update(db,run_id,state='failed',detail='Cycle interrupted or a local step failed; completed units are saved for resume')
+    except BaseException as error:
+        failure = 'invalid_model_json' if isinstance(error,json.JSONDecodeError) else 'timeout' if isinstance(error,TimeoutError) else 'interrupted' if isinstance(error,InterruptedError) else 'local_step_failed'
+        update(db,run_id,state='failed',detail=json.dumps(dict(failure=failure, recovery='Completed units are saved; resume retries the pending unit')))
         raise
