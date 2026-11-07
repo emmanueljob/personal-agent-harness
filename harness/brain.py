@@ -109,10 +109,16 @@ class FileBrain:
                 matching = sorted((x for x in scored if x[0]), key=lambda x: x[0], reverse=True)[:3]
                 if matching:
                     excerpts = [x[1] for x in matching]
+                    # A title match should carry the note's actual ideas, not
+                    # just a heading the agent cannot answer from.
+                    if all(part.lstrip().startswith('#') for part in excerpts):
+                        supporting = [part for part in paragraphs if part.strip()
+                                      and not part.lstrip().startswith(('#', 'Source:', 'Added:', 'Visibility:'))]
+                        excerpts.extend(supporting[:2])
                     if p.parent.name == 'influences':
                         # Preserve the work's identity and provenance beside its ideas.
                         excerpts = list(dict.fromkeys(paragraphs[:2] + excerpts))
-                    results.append({"source": visibility + "/" + p.relative_to(scope).as_posix(), "text": "\n\n".join(excerpts)[:3500], "score": sum(x[0] for x in matching)})
+                    results.append({"source": visibility + "/" + p.relative_to(scope).as_posix(), "title": body.splitlines()[0].lstrip("# ")[:200] if body.splitlines() else p.stem, "text": "\n\n".join(excerpts)[:3500], "score": sum(x[0] for x in matching)})
         # Only the curated public snapshot is available to visitor retrieval.
         for visibility in visibilities:
             shelf = json.loads(self.read(visibility, "bookshelf.json") or '{"books":[]}')
