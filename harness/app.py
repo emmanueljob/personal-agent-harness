@@ -62,6 +62,14 @@ if (frontend_dist / "assets").exists():
     app.mount("/assets", StaticFiles(directory=frontend_dist / "assets"), name="frontend-assets")
 
 
+@app.get('/images/alpine-panorama.jpeg', include_in_schema=False)
+def alpine_background():
+    path = frontend_dist / 'images' / 'alpine-panorama.jpeg'
+    if not path.is_file():
+        raise HTTPException(404, 'Theme image is not built.')
+    return FileResponse(path, media_type='image/jpeg')
+
+
 def owner(authorization: str = Header(default="")):
     if public_only():
         raise HTTPException(404, "Owner workspace is available only in the local edition.")

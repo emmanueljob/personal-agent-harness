@@ -4,6 +4,7 @@ COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/index.html frontend/tsconfig.json frontend/vite.config.ts ./
 COPY frontend/src ./src
+COPY frontend/public/images/alpine-panorama.jpeg ./public/images/alpine-panorama.jpeg
 RUN npm run build
 
 FROM python:3.12-slim AS runtime

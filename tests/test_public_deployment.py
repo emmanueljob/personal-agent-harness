@@ -105,3 +105,24 @@ def test_container_build_context_has_no_personal_or_runtime_inputs():
     dockerfile=(root/'Dockerfile').read_text()
     assert 'COPY . ' not in dockerfile
     assert 'sha256sum -c' in dockerfile
+    assert '!frontend/public/images/alpine-panorama.jpeg' in rules
+    assert '!frontend/public/**' not in rules
+    assert 'COPY frontend/public/images/alpine-panorama.jpeg ./public/images/alpine-panorama.jpeg' in dockerfile
+
+
+def test_public_theme_background_is_served_from_frontend_build(tmp_path, monkeypatch):
+    module, store = configure(tmp_path, monkeypatch)
+    built = tmp_path / 'frontend-build'
+    image = built / 'images' / 'alpine-panorama.jpeg'
+    image.parent.mkdir(parents=True)
+    body = b'\xff\xd8synthetic-landscape\xff\xd9'
+    image.write_bytes(body)
+    monkeypatch.setattr(module, 'frontend_dist', built)
+    with TestClient(module.app, base_url='https://portfolio.test') as client:
+        response = client.get('/images/alpine-panorama.jpeg')
+        assert response.status_code == 200
+        assert response.headers['content-type'] == 'image/jpeg'
+        assert response.content == body
+        assert client.get('/images/unreviewed.jpeg').status_code == 404
+        image.unlink()
+        assert client.get('/images/alpine-panorama.jpeg').status_code == 404

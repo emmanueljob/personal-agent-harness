@@ -17,6 +17,9 @@ frontend/*
 !frontend/vite.config.ts
 !frontend/src/
 !frontend/src/**
+!frontend/public/
+!frontend/public/images/
+!frontend/public/images/alpine-panorama.jpeg
 **/__pycache__/**
 **/*.sqlite*
 **/.env*
