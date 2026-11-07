@@ -4,6 +4,7 @@ struct ImportView: View {
     @StateObject private var model = ImportModel()
     @State private var showAccess = false
     @State private var showMemory = false
+    @State private var showEmail = false
     @StateObject private var memory = MemoryModel()
     @StateObject private var access = AccessModel()
     var body: some View {
@@ -15,6 +16,7 @@ struct ImportView: View {
                     Text("Selected sources. Local evidence. Your control.").foregroundStyle(.secondary)
                 }
                 Spacer()
+                Button("Email imports") { showEmail = true }
                 Button("Memory & dreaming") { showMemory = true }
                 Button("Access settings") { showAccess = true }
             }
@@ -59,6 +61,7 @@ struct ImportView: View {
             Text("Rich message text is decoded where supported; original bytes are retained locally. Attachments are not downloaded. Records are evidence, not proof of attendance, agreement or preference. Quit pauses work at the last committed batch.").font(.caption).foregroundStyle(.secondary)
         }
         .padding(24).frame(minWidth: 920, minHeight: 650)
+        .sheet(isPresented: $showEmail) { EmailImportView().onDisappear { model.refreshSummary() } }
         .sheet(isPresented: $showAccess) { VStack { ContentView(model: access); Button("Done") { showAccess = false }.padding() }.frame(width: 780, height: 750) }
         .sheet(isPresented: $model.showBrowser) { browser }
         .sheet(isPresented: $showMemory) { VStack { MemoryView(model: memory); Button("Done") { showMemory = false }.padding() } }

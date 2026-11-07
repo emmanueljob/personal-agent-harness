@@ -103,6 +103,69 @@ contact write, or cloud lookup occurs. A selected conversation's displayed title
 included in its local import plan/evidence, as other conversation labels are. Existing
 imports are not renamed merely by refreshing the picker.
 
+## Gmail backfills (0.5)
+
+**Email imports** shows locally saved discovery and ingestion progress for each
+selected account: imported, pending, failed and excluded counts, the date range,
+and whether provider search finished. The main local evidence browser includes
+email subjects, extracted text and source headers alongside Calendar and Messages.
+
+This pilot uses Gmail accounts already connected in the owner's chat for fetching.
+The desktop app does not yet implement Gmail OAuth, hold Gmail credentials or
+perform automatic mail sync. To fetch another range or resume pending retrieval,
+ask the connected chat to run the backfill. Pausing in the app takes effect after
+the current batch; the chat must resume fetching. Closing the app does not terminate
+a connector backfill running in the chat.
+
+The ingestion sink, bundled as `email_ingest.py`, receives connector MIME trees
+through stdin. It has no network client and never fetches attachments, remote
+images or tracking URLs. Source material must be staged only outside the public
+checkout, e.g. in the private PersonalBrain application-support directory. No
+account addresses, account link IDs or retrieved payloads belong in repository
+configuration, tests, commits or PR descriptions.
+
+The owner-authorized orchestrator uses read-only Gmail search and batch-read tools:
+
+1. `begin` freezes accounts, personal/shared roles, provider query and a half-open
+   timestamp range under a run ID. Reusing that ID with changed selection fails.
+2. `page` atomically saves discovered IDs and the next page token. All pages must
+   finish; the first search page is not treated as the whole mailbox.
+3. `pending` returns bounded batches. `messages` commits canonical evidence and
+   per-message receipts in one transaction. Retries cannot double-insert records;
+   an explicit `reprocess` refreshes changed payloads under the same Gmail identity.
+4. `finish` requires complete discovery and no pending/failed IDs. Unsupported mail
+   is counted as failed, never silently reported as fully imported. `resume` clears
+   a pause; failed IDs can be explicitly reset for retry.
+
+Evidence IDs include a hash of the account and Gmail message ID. The same message
+in two accounts stays separately sourced, while Gmail label overlap cannot duplicate
+one account's record. SPAM, TRASH, DRAFT and out-of-range messages are excluded again
+at ingestion, independently of the search query. These exclusions do not remove
+older evidence already imported; deletion reconciliation is not part of this version.
+
+MIME extraction prefers text/plain alternatives, falls back to HTML-to-text without
+executing HTML, ignores attachment filenames/dispositions and attached RFC822
+messages, bounds nesting and message size, and keeps missing external body parts
+as explicitly header-only evidence. Original extracted text is retained, including
+quoted history. Personal sent mail qualifies as owner-origin only when SENT and
+the exact account From address agree; synthesis uses a separate conservative
+quote/signature-stripped text. HTML blockquotes remain marked as quotes. This is a
+heuristic, not proof that every remaining phrase is the owner's own statement.
+
+Received mail supports only tentative, provider-reported activity or email-topic
+patterns. Every shared-mailbox message, including sent mail, retains shared
+attribution. Dreams label any candidate grounded in received/shared mail as reported
+activity with owner attribution unverified. An advertisement is not a personal
+preference, and a receipt or reservation is not proof of attendance or intent.
+Source quotes and owner review remain necessary.
+
+Three additive SQLite tables (`email_runs`, `email_accounts`, `email_queue`) store
+selection, discovery checkpoints and receipts in the existing private brain database.
+The evidence schema, Calendar/Messages import plans and Temporal workflow payloads
+are unchanged. No models or GBrain jobs run automatically just because mail arrives.
+Open **Memory & dreaming** to explicitly process new imports; large mail backfills
+can require many resumable indexing and inference units.
+
 ## Permissions and packaging
 
 Access settings retains the original inventory-only Calendar probe and Messages

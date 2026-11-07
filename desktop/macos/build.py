@@ -27,7 +27,7 @@ def main():
                     '-lsqlite3', '-o', str(executable)], check=True)
     resources = contents / 'Resources'
     resources.mkdir(parents=True, exist_ok=True)
-    for worker in ('memory_worker.py', 'dream_cycle.py'):
+    for worker in ('memory_worker.py', 'dream_cycle.py', 'email_ingest.py'):
         shutil.copy2(source / 'Worker' / worker, resources / worker)
     dependencies = [
         ('pytypedstream.whl', 'https://files.pythonhosted.org/packages/0d/1a/dbbbad9690c24506aec4571bc6613a5625b163b1607777109c9dabdbec07/pytypedstream-0.1.0-py3-none-any.whl', '499920d4cb8bec8fd9d9cdd4c6312765eb418c398c10371ab1c9c0051104d278'),
@@ -54,7 +54,7 @@ def main():
             'CFBundleIdentifier': 'local.personalbrain.mac',
             'CFBundleName': 'Personal Brain', 'CFBundleDisplayName': 'Personal Brain',
             'CFBundleExecutable': 'PersonalBrain', 'CFBundlePackageType': 'APPL',
-            'CFBundleShortVersionString': '0.4.1', 'CFBundleVersion': '5',
+            'CFBundleShortVersionString': '0.5.0', 'CFBundleVersion': '6',
             'LSMinimumSystemVersion': '14.0', 'NSHighResolutionCapable': True,
             'NSContactsUsageDescription': 'Match Messages phone numbers and email addresses to contact names locally so you can choose conversations. Your address book is not uploaded.',
             'NSCalendarsFullAccessUsageDescription': 'Read calendars you select to import events into your local personal brain. This app does not modify your calendars.',

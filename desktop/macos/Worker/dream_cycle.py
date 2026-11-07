@@ -103,6 +103,12 @@ def chunks(rows):
             if meta.get('body_status') not in ('plain_text','decoded_rich_text') or float(meta.get('date_retracted','0') or '0')>0:
                 continue
             text=record['body'];speaker='owner' if meta.get('speaker')=='owner' else 'other'
+        elif kind=='email':
+            if meta.get('speaker')=='owner':
+                text=meta.get('authored_text','');speaker='owner'
+            else:
+                text=record['title']+'\n'+record['body']
+                speaker='shared_mail' if meta.get('account_role')=='shared' else 'email_received'
         elif kind=='calendar':
             text=record['title']+'\n'+record['body'];speaker='calendar_schedule'
         else:
@@ -130,13 +136,15 @@ def validate(values, available, key, minimum=1):
             if not evidence or not isinstance(quote,str) or not 4<=len(quote)<=600:continue
             # Calendar can support schedule observations, not attended events.
             if not any(quote in span for span in evidence.get('spans',[evidence['text']])):continue
-            if evidence['speaker'] not in ('owner','calendar_schedule'):continue
+            if evidence['speaker'] not in ('owner','calendar_schedule','email_received','shared_mail'):continue
             if ident not in seen:
                 result.append(dict(id=ident,hash=evidence['hash'],quote=quote,basis=evidence['speaker']))
                 seen.add(ident)
         if len(result)<minimum:continue
         if all(c['basis']=='calendar_schedule' for c in result):
             claim=claim if claim.startswith('Calendar pattern (') else 'Calendar pattern (scheduled plans; attendance unverified): '+claim
+        if any(c['basis'] in ('email_received','shared_mail') for c in result):
+            claim=claim if claim.startswith('Email evidence (') else 'Email evidence (reported activity; owner attribution unverified): '+claim
         accepted.append(dict(claim=claim.strip(),explanation=explanation.strip(),citations=result))
     return accepted
 
