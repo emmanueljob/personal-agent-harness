@@ -8,14 +8,18 @@ from pathlib import Path
 from typing import Protocol
 
 
+def external_title_match(body, query):
+    title = body.split('\n', 1)[0].removeprefix('# External reference: ').lower()
+    phrase = ' '.join(re.findall(r'\w+', query.lower()))
+    normalized_title = ' '.join(re.findall(r'\w+', title))
+    return bool((len(phrase.split()) >= 2 and phrase in normalized_title)
+                or (len(normalized_title.split()) >= 2 and normalized_title in phrase))
+
+
 def external_score(body, tokens, query):
-    title = body.split('\n',1)[0].removeprefix('# External reference: ').lower()
-    words = set(re.findall(r'\w+',title))
-    phrase = ' '.join(re.findall(r'\w+',query.lower()))
-    normalized_title = ' '.join(re.findall(r'\w+',title))
-    exact = ((len(phrase.split()) >= 2 and phrase in normalized_title)
-             or (len(normalized_title.split()) >= 2 and normalized_title in phrase))
-    return len(set(tokens) & set(re.findall(r'\w+',body.lower()))) + 5*len(set(tokens)&words) + (60 if exact else 0)
+    title = body.split('\n', 1)[0].removeprefix('# External reference: ').lower()
+    words = set(re.findall(r'\w+', title))
+    return len(set(tokens) & set(re.findall(r'\w+', body.lower()))) + 5*len(set(tokens)&words) + (60 if external_title_match(body, query) else 0)
 
 
 class KnowledgeProvider(Protocol):
@@ -109,10 +113,16 @@ class FileBrain:
                 matching = sorted((x for x in scored if x[0]), key=lambda x: x[0], reverse=True)[:3]
                 if matching:
                     excerpts = [x[1] for x in matching]
+                    # A title match should carry the note's actual ideas, not
+                    # just a heading the agent cannot answer from.
+                    if all(part.lstrip().startswith('#') for part in excerpts):
+                        supporting = [part for part in paragraphs if part.strip()
+                                      and not part.lstrip().startswith(('#', 'Source:', 'Added:', 'Visibility:'))]
+                        excerpts.extend(supporting[:2])
                     if p.parent.name == 'influences':
                         # Preserve the work's identity and provenance beside its ideas.
                         excerpts = list(dict.fromkeys(paragraphs[:2] + excerpts))
-                    results.append({"source": visibility + "/" + p.relative_to(scope).as_posix(), "text": "\n\n".join(excerpts)[:3500], "score": sum(x[0] for x in matching)})
+                    results.append({"source": visibility + "/" + p.relative_to(scope).as_posix(), "title": body.splitlines()[0].lstrip("# ")[:200] if body.splitlines() else p.stem, "text": "\n\n".join(excerpts)[:3500], "score": sum(x[0] for x in matching)})
         # Only the curated public snapshot is available to visitor retrieval.
         for visibility in visibilities:
             shelf = json.loads(self.read(visibility, "bookshelf.json") or '{"books":[]}')
@@ -126,6 +136,6 @@ class FileBrain:
             for source, body in external_documents(self, visibility).items():
                 score = external_score(body,tokens,query)
                 if score:
-                    results.append({"source":source,"text":body,"score":score,"knowledge_role":"external_reference"})
+                    results.append({"source":source,"text":body,"score":score,"knowledge_role":"external_reference","exact_title_match":external_title_match(body,query)})
         from .retrieval import rank_knowledge
         return rank_knowledge(results, limit=12)

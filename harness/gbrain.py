@@ -12,7 +12,7 @@ import subprocess
 import uuid
 from pathlib import Path
 
-from .brain import FileBrain, external_score
+from .brain import FileBrain, external_score, external_title_match
 
 
 class GBrainError(RuntimeError):
@@ -161,7 +161,7 @@ class GBrain(FileBrain):
                     # Keep identity/author/provenance near excerpts, so a matching
                     # opinion paragraph does not lose which work it describes.
                     evidence = list(dict.fromkeys(paragraphs[:3] + ranked[:4]))
-                    results.append({"source": record["source"], "text": "\n\n".join(evidence)[:5000], "score": score, "backend": "gbrain"})
+                    results.append({"source": record["source"], "text": "\n\n".join(evidence)[:5000], "score": score, "backend": "gbrain", "exact_title_match": external_title_match(body,query) if "/references/" in record["source"] else False})
         from .learning import learning_hits
         from .retrieval import rank_knowledge
         return rank_knowledge(learning_hits(self,query,mode)+self.perspectives(query,mode)+results)
