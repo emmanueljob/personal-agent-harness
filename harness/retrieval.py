@@ -25,8 +25,8 @@ def rank_knowledge(hits, limit=5):
                         if not personal_source(selected[i])),None)
         if replace is not None:
             selected[replace] = books[0]
-    # Preserve complete owner evidence first, then books before long transcripts.
-    return sorted(selected,key=lambda h:(0 if h.get('knowledge_role') in ('owner_perspective','owner_learning') else 1 if personal_source(h) else 2 if book_source(h) else 3, -h['score']))
+    # Preserve explicit source requests, while keeping personal evidence visible.
+    return sorted(selected,key=lambda h:(0 if h.get('knowledge_role') in ('owner_perspective','owner_learning') else 1 if h.get('exact_title_match') else 2 if personal_source(h) else 3 if book_source(h) else 4, -h['score']))
 
 
 def personal_source(hit):
