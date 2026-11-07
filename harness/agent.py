@@ -46,6 +46,8 @@ class PluginRegistry:
 
 
 plugins = PluginRegistry()
+from .whatsapp_muse import whatsapp_muse_tools
+plugins.register('whatsapp_muse', whatsapp_muse_tools)
 
 
 @wrap_model_call

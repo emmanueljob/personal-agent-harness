@@ -351,3 +351,11 @@ The Brain tab reads `/api/brain-map`, a derived view of the already-published wi
 ## Grok Bot connection proof
 
 Owner admin → Job search · Grok Bot can push a synthetic assignment to a webhook routine, receive private MCP acknowledgements/results, and request an existing job-search report after a successful test. See [setup and callback contract](docs/grok-connection-proof.md). Reports remain private runtime records awaiting reconciliation.
+
+## Local Muse WhatsApp proof
+
+An opt-in, private-only [Muse WhatsApp MCP facade](docs/whatsapp-muse-proof.md)
+can send one fixed synthetic test and inspect its exact nonce reply through a
+separately reviewed local companion. WhatsApp sessions and any synchronized
+history remain outside the repository and web deployment. Both companion-device
+pairing and linking WhatsApp to the existing Muse account require the primary phone.
