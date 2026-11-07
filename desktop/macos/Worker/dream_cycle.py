@@ -129,7 +129,7 @@ def validate(values, available, key, minimum=1):
             evidence=available.get(ident)
             if not evidence or not isinstance(quote,str) or not 4<=len(quote)<=600:continue
             # Calendar can support schedule observations, not attended events.
-            if quote not in evidence['text']:continue
+            if not any(quote in span for span in evidence.get('spans',[evidence['text']])):continue
             if evidence['speaker'] not in ('owner','calendar_schedule'):continue
             if ident not in seen:
                 result.append(dict(id=ident,hash=evidence['hash'],quote=quote,basis=evidence['speaker']))
@@ -143,17 +143,19 @@ def validate(values, available, key, minimum=1):
 
 def unit(db, run, phase, input_values, available, model_fn, minimum):
     key=digest(dict(version=VERSION,model=run['model'],phase=phase,input=input_values))
+    if phase != 'extract':
+        available = {k:dict(v, spans=[c['quote'] for value in input_values for c in value['citations'] if c['id']==k]) for k,v in available.items()}
+    response_key='observations' if phase=='extract' else 'patterns'
     row=db.execute('SELECT output FROM dream_units WHERE key=?',(key,)).fetchone()
     if row:
         cached=json.loads(row['output'])
-        if all(current_citations(db,v['citations']) for v in cached):return cached
+        valid=validate({response_key:cached},available,response_key,minimum)
+        if len(valid)==len(cached) and all(current_citations(db,v['citations']) for v in valid):return valid
         with db:db.execute('DELETE FROM dream_units WHERE key=?',(key,))
     check_pause(db,run['id'])
     # Caller fixes model routing to the validated local endpoint. No tools are offered.
     output=model_fn(phase,input_values,run['model'])
-    if phase != 'extract':
-        available = {k:dict(v, text='\n'.join(c['quote'] for value in input_values for c in value['citations'] if c['id']==k)) for k,v in available.items()}
-    values=validate(output,available,'observations' if phase=='extract' else 'patterns',minimum)
+    values=validate(output,available,response_key,minimum)
     # Do not publish candidates based on a source changed while inference was running.
     if any(not current_citations(db,v['citations']) for v in values):
         raise ValueError('Source changed during dreaming; start a new snapshot.')
@@ -199,8 +201,9 @@ def run(db, model, model_fn, repair_fn, index_fn, maintenance_fn):
             update(db,run_id,phase='extract',units_done=i,units_total=len(groups),detail='Extracting sourced observations')
             available={}
             for item in group:
-                if item['id'] not in available:available[item['id']]=dict(item)
-                else:available[item['id']]['text']+='\n'+item['text']
+                if item['id'] not in available:available[item['id']]=dict(item,spans=[item['text']])
+                else:
+                    available[item['id']]['spans'].append(item['text'])
             observations.extend(unit(db,run,'extract',group,available,model_fn,1))
             covered.update(v['id'] for v in group)
             update(db,run_id,completed=len(covered),units_done=i+1)
@@ -209,8 +212,9 @@ def run(db, model, model_fn, repair_fn, index_fn, maintenance_fn):
         skipped=len(rows)-len({c['id'] for c in source_chunks})
         available={}
         for item in source_chunks:
-            if item['id'] not in available:available[item['id']]=dict(item)
-            else:available[item['id']]['text']+='\n'+item['text']
+            if item['id'] not in available:available[item['id']]=dict(item,spans=[item['text']])
+            else:
+                available[item['id']]['spans'].append(item['text'])
         patterns=[]
         groups=list(batches(list(synthesis_inputs(observations))))
         for i,group in enumerate(groups):
@@ -257,6 +261,7 @@ def run(db, model, model_fn, repair_fn, index_fn, maintenance_fn):
     except Paused:
         update(db,run_id,state='paused',detail='Paused at a durable boundary; resume reuses completed model work')
         return latest(db)
-    except BaseException:
-        update(db,run_id,state='failed',detail='Cycle interrupted or a local step failed; completed units are saved for resume')
+    except BaseException as error:
+        failure = 'invalid_model_json' if isinstance(error,json.JSONDecodeError) else 'timeout' if isinstance(error,TimeoutError) else 'interrupted' if isinstance(error,InterruptedError) else 'local_step_failed'
+        update(db,run_id,state='failed',detail=json.dumps(dict(failure=failure, recovery='Completed units are saved; resume retries the pending unit')))
         raise

@@ -123,3 +123,9 @@ def test_empty_corpus_finishes_without_model_calls(db):
     def fail(*_):raise AssertionError('No inference needed')
     result=execute(db,fail)
     assert result['state']=='complete' and result['total']==0
+
+
+def test_quote_cannot_bridge_artificial_chunk_or_citation_boundaries():
+    available={'one':dict(text='first part\nsecond part',spans=['first part','second part'],speaker='owner',hash='synthetic')}
+    candidate=dict(claim='Unseen concatenation',citations=[dict(id='one',quote='part\nsecond')])
+    assert dream.validate({'observations':[candidate]},available,'observations')==[]

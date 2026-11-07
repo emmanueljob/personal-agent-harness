@@ -230,7 +230,7 @@ output is suppressed. Decoder batches are capped at 16 MB and 200 bodies, with a
 is capped at 200 records. Local learning runs at most five records per action, with
 8,000 characters per input, 1,200 output tokens per call and a 90-second HTTP timeout.
 Full-cycle inference uses a 14,000-character input budget, 16,384-token context,
-3,000 output tokens and a 180-second local HTTP timeout per unit. Full cycles have
+3,000 output tokens and a 360-second local HTTP timeout per unit. Full cycles have
 a four-hour worker deadline; longer corpora can be resumed. Malformed model output
 leaves the current unit pending for retry. Exact quotes constrain
 provenance but do not prove entailment; owner review is still necessary.
