@@ -58,6 +58,14 @@ async def upstream(name, arguments):
                 await session.initialize()
                 response = await session.call_tool(name, arguments)
                 if response.is_error:
+                    # Keep diagnostics locally; provider messages never enter a model response.
+                    detail = '\n'.join(c.text for c in response.content if c.type == 'text')[:2000]
+                    detail = detail.replace(config['token'], '[REDACTED]')
+                    log_path = directory()/'facade.log'
+                    if not log_path.is_symlink():
+                        fd = os.open(log_path, os.O_CREAT | os.O_APPEND | os.O_WRONLY, 0o600)
+                        with os.fdopen(fd, 'a') as log:
+                            log.write(json.dumps({'time': time.time(), 'tool': name, 'error': detail})+'\n')
                     raise RuntimeError('WhatsApp MCP rejected this operation.')
                 if response.structured_content is not None:
                     return response.structured_content

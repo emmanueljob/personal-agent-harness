@@ -109,6 +109,10 @@ def test_real_http_mcp_transport(home, monkeypatch):
     @server.tool()
     def connection_status() -> dict:
         return {'connected': True, 'logged_in': False, 'pairing': True}
+    @server.tool()
+    def synthetic_rejection() -> dict:
+        from mcp.server.mcpserver.exceptions import ToolError
+        raise ToolError('synthetic rejection '+('synthetic-token-'*4))
     app = server.streamable_http_app(stateless_http=True, json_response=True)
     def fake_http(headers):
         assert headers['Authorization'] == 'Bearer '+('synthetic-token-'*4)
@@ -117,4 +121,8 @@ def test_real_http_mcp_transport(home, monkeypatch):
     async def check():
         async with server.session_manager.run():
             assert await muse.connection_status() == {'connected': True, 'logged_in': False, 'pairing': True}
+            with pytest.raises(Exception):
+                await muse.upstream('synthetic_rejection', {})
+            log = (home/'facade.log').read_text()
+            assert '[REDACTED]' in log and ('synthetic-token-'*4) not in log
     asyncio.run(check())
