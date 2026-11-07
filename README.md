@@ -63,7 +63,7 @@ The Temporal integration test kills a worker mid-activity, starts a replacement,
 
 ## Interface development
 
-The frontend is React + TypeScript + Vite, with Motion transitions and locally bundled DM Sans and DM Serif Display fonts. The portfolio has conversation, resume, background, bookshelf, podcast and architecture navigation. The architecture page provides a labeled logical diagram, component/source links, execution flow, design principles and deployment limits. Alpine glass is the default appearance; dark charcoal/amber and warm light themes remain available, and the theme preference persists locally. Personal presentation fields come from `/api/portfolio`, not the frontend bundle.
+The frontend is React + TypeScript + Vite, with Motion transitions and locally bundled DM Sans and DM Serif Display fonts. The portfolio has conversation, resume, bookshelf, podcast and architecture navigation. The architecture page provides a labeled logical diagram, component/source links, execution flow, design principles and deployment limits. Alpine glass is the default appearance; dark charcoal/amber and warm light themes remain available, and the theme preference persists locally. Personal presentation fields come from `/api/portfolio`, not the frontend bundle.
 
 FastAPI serves frontend/dist at the existing localhost:8000 URL after a frontend build:
 
