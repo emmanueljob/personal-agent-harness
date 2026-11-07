@@ -63,7 +63,7 @@ The Temporal integration test kills a worker mid-activity, starts a replacement,
 
 ## Interface development
 
-The frontend is React + TypeScript + Vite, with Motion transitions and locally bundled DM Sans and DM Serif Display fonts. The portfolio has conversation, resume, bookshelf, podcast and architecture navigation. The architecture page provides a labeled logical diagram, component/source links, execution flow, design principles and deployment limits. Alpine glass is the default appearance; dark charcoal/amber and warm light themes remain available, and the theme preference persists locally. Personal presentation fields come from `/api/portfolio`, not the frontend bundle.
+The frontend is React + TypeScript + Vite, with Motion transitions and locally bundled DM Sans and DM Serif Display fonts. The portfolio has conversation, resume, bookshelf, podcast, brain-map and architecture navigation. The architecture page provides a labeled logical diagram, component/source links, execution flow, design principles and deployment limits. Alpine glass is the default appearance; dark charcoal/amber and warm light themes remain available, and the theme preference persists locally. Personal presentation fields come from `/api/portfolio`, not the frontend bundle.
 
 FastAPI serves frontend/dist at the existing localhost:8000 URL after a frontend build:
 
@@ -341,3 +341,7 @@ created lazily on the persistent volume; deleting a link also removes its label.
 Failed web-tool attempts are recorded as sanitized error results and count toward the existing four-result turn budget. A repeated identical call reuses its saved error rather than issuing another request. Existing successful result caches and Temporal activity names remain compatible.
 
 See [separate site data](docs/separate-site-data.md) for migration, deployment configuration and history limits.
+
+### Public knowledge map
+
+The Brain tab reads `/api/brain-map`, a derived view of the already-published wiki, perspectives, books and active podcast references. It highlights keyword-based topic connections and distinguishes annotations from reference-library membership. Transcripts are not included in the map response. The view is read-only, makes no model calls, and does not publish or enrich from the private scope. Personal knowledge stays external to the repository and builds.

@@ -1,4 +1,5 @@
 import Podcasts from './podcasts';
+import BrainExplorer from './brain-map';
 import {ObservabilityStudio} from './observability';
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
@@ -13,7 +14,7 @@ import {LearningStudio,type FeedbackSeed} from './learning';
 import {registerPortfolioTools} from './webmcp';
 
 type Mode='public'|'private';
-const sections=[['conversation','Conversation'],['bookshelf','The bookshelf'],['podcasts','Podcasts'],['behind-the-curtain','The machinery']] as const;
+const sections=[['conversation','Conversation'],['bookshelf','The bookshelf'],['podcasts','Podcasts'],['brain','The brain'],['behind-the-curtain','The machinery']] as const;
 type Section=typeof sections[number][0];
 const sectionFromHash=():Section=>sections.find(([id])=>'#'+id===location.hash)?.[0]||'conversation';
 type Turn={provider?:string;model?:string;model_choice?:string;id:string;prompt:string;status:string;result:string|null;error:string|null;created:number};
@@ -133,7 +134,7 @@ function App(){
  const download=(a:Artifact)=>{const url=URL.createObjectURL(new Blob([a.body],{type:'text/markdown'}));const link=document.createElement('a');link.href=url;link.download=a.title.replace(/[^\p{L}\p{N} _-]/gu,'').slice(0,80)+'.md';link.click();URL.revokeObjectURL(url)};
  return <MotionConfig reducedMotion="user"><div className="afterhours-app" data-theme={theme}>
  <header className="topbar"><a className="identity" href="#conversation" onClick={e=>{e.preventDefault();navigate('conversation')}} aria-label={portfolio.name+'’s AI portfolio'}><span className="identity-orb"/><span>{portfolio.name} <span className="identity-divider">/</span> <span className="identity-edition">portfolio</span></span></a><nav aria-label="Portfolio navigation"><div className="section-tabs" aria-label="Portfolio sections">{sections.map(([id,label],i)=><React.Fragment key={id}><button id={'tab-'+id} aria-current={activeTab===id?'page':undefined} aria-controls={'panel-'+id} onClick={()=>navigate(id)} onKeyDown={e=>tabKey(e,i)}>{label}</button>{id==='conversation'&&<a className="resume-nav" href={resumeUrl||'/resume'}>Resume</a>}</React.Fragment>)}</div><label className="theme-picker"><span className="sr-only">Site theme</span><select aria-label="Site theme" value={theme} onChange={e=>{setTheme(e.target.value as typeof theme);requestAnimationFrame(()=>trackUI('theme_changed'))}}><option value="alpine">Alpine</option><option value="light">Light</option><option value="dark">Dark</option></select></label></nav></header>
- <div hidden={activeTab==='bookshelf'||activeTab==='podcasts'||activeTab==='behind-the-curtain'} className="app-body portfolio-panel">
+ <div hidden={activeTab!=='conversation'} className="app-body portfolio-panel">
  <main id="panel-conversation" role="region" aria-labelledby="tab-conversation" tabIndex={0} hidden={activeTab!=='conversation'} className={'agent-stage '+(thread?.turns.length?'has-conversation':'')}>
  <div className="conversation-bar"><span className="mode-caption"><span className="status-dot"/>{mode==='public'?portfolio.shortName.toUpperCase()+' · AI GUIDE':'YOUR PRIVATE STUDIO'}</span><button className="fresh-button" onClick={()=>{viewVersion.current++;void perform(()=>newThread())}}><span>↺</span> Start fresh</button></div>
  <div className={'presence '+(pending.length?'presence-busy':'')}><Orb busy={pending.length>0}/></div>
@@ -154,6 +155,7 @@ function App(){
  </div>
  <div className="portfolio-panel" id="panel-bookshelf" role="region" aria-labelledby="tab-bookshelf" tabIndex={0} hidden={activeTab!=='bookshelf'}><Bookshelf books={books} ask={ask} enabled={activeTab==='bookshelf'} selection={shelfSelection} clearSelection={()=>setShelfSelection(null)}/></div>
  <div className="portfolio-panel" id="panel-podcasts" role="region" aria-labelledby="tab-podcasts" tabIndex={0} hidden={activeTab!=='podcasts'}>{activeTab==='podcasts'&&<Podcasts ask={ask}/>}</div>
+ <div className="portfolio-panel" id="panel-brain" role="region" aria-labelledby="tab-brain" tabIndex={0} hidden={activeTab!=='brain'}>{activeTab==='brain'&&<BrainExplorer ask={ask}/>}</div>
  <div className="portfolio-panel" id="panel-behind-the-curtain" role="region" aria-labelledby="tab-behind-the-curtain" tabIndex={0} hidden={activeTab!=='behind-the-curtain'}><Architecture ask={ask}/></div>
  <footer className="footer"><span className="footer-signature">{portfolio.footer}</span><div><a className="owner-link" href="/agents">For agents ↗</a><span className="footer-meta">AI GUIDE · {portfolio.resumeLabel}</span>{status&&(!status.public_only||status.owner_studio)&&<a href="/admin" className="owner-link">Admin portal ↗</a>}</div></footer>
  <AnimatePresence>{notice&&<motion.div className="notice" initial={{opacity:0,y:5}} animate={{opacity:1,y:0}} exit={{opacity:0}} role="status"><span>{notice}</span><button aria-label="Dismiss notification" onClick={()=>setNotice('')}>×</button></motion.div>}</AnimatePresence>
