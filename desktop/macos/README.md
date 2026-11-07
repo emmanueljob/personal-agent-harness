@@ -19,7 +19,8 @@ first module-cache build can take longer. No developer checkout is used for data
 
 1. Load calendars and/or message threads. This reads calendar names and conversation
    labels, not event/message bodies. All checkboxes start unchecked. Thread search
-   matches labels/addresses; no Contacts permission or name lookup is requested.
+   matches labels/addresses. **Show contact names** requests macOS Contacts access
+   and resolves permitted phone/email matches locally, without importing message bodies.
 2. Select sources and a date range. From is inclusive and Until is exclusive; the
    initial range is the previous 90 days through tomorrow, including today. Adjust
    dates before starting. The app copies only the selected calendars/conversations.
@@ -81,7 +82,26 @@ Many modern messages have only an Apple rich-body archive rather than plain `tex
 Version 0.3 decodes supported formats and retains original bytes. Unknown formats are
 explicitly marked unsupported. Search cannot find undecoded content. An original rich body is not
 an attachment download or a complete copy of all edit history. Voice notes, images,
-attachment files and contact-name resolution are not imported.
+attachment files are not imported. Contact names can label conversations as described below.
+
+## Conversation names (0.4.1)
+
+Click **Show contact names** beside the Messages picker and allow the macOS Contacts
+prompt. Names are matched on your Mac from the contacts macOS allows the app to see.
+Denying access keeps phone/email labels usable; retry after changing Contacts permission
+in System Settings. The app supports macOS limited contact access when available.
+
+Phone punctuation and US/Canada 10-digit / +1 forms normalize to the same key; other
+international numbers require matching full digits. It never guesses by the last few
+digits. Email matches ignore case. Addresses shared by multiple contact identities
+remain unresolved. Saved group-chat names take precedence; unnamed groups show their
+participants' resolved names or addresses. Raw addresses remain in subtitles and search.
+Names are useful labels, not proof of identity.
+
+The lookup index stays in memory, refreshed on demand. No bulk address-book export,
+contact write, or cloud lookup occurs. A selected conversation's displayed title is
+included in its local import plan/evidence, as other conversation labels are. Existing
+imports are not renamed merely by refreshing the picker.
 
 ## Permissions and packaging
 

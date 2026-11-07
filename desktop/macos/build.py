@@ -23,7 +23,7 @@ def main():
     subprocess.run(['xcrun', 'swiftc', '-swift-version', '5', '-parse-as-library',
                     '-target', 'arm64-apple-macosx14.0', '-module-cache-path', str(build / 'module-cache'),
                     *map(str, sorted((source / 'Sources').glob('*.swift'))),
-                    '-framework', 'SwiftUI', '-framework', 'AppKit', '-framework', 'EventKit',
+                    '-framework', 'Contacts', '-framework', 'SwiftUI', '-framework', 'AppKit', '-framework', 'EventKit',
                     '-lsqlite3', '-o', str(executable)], check=True)
     resources = contents / 'Resources'
     resources.mkdir(parents=True, exist_ok=True)
@@ -54,8 +54,9 @@ def main():
             'CFBundleIdentifier': 'local.personalbrain.mac',
             'CFBundleName': 'Personal Brain', 'CFBundleDisplayName': 'Personal Brain',
             'CFBundleExecutable': 'PersonalBrain', 'CFBundlePackageType': 'APPL',
-            'CFBundleShortVersionString': '0.4.0', 'CFBundleVersion': '4',
+            'CFBundleShortVersionString': '0.4.1', 'CFBundleVersion': '5',
             'LSMinimumSystemVersion': '14.0', 'NSHighResolutionCapable': True,
+            'NSContactsUsageDescription': 'Match Messages phone numbers and email addresses to contact names locally so you can choose conversations. Your address book is not uploaded.',
             'NSCalendarsFullAccessUsageDescription': 'Read calendars you select to import events into your local personal brain. This app does not modify your calendars.',
         }, file)
     # A designated identifier keeps the ad-hoc development identity stable across builds.

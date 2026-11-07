@@ -23,16 +23,35 @@ func runImportTests() -> Bool {
         do { try store.commit([failed], plan: plan); print("Synthetic import test failed at line \(#line)"); return false } catch { }
         guard try store.count() == 1 else { print("Synthetic import test failed at line \(#line)"); return false }
         try store.sql.run("DROP TRIGGER fail_checkpoint")
+        var names = ContactNames()
+        names.add(id: "synthetic-alex", name: "Alex Example", addresses: ["+1 (202) 555-0100", "alex@example.invalid"])
+        guard names.name(for: "2025550100") == "Alex Example",
+              names.name(for: "ALEX@example.invalid") == "Alex Example",
+              names.name(for: "+442025550100") == nil,
+              ContactNames.key("chat1234567890") == nil,
+              ContactNames.key("2025550100 ext 9") == nil else { return false }
+        var ambiguous = names
+        ambiguous.add(id: "synthetic-other", name: "Other Example", addresses: ["2025550100"])
+        guard ambiguous.name(for: "+12025550100") == nil else { return false }
         let sourcePath = root.appendingPathComponent("messages.sqlite").path
         do {
             let fixture = try SQL(sourcePath)
             try fixture.run("CREATE TABLE chat (guid TEXT, display_name TEXT, chat_identifier TEXT)")
             try fixture.run("CREATE TABLE handle (id TEXT)")
+            try fixture.run("CREATE TABLE chat_handle_join (chat_id INTEGER,handle_id INTEGER)")
             try fixture.run("CREATE TABLE message (guid TEXT,text TEXT,date INTEGER,is_from_me INTEGER,handle_id INTEGER,attributedBody BLOB,date_retracted INTEGER)")
             try fixture.run("CREATE TABLE chat_message_join (chat_id INTEGER,message_id INTEGER)")
             try fixture.run("INSERT INTO chat VALUES ('synthetic-thread','Synthetic conversation','fixture')")
             try fixture.run("INSERT INTO chat VALUES ('excluded-thread','Excluded','fixture')")
             try fixture.run("INSERT INTO handle VALUES ('synthetic-speaker')")
+            try fixture.run("INSERT INTO handle VALUES ('+12025550100')")
+            try fixture.run("INSERT INTO handle VALUES ('unknown@example.invalid')")
+            try fixture.run("INSERT INTO chat_handle_join VALUES (1,2)")
+            try fixture.run("INSERT INTO chat VALUES ('direct-thread','','+12025550100')")
+            try fixture.run("INSERT INTO chat_handle_join VALUES (3,2)")
+            try fixture.run("INSERT INTO chat VALUES ('group-thread','','chat123456')")
+            try fixture.run("INSERT INTO chat_handle_join VALUES (4,2)")
+            try fixture.run("INSERT INTO chat_handle_join VALUES (4,3)")
             try fixture.run("BEGIN")
             for i in 1...201 {
                 try fixture.run("INSERT INTO message VALUES (?, ?, ?, 0, 1, NULL, 0)", ["m\(i)", "synthetic \(i)", "700000000000000000"])
@@ -47,7 +66,12 @@ func runImportTests() -> Bool {
             try fixture.run("COMMIT")
         }
         let before = try Data(contentsOf: URL(fileURLWithPath: sourcePath))
-        guard try MessagesSource.choices(path: sourcePath).count == 2 else { print("Synthetic import test failed at line \(#line)"); return false }
+        guard try MessagesSource.choices(path: sourcePath).count == 4 else { print("Synthetic import test failed at line \(#line)"); return false }
+        let labeled = try MessagesSource.choices(path: sourcePath, names: names)
+        guard labeled.first(where: { $0.id == "synthetic-thread" })?.title == "Synthetic conversation",
+              labeled.first(where: { $0.id == "direct-thread" })?.title == "Alex Example",
+              labeled.first(where: { $0.id == "direct-thread" })?.subtitle.contains("+12025550100") == true,
+              labeled.first(where: { $0.id == "group-thread" })?.title == "Alex Example, unknown@example.invalid" else { return false }
         let first = try MessagesSource.batch(thread: thread, start: plan.start, end: plan.end, after: 0, path: sourcePath)
         guard first.scanned == 200, first.records.count == 200, first.cursor == 200 else { print("Synthetic import test failed at line \(#line)"); return false }
         guard first.records.first?.metadata["speaker"] == "synthetic-speaker" else { print("Synthetic import test failed at line \(#line)"); return false }

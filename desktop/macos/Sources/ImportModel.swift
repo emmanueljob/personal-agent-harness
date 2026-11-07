@@ -1,5 +1,6 @@
 import SwiftUI
 import EventKit
+import Contacts
 
 @MainActor
 final class ImportModel: ObservableObject {
@@ -21,6 +22,8 @@ final class ImportModel: ObservableObject {
     @Published var notice = "Select sources and a date range. Nothing is selected by default."
     @Published var showBrowser = false
     private var pauseRequested = false
+    @Published var contactNotice = "Show contact names to match phone numbers and email addresses locally."
+    private var contactNames = ContactNames()
     private let eventStore = EKEventStore()
     private var database: BrainStore?
 
@@ -32,7 +35,7 @@ final class ImportModel: ObservableObject {
             if let plan, !plan.complete { notice = "An interrupted import is ready to resume from its last committed batch." }
         } catch { notice = "Local brain could not open. Check disk space and permissions. No import started." }
     }
-    var visibleThreads: [SourceChoice] { threadFilter.isEmpty ? threads : threads.filter { $0.title.localizedCaseInsensitiveContains(threadFilter) } }
+    var visibleThreads: [SourceChoice] { threadFilter.isEmpty ? threads : threads.filter { $0.title.localizedCaseInsensitiveContains(threadFilter) || $0.subtitle.localizedCaseInsensitiveContains(threadFilter) } }
     var canStart: Bool { !running && database != nil && start < end && (!selectedCalendars.isEmpty || !selectedThreads.isEmpty) }
 
     func loadCalendars() async {
@@ -48,9 +51,31 @@ final class ImportModel: ObservableObject {
         loadingThreads = true
         defer { loadingThreads = false }
         do {
-            threads = try await Task.detached { try MessagesSource.choices() }.value
+            let names = contactNames
+            threads = try await Task.detached { try MessagesSource.choices(names: names) }.value
             notice = "Conversation labels loaded locally. Search and select threads. Message bodies have not been imported."
         } catch { notice = "Could not list Messages. Check Full Disk Access, quit/reopen, then retry. The schema may also be unsupported." }
+    }
+    func showContactNames() async {
+        guard !loadingThreads else { return }
+        loadingThreads = true
+        do {
+            let store = CNContactStore()
+            if CNContactStore.authorizationStatus(for: .contacts) == .notDetermined {
+                _ = try await store.requestAccess(for: .contacts)
+            }
+            let authorization = CNContactStore.authorizationStatus(for: .contacts)
+            // Limited access (macOS 15+) may enumerate only the owner's chosen contacts.
+            guard authorization == .authorized || authorization.rawValue == 4 else {
+                contactNotice = "Contacts access is off. Allow Personal Brain in System Settings → Privacy & Security → Contacts, then retry. Phone numbers remain usable."
+                loadingThreads = false
+                return
+            }
+            contactNames = try await Task.detached { try ContactNames.load() }.value
+            contactNotice = "Names matched locally from permitted Contacts. Unmatched or ambiguous addresses stay visible. Names are labels, not verified identities."
+        } catch { contactNotice = "Could not read Contacts. Phone numbers remain visible; check Contacts permission and retry." }
+        loadingThreads = false
+        await loadThreads()
     }
     func startImport() async {
         guard canStart, let database else { return }

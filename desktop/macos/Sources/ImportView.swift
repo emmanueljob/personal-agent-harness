@@ -33,6 +33,8 @@ struct ImportView: View {
                 GroupBox("Messages · \(model.selectedThreads.count) selected") {
                     VStack(alignment: .leading) {
                         Button(model.loadingThreads ? "Loading…" : "Load message threads") { Task { await model.loadThreads() } }.disabled(model.running || model.loadingThreads)
+                        Button("Show contact names") { Task { await model.showContactNames() } }.disabled(model.running || model.loadingThreads)
+                        Text(model.contactNotice).font(.caption).foregroundStyle(.secondary)
                         TextField("Search conversation names or addresses", text: $model.threadFilter)
                         List(model.visibleThreads) { item in selection(item, selected: $model.selectedThreads) }.frame(minHeight: 170)
                     }.padding(4)

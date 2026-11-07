@@ -4,13 +4,22 @@ struct MessageBatch { let records: [Evidence]; let cursor: Int64; let scanned: I
 
 enum MessagesSource {
     static var path: String { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Messages/chat.db").path }
-    static func choices(path: String = path) throws -> [SourceChoice] {
+    static func choices(path: String = path, names: ContactNames = ContactNames()) throws -> [SourceChoice] {
         let db = try SQL(path, readOnly: true)
+        var participants: [String: [String]] = [:]
+        if !(try db.rows("SELECT name FROM sqlite_master WHERE type='table' AND name='chat_handle_join'")).isEmpty {
+            for row in try db.rows("SELECT c.guid,h.id AS address FROM chat c JOIN chat_handle_join j ON j.chat_id=c.ROWID JOIN handle h ON h.ROWID=j.handle_id ORDER BY c.ROWID,h.ROWID") {
+                if let guid = row["guid"], let address = row["address"] { participants[guid, default: []].append(address) }
+            }
+        }
         return try db.rows("SELECT ROWID AS id, guid, display_name, chat_identifier FROM chat ORDER BY ROWID DESC").compactMap { row in
             guard let id = row["id"], let guid = row["guid"], !guid.isEmpty else { return nil }
             let display = row["display_name"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let address = row["chat_identifier"] ?? ""
-            return SourceChoice(id: guid, title: display.isEmpty ? (address.isEmpty ? "Conversation \(id)" : address) : display, subtitle: "Local conversation · \(id)")
+            let addresses = Array(Set(participants[guid] ?? (address.isEmpty ? [] : [address]))).sorted()
+            let labels = addresses.map { names.name(for: $0) ?? $0 }
+            let title = !display.isEmpty ? display : !labels.isEmpty ? labels.joined(separator: ", ") : "Conversation \(id)"
+            return SourceChoice(id: guid, title: title, subtitle: (addresses.isEmpty ? "Local conversation" : addresses.joined(separator: ", ")) + " · \(id)")
         }
     }
     static func batch(thread: SourceChoice, start: Double, end: Double, after: Int64, path: String = path) throws -> MessageBatch {
