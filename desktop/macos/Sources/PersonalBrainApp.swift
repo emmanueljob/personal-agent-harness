@@ -121,13 +121,13 @@ struct PersonalBrainApp: App {
     @StateObject private var model = AccessModel()
     init() {
         if CommandLine.arguments.contains("--self-test") {
-            let passed = runSyntheticTests()
+            let passed = runSyntheticTests() && runImportTests()
             print(passed ? "Synthetic read-only probe tests passed." : "Synthetic probe tests failed.")
             exit(passed ? 0 : 1)
         }
     }
     var body: some Scene {
-        WindowGroup { ContentView(model: model) }.defaultSize(width: 800, height: 750)
+        WindowGroup { ImportView() }.defaultSize(width: 1040, height: 760)
         MenuBarExtra("Personal Brain", systemImage: "brain.head.profile") {
             Button("Open Personal Brain") { NSApp.activate(ignoringOtherApps: true); NSApp.windows.first(where: { $0.canBecomeMain })?.makeKeyAndOrderFront(nil) }
             Divider()

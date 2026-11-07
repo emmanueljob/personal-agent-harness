@@ -26,9 +26,9 @@ def main():
             'CFBundleIdentifier': 'local.personalbrain.mac',
             'CFBundleName': 'Personal Brain', 'CFBundleDisplayName': 'Personal Brain',
             'CFBundleExecutable': 'PersonalBrain', 'CFBundlePackageType': 'APPL',
-            'CFBundleShortVersionString': '0.1.0', 'CFBundleVersion': '1',
+            'CFBundleShortVersionString': '0.2.0', 'CFBundleVersion': '2',
             'LSMinimumSystemVersion': '14.0', 'NSHighResolutionCapable': True,
-            'NSCalendarsFullAccessUsageDescription': 'Verify local calendar access for your personal brain. This prototype reads only the calendar count and does not modify events.',
+            'NSCalendarsFullAccessUsageDescription': 'Read calendars you select to import events into your local personal brain. This app does not modify your calendars.',
         }, file)
     # A designated identifier keeps the ad-hoc development identity stable across builds.
     # Developer ID signing/notarization is a later distribution gate.
