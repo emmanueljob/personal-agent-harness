@@ -121,8 +121,8 @@ struct PersonalBrainApp: App {
     @StateObject private var model = AccessModel()
     init() {
         if CommandLine.arguments.contains("--self-test") {
-            let passed = runSyntheticTests() && runImportTests()
-            print(passed ? "Synthetic read-only probe tests passed." : "Synthetic probe tests failed.")
+            let passed = runSyntheticTests() && runImportTests() && runMemoryTests()
+            print(passed ? "Synthetic access, import and rich decoder tests passed." : "Synthetic probe tests failed.")
             exit(passed ? 0 : 1)
         }
     }

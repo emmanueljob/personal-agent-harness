@@ -2,8 +2,8 @@
 
 A native SwiftUI app for selecting Calendar sources and Messages conversations,
 importing a chosen date range into a local evidence store, and browsing provenance.
-No model calls, inference, network listener, source writes or cloud uploads. GBrain
-indexing and inferred preferences are not enabled yet. The portfolio is unchanged.
+No source writes, cloud uploads or network listener. Optional local learning and
+GBrain indexing are described in the 0.3 section below. The portfolio is unchanged.
 
 Requires Apple Silicon, macOS 14+, Python 3 and Apple Command Line Tools.
 
@@ -25,7 +25,7 @@ first module-cache build can take longer. No developer checkout is used for data
    dates before starting. The app copies only the selected calendars/conversations.
 3. Click **Import selected sources**. This is the collection action. Imported records
    may include event notes/attendee names, message text/speaker identifiers and original
-   rich-body bytes. Data remains local. Messages attachments are not fetched.
+   rich-body bytes. Data remains local. Messages attachments are not fetched; supported rich text is decoded.
 4. Pause at a batch boundary, or Quit. Resume saved import continues its original
    source selection/range, not any subsequently edited checkboxes. Stop pending import
    ends a plan but retains committed evidence. A new import can then be started.
@@ -57,7 +57,7 @@ no claim of exactly-once source reads. The persisted plan survives restart. Live
 content can change between batches; this is a bounded import, not an archival snapshot.
 
 One app process is supported. Imported evidence is not automatically exported, backed
-up, indexed in GBrain or shared with another assistant. Those are subsequent milestones.
+up or shared with another assistant. GBrain projection is described below.
 
 ## Source limitations
 
@@ -78,9 +78,8 @@ It does not interpret reactions as independent owner statements. Missing GUID/da
 are counted as skipped; malformed/incompatible databases stop with a generic error.
 
 Many modern messages have only an Apple rich-body archive rather than plain `text`.
-This version retains its hex representation with the record and marks the body as
-pending decoding. It never guesses text from arbitrary binary bytes or treats an
-attachment as text. Search cannot find undecoded content. An original rich body is not
+Version 0.3 decodes supported formats and retains original bytes. Unknown formats are
+explicitly marked unsupported. Search cannot find undecoded content. An original rich body is not
 an attachment download or a complete copy of all edit history. Voice notes, images,
 attachment files and contact-name resolution are not imported.
 
@@ -115,3 +114,96 @@ required. Real permission/inventory checks run from the packaged app under macOS
 Public source publication permits `.swift` only under `desktop/macos/Sources/`.
 Generated apps, databases and local reports remain outside source control. No frontend
 or harness workflow changes are required by this milestone.
+
+## Rich message decoding and local memory (0.3)
+
+This version replaces the earlier rich-body limitation. Imports now decode supported
+Apple typedstream NSAttributedString/NSMutableAttributedString bodies with pinned
+pytypedstream 0.1.0. Keyed NSAttributedString archives use a bounded property-list
+reader. Neither path instantiates native Objective-C objects from untrusted archives.
+Unicode, emoji, multiline text and attachment placeholders are preserved. Other root
+classes, malformed/truncated input, oversized input and unknown formats remain marked
+unsupported; original bytes stay local. Attachments themselves are not downloaded.
+
+Open **Memory & dreaming**:
+
+1. **Decode stored rich messages** repairs up to 200 previously imported records per
+   click, checkpointing each update. Already successful or unsupported-at-this-decoder
+   records are not retried endlessly. New imports decode automatically.
+2. **Index imports in GBrain** projects evidence and owner-confirmed memory into a new,
+   isolated `PersonalBrain/gbrain/` home. Changed-page receipts make retries incremental.
+   Successful new imports trigger indexing automatically. If another memory job is
+   running, use the button afterward. The SQLite store remains authoritative.
+3. **GBrain maintenance** indexes changes and runs the pinned native `dream` command
+   with only `extract` and `orphans` selected. This maintains links/timeline metadata
+   and reports orphan pages. The UI reports native partial/warning status; no suggestion
+   of personal insight is implied by successful maintenance. It does not run synthesis,
+   embeddings, model extraction or consolidation of hot facts into takes.
+4. **Learn from next 5 records** calls the selected installed Ollama model on loopback,
+   with no proxy, redirects or cloud fallback. Cloud-routed model metadata/names are
+   refused. Eligible inputs are plain/decoded owner messages and calendar entries.
+   Other people's messages are excluded. Calendar suggestions are forcibly rewritten
+   as scheduled plans, never attendance or preferences. The model can validly return
+   no suggestions. Each proposal needs an exact quote and current source hash.
+5. Review the quote/evidence ID and **Confirm** or **Reject / remove**. Only confirmed,
+   still-current proposals become reviewed memory pages on the next index. Previously
+   indexed stale/rejected pages are excluded immediately from in-app search, and removed
+   from GBrain by the next index. There is no external GBrain/MCP access in this version.
+6. Optionally enable a five-record learning batch every 30 minutes while the memory
+   sheet remains open. It is off by default, not persistent, and starts no new work while
+   the sheet is closed, app is quit or Mac sleeps. In-flight work may finish when the
+   sheet closes. One bounded worker job runs at a time; no daemon/cron/global hooks.
+
+GBrain does have broader native dreaming: `synthesize`, `patterns`, extraction and
+`consolidate` (hot facts to takes), among other phases. A full dream can call models;
+`dream --dry-run` is not a universal no-inference guarantee. This app therefore uses
+explicit non-model phases plus its own bounded local suggestion/review step. It does
+not pretend that indexing alone learns preferences or that canonical memory is a
+GBrain hot-facts table. Native synthesis/local tool-loop compatibility and accepted
+memory promotion are future, separately measured steps.
+
+### Boundaries, resources and schema
+
+The development app now bundles a checksum-verified official GBrain 0.60.530.0 binary,
+pytypedstream wheel, matching source archive and license notices. `build.py` accepts
+`--gbrain-binary /path/to/existing/pinned/binary` to avoid a download, still verifying
+its pinned release hash. First build requires network access for missing dependencies;
+imports never do. No dependency download executes an install script. See
+[third-party notices](THIRD-PARTY.md). Runtime requires Apple's `/usr/bin/python3`,
+provided with Command Line Tools for this pilot; a bundled interpreter remains a later
+packaging task. NSArchiver is used only to generate synthetic test fixtures.
+
+The worker receives record bytes via stdin, not process arguments; stderr/provider
+output is suppressed. Decoder batches are capped at 16 MB and 200 bodies, with a
+15-second timeout. Rich bodies are capped at 1 MB decoded input each. Stored repair
+is capped at 200 records. Local learning runs at most five records per action, with
+8,000 characters per input, 1,200 output tokens per call and a 90-second HTTP timeout.
+Malformed model output leaves the record pending for retry. Exact quotes constrain
+provenance but do not prove entailment; owner review is still necessary.
+
+The GBrain subprocess gets a minimal environment, its own HOME/GBRAIN_HOME and working
+folder, no provider secrets, and a macOS sandbox-exec egress-denial profile. This is
+network containment, not a general filesystem sandbox. It never opens the serving
+Afterhours GBrain indexes or changes their config. No GBrain autopilot, global hooks,
+Git synchronization or model phases are enabled. GBrain command timeouts are 120
+seconds; the app worker has a 10-minute action deadline. Interrupted indexing resumes
+changed pages from its receipts. `/usr/bin/sandbox-exec` is a development dependency;
+if it is unavailable, indexing fails closed rather than dropping egress protection.
+
+New additive SQLite tables store projection receipts, per-source learning receipts
+and reviewable proposals. Current-hash joins hide proposals based on changed evidence.
+Reprocessing does not automatically confirm a proposal. Source groups and accepted
+memories link to evidence pages; raw rich-body bytes are never indexed or sent to a
+model. Keyword search validates GBrain hits against the current canonical projection.
+Confirmed memory pages are still tagged as tool-output provenance when written through
+GBrain; the app does not falsely claim they were spoken in a live agent conversation.
+
+Synthetic tests include both Apple archive formats, unsupported roots, corrupt input,
+projection idempotency/withdrawal, attribution, rejected/stale memories, local inference
+failure, exact-quote validation and cloud-route rejection. The opt-in real GBrain test
+uses only a temporary synthetic database with all GBrain network access denied:
+
+```sh
+DESKTOP_MEMORY_RESOURCES="$PWD/.runtime/personal-brain-macos/Personal Brain.app/Contents/Resources" \
+  python3 -m pytest tests/test_desktop_memory.py -q
+```
