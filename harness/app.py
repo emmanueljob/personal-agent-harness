@@ -95,6 +95,8 @@ from .admin import mount_admin
 mount_admin(app, lambda:store, studio_owner)
 from .grok_connection import mount_grok
 mount_grok(app, lambda:store, studio_owner)
+from .crm import mount as mount_crm
+mount_crm(app, lambda:store, studio_owner)
 
 
 def access(ident, authorization):
