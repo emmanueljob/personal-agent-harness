@@ -22,3 +22,8 @@ python3 scripts/privacy_guard.py --all
 ```
 
 Keep actual `.env`, profiles, voice notes, library exports, email/Slack material, downloaded covers/spines and runtime databases outside Git. `.env.example` contains blank credentials only. Use a GitHub noreply email for commit metadata when personal contact details should stay private.
+
+The owner-supplied synthetic Alpine landscape at
+`frontend/public/images/alpine-panorama.jpeg` was visually reviewed for publication.
+The guard permits only its exact SHA-256 in `PUBLIC_ASSETS`; other images and
+replacements remain blocked until separately reviewed.

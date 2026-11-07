@@ -42,7 +42,7 @@
     for (const [key,value] of Object.entries(utm)) if (!url.searchParams.has(key)) url.searchParams.set(key,value);
     // Do not send conversation text, result tokens or arbitrary query parameters.
     for (const key of [...url.searchParams.keys()]) if (outreachCode || !keys.includes(key)) url.searchParams.delete(key);
-    const payload = JSON.stringify({name,target,outreach_code:outreachCode,session_id:analyticsSession(),theme:document.documentElement.dataset.theme==='light'?'light':'dark',url:url.pathname+url.search+url.hash,profile_key:profile.key,utm,referrer:document.referrer});
+    const payload = JSON.stringify({name,target,outreach_code:outreachCode,session_id:analyticsSession(),theme:['alpine','light','dark'].includes(document.documentElement.dataset.theme)?document.documentElement.dataset.theme:'alpine',url:url.pathname+url.search+url.hash,profile_key:profile.key,utm,referrer:document.referrer});
     // Serialize the first events so a newly issued browser cookie is reused.
     trackingQueue = trackingQueue.then(()=>fetch('/api/visit-events',{method:'POST',headers:{'Content-Type':'application/json'},body:payload,keepalive:true})).catch(()=>{});
   };

@@ -119,3 +119,20 @@ def test_real_pre_push_hook_blocks_deleted_private_file_before_transfer(tmp_path
     assert result.returncode != 0
     assert b'PUBLICATION BLOCKED' in result.stderr
     assert subprocess.check_output(['git','-C',str(remote),'rev-parse','refs/heads/main']).strip()==safe
+
+
+def test_reviewed_public_asset_requires_exact_content(repo, monkeypatch):
+    asset = 'frontend/public/images/alpine-panorama.jpeg'
+    body = b'\xff\xd8synthetic-test-image\x00\xff\xd9'
+    monkeypatch.setattr(guard, 'PUBLIC_ASSETS', {asset: hashlib.sha256(body).hexdigest()})
+    target = repo / asset
+    target.parent.mkdir(parents=True)
+    target.write_bytes(body)
+    subprocess.run(['git', '-C', str(repo), 'add', asset], check=True)
+    guard.scan(guard.index_entries())
+    target.write_bytes(body + b'changed')
+    subprocess.run(['git', '-C', str(repo), 'add', asset], check=True)
+    with pytest.raises(guard.Blocked, match='differs from reviewed'):
+        guard.scan(guard.index_entries())
+    with pytest.raises(guard.Blocked, match='unreviewed file type'):
+        guard.check_path('frontend/public/images/other.jpeg', '100644')

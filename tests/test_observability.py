@@ -209,3 +209,13 @@ def test_pageview_issues_browser_cookie_and_respects_opt_out(tmp_path, monkeypat
         assert len(store.query('SELECT * FROM visitor_arrivals')) == 1
         client.post('/api/visit-events',json={'name':'pageview','url':'/#work'})
         assert len(store.query('SELECT * FROM visitor_arrivals')) == 1
+
+
+def test_alpine_theme_is_preserved_in_usage_events(tmp_path, monkeypatch):
+    from harness.observability import record_ui, initialize
+    from harness.visits import VisitEvent
+    module, store = setup(tmp_path, monkeypatch)
+    initialize(store)
+    event = VisitEvent(name='theme_changed', url='/#work', theme='alpine')
+    record_ui(store, event)
+    assert store.query('SELECT theme FROM ui_events')[0]['theme'] == 'alpine'
