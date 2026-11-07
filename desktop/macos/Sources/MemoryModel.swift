@@ -79,7 +79,11 @@ final class MemoryModel: ObservableObject {
                 dreamProgress = "\(state) · \(row["phase"] ?? "") · \(row["completed"] ?? "0")/\(row["total"] ?? "0") source records · step \(row["units_done"] ?? "0")/\(row["units_total"] ?? "0") · \(row["patterns"] ?? "0") patterns"
                 if let detail = row["detail"], let data = detail.data(using: .utf8),
                    let report = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                    dreamProgress += " · \(report["unsupported_or_empty"] ?? 0) unsupported/empty"
+                    if let skipped = report["unsupported_or_empty"] { dreamProgress += " · \(skipped) unsupported/empty" }
+                    if let failure = report["failure"] as? String {
+                        let reasons = ["invalid_model_json": "Model response was not valid JSON", "timeout": "Local step timed out", "interrupted": "Worker was interrupted", "local_step_failed": "Local step failed"]
+                        dreamProgress += " · \(reasons[failure] ?? "Local step failed"). Resume reuses saved work."
+                    }
                 }
             }
             patterns = try store.sql.rows("SELECT * FROM dream_patterns WHERE state<>'rejected' ORDER BY created DESC LIMIT 500").compactMap { row in
@@ -213,6 +217,14 @@ struct MemoryView: View {
                 }
             }.frame(minHeight: 130)
         }.padding(24).frame(width: 960, height: 700)
+        .task {
+            // Refresh after reopening this panel, including work resumed by another
+            // owner-launched local worker. This task never starts model inference.
+            while !Task.isCancelled {
+                model.refreshDream()
+                do { try await Task.sleep(nanoseconds: 2_000_000_000) } catch { break }
+            }
+        }
         .task {
             while !Task.isCancelled {
                 do { try await Task.sleep(nanoseconds: 1_800_000_000_000) } catch { break }
