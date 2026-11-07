@@ -2,6 +2,7 @@ import React,{useCallback,useEffect,useState} from 'react';
 import type {Portfolio} from './portfolio';
 import {LearningStudio} from './learning';
 import './admin.css';
+import {GrokConnection} from './grok-connection';
 import {VisitorDashboard} from './visitors';
 
 type Profile={key:string;enabled:boolean;headline:string;pitch:string;featured:string[];questions:string[];system_note:string;cta:string;banner:string;company:string;first90:string[]};
@@ -11,7 +12,7 @@ type Link={id:string;slug?:string;tokens:Record<string,string>;labels:Record<str
 type Count={day:string;event:string;source:string;campaign:string;content:string;target:string;count:number};
 type Report={tags:{token:string;field:string;label:string;profile_key:string;active:boolean}[];links:Link[];counts:Count[]};
 type Api=(path:string,method?:string,body?:unknown)=>Promise<any>;
-const sections=['Profiles & copy','Site & projects','Outreach links','Visit reports','Visitors & conversations','Contact & guide','Learning studio','System'] as const;
+const sections=['Profiles & copy','Site & projects','Outreach links','Visit reports','Visitors & conversations','Contact & guide','Learning studio','Job search · Grok Bot','System'] as const;
 type Section=typeof sections[number];
 function download(filename:string,text:string,type='application/json'){const url=URL.createObjectURL(new Blob([text],{type}));const a=document.createElement('a');a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
 function Field({label,value,onChange,multiline=false,hint}:{label:string;value:string;onChange:(v:string)=>void;multiline?:boolean;hint?:string}){const help=React.useId();return <label className="admin-field"><span>{label}</span>{multiline?<textarea aria-label={label} aria-describedby={hint?help:undefined} rows={4} value={value} onChange={e=>onChange(e.target.value)}/>:<input aria-label={label} aria-describedby={hint?help:undefined} value={value} onChange={e=>onChange(e.target.value)}/>} {hint&&<small id={help}>{hint}</small>}</label>}
@@ -36,6 +37,7 @@ export default function AdminPortal(){
  {section==='Visit reports'&&<Reports api={api}/>}
  {section==='Contact & guide'&&<SettingsEditor config={config} busy={busy} dirty={()=>setDirty(true)} save={save} api={api}/>}
  {section==='Learning studio'&&<div className="admin-card"><LearningStudio api={api} seed={null}/></div>}
+ {section==='Job search · Grok Bot'&&<GrokConnection api={api}/>}
  {section==='System'&&<System config={config}/>}
  </main></div></div>;
 }

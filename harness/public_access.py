@@ -73,11 +73,11 @@ class PublicAccess(BaseHTTPMiddleware):
                 expected.add('https://'+os.environ['FLY_APP_NAME']+'.fly.dev')
             # OAuth token/registration endpoints use their protocol's validation;
             # admin MCP requires a resource-bound bearer token on every request.
-            oauth_transport = path in {'/register','/token','/revoke','/admin-mcp'}
+            oauth_transport = path in {'/register','/token','/revoke','/admin-mcp','/grok-mcp'}
             if not oauth_transport and ((origin and origin.rstrip('/') not in expected) or request.headers.get('sec-fetch-site') == 'cross-site'):
                 return JSONResponse({'detail':'Cross-site requests are not accepted.'}, status_code=403)
             try:
-                limit = 128000 if path.startswith('/api/model-bridge/') else 32000
+                limit = 128000 if path.startswith('/api/model-bridge/') or path == '/grok-mcp' else 32000
                 if int(request.headers.get('content-length', '0')) > limit:
                     return JSONResponse({'detail':'Request is too large.'}, status_code=413)
             except ValueError:

@@ -347,3 +347,7 @@ See [separate site data](docs/separate-site-data.md) for migration, deployment c
 ### Public knowledge map
 
 The Brain tab reads `/api/brain-map`, a derived view of the already-published wiki, perspectives, books and active podcast references. It highlights keyword-based topic connections and distinguishes annotations from reference-library membership. Transcripts are not included in the map response. The view is read-only, makes no model calls, and does not publish or enrich from the private scope. Personal knowledge stays external to the repository and builds.
+
+## Grok Bot connection proof
+
+Owner admin → Job search · Grok Bot can push a synthetic assignment to a webhook routine, receive private MCP acknowledgements/results, and request an existing job-search report after a successful test. See [setup and callback contract](docs/grok-connection-proof.md). Reports remain private runtime records awaiting reconciliation.
