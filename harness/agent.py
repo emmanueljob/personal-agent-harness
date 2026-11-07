@@ -7,7 +7,7 @@ from langchain_core.messages import ToolMessage, SystemMessage, HumanMessage
 from langchain.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.sqlite import SqliteSaver
-from .models import settings, local_model, openai_options
+from .models import settings, local_model, openai_options, context_window
 from .retrieval import evidence, grounding_query
 from .web_tools import web_tools, provider as web_provider
 from .bookshelf_tools import bookshelf_tools
@@ -119,7 +119,7 @@ def conversation_input(profile, previous, prompt, config, extra_context=""):
     messages = [{"role": "user", "content": prompt}]
     if config["provider"] == "ollama" or config.get("public_deployment"):
         from langchain_core.messages.utils import count_tokens_approximately
-        budget = int(config.get("context_window", os.getenv("OLLAMA_CONTEXT", "8192"))) - 2048 - int((len(profile) + len(extra_context)) / 3) - 1600
+        budget = context_window(config) - 2048 - int((len(profile) + len(extra_context)) / 3) - 1600
         if config.get("web_enabled"):
             budget -= 2500  # Leave room for bounded web-tool evidence.
         if count_tokens_approximately(messages, chars_per_token=3) > budget:
@@ -179,7 +179,7 @@ def prepare_turn(store, turn):
         choice = store.query("SELECT choice FROM turn_model_choice WHERE turn_id=?", (turn["id"],))
         config = settings(choice[0]["choice"] if choice else "default")
         config["agent_runtime"] = store.runtime_for(turn["id"])
-        config["context_window"] = int(os.getenv("OLLAMA_CONTEXT", "8192"))
+        config["context_window"] = context_window(config)
         config["web_enabled"] = web_provider() != "disabled"
         from .public_access import public_only
         config['public_deployment'] = public_only()

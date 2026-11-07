@@ -83,6 +83,7 @@ def test_short_followup_fits_large_serialized_evidence(tmp_path, monkeypatch, pr
     monkeypatch.setenv('MODEL_PROVIDER', provider)
     monkeypatch.setenv('PUBLIC_ONLY', 'true')
     monkeypatch.setenv('OLLAMA_CONTEXT', '16384')
+    monkeypatch.setenv('OPENAI_CONTEXT', '16384')
     monkeypatch.setenv('WEB_SEARCH_PROVIDER', 'disabled')
     store = Store(tmp_path)
     store.set_profile('public', 'Verified career facts. ' * 350)

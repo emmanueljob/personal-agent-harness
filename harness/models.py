@@ -1,6 +1,15 @@
 import os
 
 
+def context_window(config):
+    """Use saved turn limits first, then independent provider allowances."""
+    if 'context_window' in config:
+        return int(config['context_window'])
+    if config['provider'] == 'openai':
+        return int(os.getenv('OPENAI_CONTEXT', '131072'))
+    return int(os.getenv('OLLAMA_CONTEXT', '8192'))
+
+
 def agent_runtime():
     value=os.getenv('AGENT_RUNTIME','legacy')
     if value not in ('legacy','deepagents'):
