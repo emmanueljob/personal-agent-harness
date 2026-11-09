@@ -155,7 +155,9 @@ def request(store,path,params=None,body=None,account=None):
         # Gmail returns quota throttles as 403 as well as 429. These must retain
         # the durable job and back off, rather than disabling the connection.
         transient={'rateLimitExceeded','userRateLimitExceeded','quotaExceeded','dailyLimitExceeded','backendError'}
-        if not reasons.intersection(transient):raise SetupError('Gmail API or Pub/Sub permission is not enabled for this Google project.')
+        if not reasons.intersection(transient):
+            codes=', '.join(sorted(reason for reason in reasons if reason.isalnum() and len(reason)<80))
+            raise SetupError('Gmail API or Pub/Sub permission needs attention.'+(' Google reason: '+codes if codes else ''))
     r.raise_for_status();return r.json() if r.content else {}
 
 
