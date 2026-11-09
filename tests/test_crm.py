@@ -50,47 +50,33 @@ def test_private_hosted_crm_boundary_and_persistence(tmp_path,monkeypatch):
     assert crm.overview(Store(store.root))['records'][0]['record']['notes']=='PRIVATE CRM CANARY'
 
 
-def test_atomic_dependency_review_duplicate_suppression_and_evidence(tmp_path):
+def test_automatic_dependency_import_is_idempotent_and_keeps_evidence(tmp_path):
     store=Store(tmp_path);sid=source(store)
     p=proposal(candidate('co',company(domain='example.org')),candidate('pat',{'kind':'person','company_id':'$co','name':'Pat'},'Pat is a contact.'),candidate('role',{'kind':'application','company_id':'$co','person_id':'$pat','title':'Lead','stage':'considering'},'A role is proposed, not applied.'))
-    crm.stage(store,sid,p)
-    assert not crm.overview(store)['records']
-    with pytest.raises(ValueError,match='Select the related'):
-        crm.accept(store,sid,[crm.Choice(key='pat')])
-    assert not crm.overview(store)['records']
-    choices=[crm.Choice(key=k) for k in ('role','pat','co')]
-    first=crm.accept(store,sid,choices)
-    assert crm.accept(store,sid,choices)==first
+    first=crm.stage(store,sid,p)
+    assert first['imported']==3 and not first['requires_owner_review']
+    assert crm.stage(store,sid,p)['imported']==0
     records=crm.overview(store)['records']
-    assert len(records)==3
-    co=next(r for r in records if r['kind']=='company')
+    assert len(records)==3 and len(crm.overview(store)['changes'])==3
     app=next(r for r in records if r['kind']=='application')
     assert app['record']['stage']=='considering' and app['record']['applied_on'] is None
-    assert app['record']['company_id']==co['id']
+    assert app['record']['person_id']==next(r['id'] for r in records if r['kind']=='person')
     assert app['source_id']==sid and app['evidence']=='A role is proposed, not applied.'
-    assert all(r['certainty']=='reported' for r in records)
-    assert len(crm.overview(store)['changes'])==3
-    assert crm.save_source(store,crm.Source(provider='muse',reference='fixture-1',title='Synthetic report',report='Example is a company. Pat is a contact. A role is proposed, not applied.'))==sid
+    result=crm.stage(store,sid,proposal(candidate('made-up',company('Invented'),'Fabricated evidence')))
+    assert result['errors'] and len(crm.overview(store)['records'])==3
     with pytest.raises(ValueError,match='different content'):
         crm.save_source(store,crm.Source(provider='muse',reference='fixture-1',title='Changed',report='different'))
-    with pytest.raises(ValueError,match='exact excerpt'):
-        crm.stage(store,sid,proposal(candidate('made-up',company('Invented'),'Fabricated evidence')))
 
 
-def test_review_fill_gaps_keeps_owner_values_and_optimistic_revision(tmp_path):
+def test_automatic_merge_fills_gaps_and_preserves_owner_corrections(tmp_path):
     store=Store(tmp_path);ident=add(store,company('Owner name',domain='example.org',notes='Owner correction',priority='high'))
     sid=source(store)
-    crm.stage(store,sid,proposal(candidate('co',company('Imported name',domain='example.org',notes='Other notes',next_action='Research team'))))
-    with pytest.raises(ValueError,match='matching record'):
-        crm.accept(store,sid,[crm.Choice(key='co')])
-    with pytest.raises(ValueError,match='Record changed'):
-        crm.accept(store,sid,[crm.Choice(key='co',target_id=ident,revision=0)])
-    crm.accept(store,sid,[crm.Choice(key='co',target_id=ident,revision=1)])
+    result=crm.stage(store,sid,proposal(candidate('co',company('Imported name',domain='example.org',notes='Other notes',next_action='Research team'))))
+    assert result['imported']==1
     row=crm.overview(store)['records'][0]
-    assert row['record']['name']=='Owner name'
+    assert row['id']==ident and row['record']['name']=='Owner name'
     assert row['record']['notes']=='Owner correction' and row['record']['priority']=='high'
-    assert row['record']['next_action']=='Research team'
-    assert row['certainty']=='owner_confirmed' and row['revision']==2
+    assert row['record']['next_action']=='Research team' and row['revision']==2
     assert crm.overview(store)['changes'][0]['source_id']==sid
 
 
@@ -124,8 +110,8 @@ def test_private_tools_stage_only_and_report_collection(tmp_path,monkeypatch):
     catalog={t.name:t for t in crm.tools({'mode':'private','store':store,'turn_id':'synthetic-turn-0001'})}
     assert 'accept_job_import' not in catalog
     sid=source(store)
-    assert catalog['propose_job_import'].invoke({'source_id':sid,'candidates':[candidate('co',company())]})['requires_owner_review']
-    assert not crm.overview(store)['records']
+    assert not catalog['propose_job_import'].invoke({'source_id':sid,'candidates':[candidate('co',company())]})['requires_owner_review']
+    assert len(crm.overview(store)['records'])==1
     from harness.grok_connection import initialize
     initialize(store)
     result=json.dumps({'outcome':'completed','report':'Existing synthetic company research','complete_export':False,'submission_id':'fixture-123'})

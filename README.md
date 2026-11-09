@@ -355,5 +355,5 @@ Owner admin → Job search · Grok Bot can push a synthetic assignment to a webh
 ## Job-search CRM
 
 The private admin Job search workspace combines a company board, people, application
-stages, activity, evidence-backed import review and a coordinating harness agent.
+stages, activity, automatic evidence-backed imports and a coordinating harness agent.
 See [workflow, data model and rollout limits](docs/job-search-crm.md).

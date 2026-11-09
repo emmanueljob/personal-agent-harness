@@ -188,7 +188,13 @@ def prepare_turn(store, turn):
         if config['provider'] == 'openai':
             config['max_output_tokens'] = int(os.getenv('OPENAI_MAX_OUTPUT_TOKENS', '2048'))
             config['reasoning_effort'] = os.getenv('OPENAI_REASONING_EFFORT')
-        profile = store.profile(mode)
+        from .crm_imports import job_for_turn
+        import_job=job_for_turn(store,turn['id']) if mode=='private' else None
+        profile = 'Private job-search source import.' if import_job else store.profile(mode)
+        if import_job:
+            config['web_enabled']=False
+            config['job_search_import']=True
+            if config['provider']=='openai':config['max_output_tokens']=8192
         if mode == 'private':
             from .crm import coordinator_prompt
             guidance = coordinator_prompt(store, turn['thread_id'])
@@ -199,12 +205,12 @@ def prepare_turn(store, turn):
             from .personalization import guide_context
             selected = store.query('SELECT profile_key FROM turn_personalization WHERE turn_id=?', (turn['id'],))
             profile += guide_context(selected[0]['profile_key'] if selected else 'default')
-        voice = store.brain.voice(mode)
+        voice = '' if import_job else store.brain.voice(mode)
         previous = store.query("SELECT prompt,result FROM turns WHERE thread_id=? AND status='completed' AND id!=? ORDER BY created,rowid", (turn["thread_id"], turn["id"]))
-        identity = store.brain.public_portfolio()
+        identity = {} if import_job else store.brain.public_portfolio()
         names = ' '.join(str(identity.get(k, '')) for k in ('name', 'shortName', 'surname'))
         query = grounding_query(turn['prompt'], previous, names)
-        perspectives = store.brain.perspectives(query,mode)
+        perspectives = [] if import_job else store.brain.perspectives(query,mode)
         # Local models sometimes offer to search instead of calling the tool.
         # Supply bounded, scoped evidence up front and snapshot it for retries.
         knowledge = []
@@ -212,7 +218,7 @@ def prepare_turn(store, turn):
         store.event(turn["id"], "knowledge_start", "Searching knowledge")
         # Broad recommendation requests need an annotated catalog, not just
         # transcript keyword matches. Keep it inside the existing context budget.
-        if any(word in query.lower() for word in ('podcast', 'book', 'read', 'listen', 'recommend')):
+        if not import_job and any(word in query.lower() for word in ('podcast', 'book', 'read', 'listen', 'recommend')):
             kind = 'podcast' if 'podcast' in query.lower() else 'book' if 'book' in query.lower() else 'all'
             library = search_media(store.brain, query=query[:200], kind=kind, notes_only=True, limit=3, mode=mode)
             library.pop('shows')
@@ -223,7 +229,7 @@ def prepare_turn(store, turn):
                 knowledge.append({'source': mode+'/media-library', 'text': text})
                 remaining -= len(text)
 
-        for hit in store.brain.search(query, mode):
+        for hit in ([] if import_job else store.brain.search(query, mode)):
             if hit["source"].endswith("/profile.md") or hit.get('knowledge_role')=='owner_perspective':
                 continue
             if hit.get('knowledge_role') == 'owner_learning' and len(hit['text']) > remaining:
