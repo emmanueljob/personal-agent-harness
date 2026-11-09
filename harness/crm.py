@@ -194,8 +194,8 @@ def validate_relations(db, record):
         if not ident:
             continue
         row = db.execute('SELECT * FROM crm_records WHERE id=? AND kind=?',(ident,kind)).fetchone()
-        if not row or (field!='company_id' and row['company_id']!=company):
-            raise ValueError('Related records must exist and belong to the same company.')
+        if not row:
+            raise ValueError('Related record must exist and have the selected type.')
     if record.get('link_id'):
         from .outreach import report
         if not any(x['id']==record['link_id'] for x in report()['links']):
@@ -212,8 +212,8 @@ def write_record(db, record, ident, revision, source_id=None, evidence='', obser
     old = db.execute('SELECT * FROM crm_records WHERE id=?',(ident,)).fetchone()
     if (old and old['revision']!=revision) or (not old and revision!=0):
         raise ValueError('Record changed. Reload before saving.')
-    if old and (old['kind']!=record['kind'] or old['company_id']!=record.get('company_id','')):
-        raise ValueError('Record kind and company cannot change; create a separate relationship record.')
+    if old and old['kind']!=record['kind']:
+        raise ValueError('Record kind cannot change.')
     if any(match!=ident for match in matches(db,record)):
         raise ValueError('A matching record exists. Merge into it or edit its identity first.')
     now=time.time(); body=json.dumps(record)

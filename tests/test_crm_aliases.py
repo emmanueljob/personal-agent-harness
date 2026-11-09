@@ -101,3 +101,32 @@ def test_default_import_stage_does_not_reopen_closed_company_or_withdrawn_applic
     rows={r['id']:r for r in crm.overview(store)['records']}
     assert rows[co]['record']['stage']=='closed' and rows[app]['record']['stage']=='withdrawn'
     assert not result['issues']
+
+
+def test_cross_company_contacts_are_valid_and_unknown_company_placeholders_resolve(tmp_path):
+    store=Store(tmp_path);target=add(store,{'kind':'company','name':'Target'})
+    agency=add(store,{'kind':'company','name':'Recruiting Agency'})
+    person=add(store,{'kind':'person','company_id':agency,'name':'Pat'})
+    sid=crm.save_source(store,crm.Source(provider='muse',reference='cross-company',title='Synthetic report',report='Pat introduced the owner. Company not stated.'))
+    result=crm.stage(store,sid,crm.Proposal(candidates=[crm.Candidate(key='cross',record=crm.Activity(company_id=target,person_id=person,title='Introduction',stage='replied'),excerpt='Pat introduced the owner.')]))
+    assert result['imported']==1 and not result['issues']
+    unknown=add(store,{'kind':'company','name':'Unknown company for Pat'})
+    result=crm.stage(store,sid,crm.Proposal(candidates=[crm.Candidate(key='unspecified',record=crm.Activity(company_id=unknown,person_id=person,title='Follow-up draft',stage='drafted'),excerpt='Company not stated.')]))
+    assert not result['issues']
+    rows=crm.overview(store)['records']
+    activity=next(r for r in rows if r['record'].get('title')=='Follow-up draft')
+    assert activity['record']['company_id']==agency and activity['certainty']=='uncertain'
+    assert not any(r['id']==unknown for r in rows)
+    assert next(r for r in rows if r['id']==agency)['record']['name']=='Recruiting Agency'
+
+
+def test_owner_can_correct_a_company_association_and_later_import_keeps_it(tmp_path):
+    store=Store(tmp_path);old=add(store,{'kind':'company','name':'Old org'});new=add(store,{'kind':'company','name':'Correct org'})
+    person=add(store,{'kind':'person','company_id':old,'name':'Pat'})
+    row=next(r for r in crm.overview(store)['records'] if r['id']==person)
+    with store.connect() as db:crm.write_record(db,{**row['record'],'company_id':new},person,row['revision'])
+    sid=crm.save_source(store,crm.Source(provider='muse',reference='old-affiliation',title='Synthetic report',report='Pat was at Old org.'))
+    crm.stage(store,sid,crm.Proposal(candidates=[crm.Candidate(key='pat',record=crm.Person(company_id=old,name='Pat',next_action='Follow up'),excerpt='Pat was at Old org.')]))
+    people=[r for r in crm.overview(store)['records'] if r['kind']=='person']
+    assert len(people)==1 and people[0]['record']['company_id']==new
+    assert people[0]['record']['next_action']=='Follow up'

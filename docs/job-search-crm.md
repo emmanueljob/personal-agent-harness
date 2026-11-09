@@ -59,6 +59,8 @@ records continue importing. Missing dependencies can resolve when later chunks
 arrive. Reports and evidence are preserved even if extraction fails. Source
 quotes are supporting evidence, not independent verification of their claims.
 
+Contacts can be affiliated with a different organization from a target company. Unknown-company placeholders resolve to a known contact affiliation with an uncertainty label; originals remain retained. Company associations are editable, and owner-corrected affiliations take precedence over later reports.
+
 All records remain directly editable in the company, contact, application and
 activity views. Existing personalized links can be attached to activities; visit
 counts remain aggregate signals in Visit reports and do not identify a visitor.

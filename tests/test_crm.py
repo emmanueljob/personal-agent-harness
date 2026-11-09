@@ -83,9 +83,9 @@ def test_automatic_merge_fills_gaps_and_preserves_owner_corrections(tmp_path):
 def test_relationship_validation_duplicate_edits_and_bad_urls(tmp_path):
     store=Store(tmp_path);a=add(store,company('A',domain='a.example'));b=add(store,company('B',domain='b.example'))
     p=add(store,{'kind':'person','name':'Pat','company_id':a})
-    with pytest.raises(ValueError,match='same company'):
-        add(store,{'kind':'application','title':'Role','company_id':b,'person_id':p})
-    with pytest.raises(ValueError,match='same company'):
+    external=add(store,{'kind':'application','title':'Role','company_id':b,'person_id':p})
+    assert external
+    with pytest.raises(ValueError,match='Related record'):
         add(store,{'kind':'person','name':'Orphan','company_id':'missing'})
     with store.connect() as db:
         with pytest.raises(ValueError,match='matching record'):

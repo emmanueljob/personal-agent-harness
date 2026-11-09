@@ -57,13 +57,15 @@ def identity_matches(db,record,exclude_id=None):
     for row in candidates:
         if row['id']==exclude_id:continue
         current=json.loads(row['body']);kind=record['kind']
-        if kind!='company' and current['company_id']!=record['company_id']:continue
+        different_company=kind!='company' and current['company_id']!=record['company_id']
+        if different_company and 'company_id' not in owner_fields(db,row['id']):continue
         # Imported identities remain aliases after the owner corrects a name/email/title.
         # Otherwise a later report could recreate the old identity as a duplicate.
         variants=[current]+[json.loads(r['body']) for r in db.execute('SELECT body FROM crm_changes WHERE record_id=? OR record_id IN (SELECT alias_id FROM crm_redirects WHERE record_id=?) ORDER BY revision DESC',(row['id'],row['id']))]
         variants.extend(json.loads(r['body']) for r in db.execute('SELECT body FROM crm_records WHERE id IN (SELECT alias_id FROM crm_redirects WHERE record_id=?)',(row['id'],)))
         strength=None
         for old in variants:
+            if different_company and old.get('company_id')!=record['company_id']:continue
             if kind=='company':
                 same_domain=bool(old.get('domain') and record.get('domain') and old['domain']==record['domain'])
                 if same_domain or organization(old['name'])==organization(record['name']):strength='exact';break
@@ -162,6 +164,16 @@ def apply_pending(db,source_id):
             db.execute('SAVEPOINT crm_auto_record')
             try:
                 record=RECORD.validate_python(record).model_dump(mode='json')
+                if record['kind'] in ('activity','application') and record.get('person_id'):
+                    person=db.execute("SELECT company_id FROM crm_records WHERE id=? AND kind='person'",(record['person_id'],)).fetchone()
+                    company=db.execute("SELECT body FROM crm_records WHERE id=? AND kind='company'",(record['company_id'],)).fetchone()
+                    if person and company and person['company_id']!=record['company_id']:
+                        label=json.loads(company['body'])['name']
+                        if re.search(r'unknown|not (?:stated|specified)|unspecified',label,re.I) and not owner_fields(db,record['company_id']):
+                            merge_records(db,record['company_id'],person['company_id'])
+                            record['company_id']=person['company_id']
+                            record['notes']=(record['notes']+'\nCompany association inferred from the known contact affiliation; original source used an unknown-company placeholder.').strip()[:12000]
+                            c['certainty']='uncertain'
                 matches=identity_matches(db,record)
                 old=matches[0] if matches else None
                 ident=old['id'] if old else str(uuid.uuid4())
@@ -276,6 +288,9 @@ def merge_records(db,alias_id,record_id):
     if a_locks and t_locks:return None
     if a_locks:return merge_records(db,record_id,alias_id)
     value=merge(db,target,json.loads(alias['body']),alias['source_id'],alias['observed_on'])
+    if target['kind']=='company':
+        original=json.loads(target['body'])
+        value['name']=original['name'];value['domain']=original['domain']
     # All reference rewrites, source bindings and history are retained atomically.
     rows=[dict(r) for r in db.execute('SELECT * FROM crm_records WHERE id NOT IN (SELECT alias_id FROM crm_redirects)')]
     now=time.time()
