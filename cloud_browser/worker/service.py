@@ -38,7 +38,9 @@ class Worker:
         await self.browser.start()
         await self.browser.context.route('**/*',self.guard)
         self.browser.page.on('request',self.observe)
-        if self.browser.page.url=='about:blank':await self.browser.page.goto(li.BASE+'/login',wait_until='domcontentloaded')
+        if self.browser.page.url=='about:blank':
+            try:await self.browser.page.goto(li.BASE+'/login',wait_until='domcontentloaded',timeout=25000)
+            except Exception:self.error='LinkedIn could not be opened automatically. Use the sign-in page button to retry.'
         self.status='needs_login'
 
     async def guard(self,route):
