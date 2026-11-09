@@ -150,7 +150,14 @@ def request(store,path,params=None,body=None,account=None):
         with httpx.Client(timeout=25,trust_env=False) as client:
             r=client.request('POST' if body is not None else 'GET',API+path,params=params,json=body,headers={'Authorization':'Bearer '+token(store,force=bool(attempt),account=account)})
         if r.status_code!=401 or attempt:break
-    if r.status_code==403:raise SetupError('Gmail API or Pub/Sub permission is not enabled for this Google project.')
+    if r.status_code==403:
+        error=r.json().get('error',{});reasons={item.get('reason','') for item in error.get('errors',[])}
+        # Gmail returns quota throttles as 403 as well as 429. These must retain
+        # the durable job and back off, rather than disabling the connection.
+        transient={'rateLimitExceeded','userRateLimitExceeded','quotaExceeded','dailyLimitExceeded','backendError'}
+        if not reasons.intersection(transient):
+            codes=', '.join(sorted(reason for reason in reasons if reason.isalnum() and len(reason)<80))
+            raise SetupError('Gmail API or Pub/Sub permission needs attention.'+(' Google reason: '+codes if codes else ''))
     r.raise_for_status();return r.json() if r.content else {}
 
 
