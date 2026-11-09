@@ -27,7 +27,7 @@ def role(value):
     value=re.sub(r'\b(?:se|swe)\s?(\d+)\b',r'\1',value)
     for short,long in [('swe','software engineer'),('em','engineering manager'),('sr','senior'),('vp','vice president')]:
         value=re.sub(r'\b'+short+r'\b',long,value)
-    return ' '.join(w for w in value.split() if w not in ('software','engineer','engineering','eng','and','of','the'))
+    return ' '.join(w for w in value.split() if w not in ('software','engineer','engineering','eng','and','of','the','role','position'))
 
 
 def job_urls(record):
@@ -314,14 +314,16 @@ def merge_records(db,alias_id,record_id):
 def consolidate(db):
     merged=0
     for kind in ('company','person','application','activity'):
-        rows=[dict(r) for r in db.execute('SELECT * FROM crm_records WHERE kind=? AND id NOT IN (SELECT alias_id FROM crm_redirects) ORDER BY created,id',(kind,))]
-        for row in rows:
-            if canonical_id(db,row['id'])!=row['id']:continue
-            current=dict(db.execute('SELECT * FROM crm_records WHERE id=?',(row['id'],)).fetchone())
-            matches=identity_matches(db,json.loads(current['body']),exclude_id=row['id'])
-            if not matches:continue
-            other=matches[0]
-            # Keep the first stable identity; owner edits can override this choice.
-            keep,alias=(current,other) if (current['created'],current['id'])<(other['created'],other['id']) else (other,current)
-            if merge_records(db,alias['id'],keep['id']):merged+=1
+        while True:
+            progress=0
+            rows=[dict(r) for r in db.execute('SELECT * FROM crm_records WHERE kind=? AND id NOT IN (SELECT alias_id FROM crm_redirects) ORDER BY created,id',(kind,))]
+            for row in rows:
+                if canonical_id(db,row['id'])!=row['id']:continue
+                current=dict(db.execute('SELECT * FROM crm_records WHERE id=?',(row['id'],)).fetchone())
+                matches=identity_matches(db,json.loads(current['body']),exclude_id=row['id'])
+                if not matches:continue
+                other=matches[0]
+                keep,alias=(current,other) if (current['created'],current['id'])<(other['created'],other['id']) else (other,current)
+                if merge_records(db,alias['id'],keep['id']):merged+=1;progress+=1
+            if not progress:break
     return merged

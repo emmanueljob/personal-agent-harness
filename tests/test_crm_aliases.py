@@ -130,3 +130,13 @@ def test_owner_can_correct_a_company_association_and_later_import_keeps_it(tmp_p
     people=[r for r in crm.overview(store)['records'] if r['kind']=='person']
     assert len(people)==1 and people[0]['record']['company_id']==new
     assert people[0]['record']['next_action']=='Follow up'
+
+
+def test_generic_role_label_converges_after_more_specific_duplicates_merge(tmp_path):
+    store=Store(tmp_path);co=add(store,{'kind':'company','name':'Example'})
+    for title in ('VP Platform Engineering (unnamed employer)','VP role','VP Platform Engineering'):
+        add(store,{'kind':'application','company_id':co,'title':title,'stage':'applied','applied_on':'2026-01-20'})
+    with store.connect() as db:
+        assert consolidate(db)==2
+        assert consolidate(db)==0
+    assert len([r for r in crm.overview(store)['records'] if r['kind']=='application'])==1
