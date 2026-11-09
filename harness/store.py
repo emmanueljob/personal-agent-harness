@@ -8,6 +8,15 @@ from .brain import FileBrain
 from .models import agent_runtime
 
 
+class ClosingConnection(sqlite3.Connection):
+    """Commit/roll back normally, then release SQLite files at context exit."""
+    def __exit__(self, *args):
+        try:
+            return super().__exit__(*args)
+        finally:
+            self.close()
+
+
 class Store:
     def __init__(self, root=None):
         self.root = Path(root) if root is not None else data_directory()
@@ -50,7 +59,7 @@ class Store:
                 db.execute("INSERT OR IGNORE INTO profiles VALUES (?,?)", (mode, "Profile not configured yet. Ask the owner to add verified information."))
 
     def connect(self):
-        db = sqlite3.connect(self.root / "harness.sqlite", timeout=30)
+        db = sqlite3.connect(self.root / "harness.sqlite", timeout=30, factory=ClosingConnection)
         db.row_factory = sqlite3.Row
         return db
 

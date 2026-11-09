@@ -18,6 +18,7 @@ import jwt
 from cryptography.fernet import Fernet
 from lxml import html
 from . import correspondence as mail
+from .store import ClosingConnection
 
 SCOPE='https://www.googleapis.com/auth/gmail.readonly'
 API='https://gmail.googleapis.com/gmail/v1/users/me'
@@ -51,7 +52,7 @@ class Vault:
     def connect(self):
         path=self.root/'gmail-oauth.sqlite'
         fd=os.open(path,os.O_RDWR|os.O_CREAT,0o600);os.fchmod(fd,0o600);os.close(fd)
-        db=sqlite3.connect(path,timeout=20);db.row_factory=sqlite3.Row
+        db=sqlite3.connect(path,timeout=20,factory=ClosingConnection);db.row_factory=sqlite3.Row
         db.execute('CREATE TABLE IF NOT EXISTS secrets(kind TEXT,id TEXT,value BLOB,expires REAL,PRIMARY KEY(kind,id))');db.commit()
         return db
 
