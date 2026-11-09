@@ -159,11 +159,18 @@ def ingest(store,message,method='owner_import',timezone='UTC'):
     return {'id':ident,'activity_id':row['activity_id'],'linked':bool(row['company_id'])}
 
 
+def is_security_notice(subject):
+    return bool(re.search(r'verification code|security code|one[- ]time (?:code|password)|verify.{0,30}new device|password reset|reset (?:your )?password|sign[- ]in (?:code|attempt)|new login',subject.casefold()))
+
+
 def messages(store,query='',offset=0,limit=30):
     initialize(store)
     result=[]
     for row in store.query('SELECT * FROM crm_messages ORDER BY COALESCE(julianday(occurred_at),2440587.5+created/86400) DESC,id'):
         value=json.loads(row.pop('body'))
+        # Keep the immutable receipt privately, but exclude authentication notices
+        # from routine CRM discovery and chat searches. Explicit detail IDs remain readable.
+        if row['method']=='gmail_api' and is_security_notice(value['subject']):continue
         if query.casefold() in json.dumps(value).casefold():result.append({**row,'message':{**value,'text':value['text'][:1000]}})
     offset=max(0,offset);end=offset+max(1,min(limit,50))
     return {'total':len(result),'messages':result[offset:end],'next_offset':end if end<len(result) else None}

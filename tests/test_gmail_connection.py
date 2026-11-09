@@ -144,7 +144,8 @@ def test_backfill_covers_every_identity_and_excludes_drafts(tmp_path,monkeypatch
             return {'messages':[{'id':'one','threadId':'thread'}]}
         return {'messages':[{'id':'sent','labelIds':['SENT']},{'id':'draft','labelIds':['DRAFT']},{'id':'trash','labelIds':['TRASH']}]}
     monkeypatch.setattr(gmail,'request',request)
-    monkeypatch.setattr(gmail,'fetch_message',lambda *args:None)
+    monkeypatch.setattr(gmail,'fetch_message',lambda *args:True)
+    monkeypatch.setattr(gmail,'relevant',lambda store,value,account:not any(l in value.get('labelIds',[]) for l in ('DRAFT','SPAM','TRASH')))
     monkeypatch.setattr(gmail,'decode_message',lambda value,account:value['id'])
     monkeypatch.setattr(gmail.mail,'ingest',lambda store,message,**kw:captured.append(message))
     with store.connect() as db:gmail.enqueue(db,'backfill',{'account':'owner@example.net'},'initial')
@@ -202,3 +203,26 @@ def test_google_403_quota_response_retries_automatically(tmp_path,monkeypatch,re
     monkeypatch.setattr(gmail,'request',lambda *args,**kw:{'historyId':'101'})
     assert gmail.process_once(Store(tmp_path),now=131)
     assert store.query('SELECT state FROM crm_mail_jobs')[0]['state']=='done'
+
+
+def test_body_only_search_hit_cannot_bypass_header_relevance(tmp_path,monkeypatch):
+    store=Store(tmp_path);connection(store)
+    paths=[]
+    def request(store,path,**kwargs):
+        paths.append(path)
+        if path=='/messages':return {'messages':[{'id':'unrelated','threadId':'unrelated-thread'}]}
+        assert path=='/messages/unrelated'
+        return {'id':'unrelated','threadId':'unrelated-thread','payload':{'headers':[{'name':'Subject','value':'Personal newsletter'}]}}
+    monkeypatch.setattr(gmail,'request',request)
+    gmail.process(store,{'id':'synthetic-backfill','kind':'backfill','body':json.dumps({'account':'owner@example.net'})})
+    assert paths==['/messages','/messages/unrelated']
+    assert not store.query('SELECT * FROM crm_messages')
+
+
+def test_security_notices_do_not_enter_job_activity_even_in_tracked_thread(tmp_path):
+    store=Store(tmp_path);connection(store);add(store,company('Example Company',domain='example.org'))
+    with store.connect() as db:db.execute("INSERT INTO crm_messages VALUES ('tracked','gmail','owner@example.net','old','t','outbound',NULL,'{}','gmail_api','','','',0,0)")
+    value={'threadId':'t','payload':{'headers':[{'name':'From','value':'Security <security@example.org>'},{'name':'Subject','value':'Please verify your new device'}]}}
+    assert not gmail.relevant(store,value,'owner@example.net')
+    value['payload']['headers'][1]['value']='Interview scheduling'
+    assert gmail.relevant(store,value,'owner@example.net')

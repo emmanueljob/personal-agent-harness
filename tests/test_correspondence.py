@@ -54,3 +54,12 @@ def test_owner_boundaries_and_no_public_message_exposure(tmp_path,monkeypatch):
         assert 'Synthetic correspondence' not in client.get('/').text
         assert 'correspondence' not in client.get('/openapi.json').text
         assert client.post('/api/admin/crm/correspondence/import',headers={**AUTH,'Origin':'https://bad.example'},json={'messages':[message().model_dump(mode='json')]}).status_code==403
+
+
+def test_authentication_notice_receipts_stay_private_without_cluttering_search(tmp_path):
+    store=Store(tmp_path)
+    notice=message().model_copy(update={'subject':'Please verify your new device'})
+    mail.ingest(store,notice,method='gmail_api')
+    assert mail.messages(store)['total']==0
+    assert len(store.query('SELECT * FROM crm_messages'))==1
+    assert len(store.query('SELECT * FROM crm_message_versions'))==1
