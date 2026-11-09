@@ -140,3 +140,11 @@ def test_generic_role_label_converges_after_more_specific_duplicates_merge(tmp_p
         assert consolidate(db)==2
         assert consolidate(db)==0
     assert len([r for r in crm.overview(store)['records'] if r['kind']=='application'])==1
+
+
+def test_same_posting_on_different_submission_dates_is_not_a_duplicate(tmp_path):
+    store=Store(tmp_path);co=add(store,{'kind':'company','name':'Example'})
+    for day in ('2026-01-20','2026-02-20'):
+        add(store,{'kind':'application','company_id':co,'title':'Staff SWE','stage':'applied','applied_on':day,'urls':['https://example.org/jobs/12345']})
+    with store.connect() as db:assert consolidate(db)==0
+    assert len([r for r in crm.overview(store)['records'] if r['kind']=='application'])==2

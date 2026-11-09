@@ -176,7 +176,7 @@ def canonical(record):
     if record['kind']=='application':
         from .crm_imports import job_urls
         urls=job_urls(record)
-        if urls:return 'job',record['company_id']+'|'+repr(sorted(urls)[0])
+        if urls:return 'job',record['company_id']+'|'+repr(sorted(urls)[0])+'|'+str(record.get('applied_on') or '')
     return None
 
 
