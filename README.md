@@ -351,3 +351,9 @@ The Brain tab reads `/api/brain-map`, a derived view of the already-published wi
 ## Grok Bot connection proof
 
 Owner admin → Job search · Grok Bot can push a synthetic assignment to a webhook routine, receive private MCP acknowledgements/results, and request an existing job-search report after a successful test. See [setup and callback contract](docs/grok-connection-proof.md). Reports remain private runtime records awaiting reconciliation.
+
+## Job-search CRM
+
+The private admin Job search workspace combines a company board, people, application
+stages, activity, evidence-backed import review and a coordinating harness agent.
+See [workflow, data model and rollout limits](docs/job-search-crm.md).
