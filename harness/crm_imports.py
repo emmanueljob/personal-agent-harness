@@ -4,6 +4,7 @@ import re
 import time
 import unicodedata
 import uuid
+from urllib.parse import urlsplit, parse_qs
 from datetime import date
 
 
@@ -11,27 +12,61 @@ def normalized(value):
     return ' '.join(re.findall(r'[a-z0-9]+',unicodedata.normalize('NFKD',value).casefold()))
 
 
+def organization(value):
+    value=re.sub(r'\([^)]*(?:undisclosed|unnamed|unknown)[^)]*\)','',value,flags=re.I)
+    return normalized(value)
+
+
+def unknown_role(value):
+    return bool(re.search(r'\b(?:unknown|unverified|unnamed|unspecified|not named)\b',value,re.I))
+
+
 def role(value):
+    value=re.sub(r'\([^)]*(?:undisclosed|unnamed)[^)]*\)','',value,flags=re.I)
     value=normalized(value)
+    value=re.sub(r'\b(?:se|swe)\s?(\d+)\b',r'\1',value)
     for short,long in [('swe','software engineer'),('em','engineering manager'),('sr','senior'),('vp','vice president')]:
         value=re.sub(r'\b'+short+r'\b',long,value)
-    return ' '.join(w for w in value.split() if w not in ('software','engineer'))
+    return ' '.join(w for w in value.split() if w not in ('software','engineer','engineering','eng','and','of','the'))
 
 
-def identity_matches(db,record):
-    candidates=[dict(r) for r in db.execute('SELECT * FROM crm_records WHERE kind=? ORDER BY created,id',(record['kind'],))]
+def job_urls(record):
+    result=set()
+    for url in record.get('urls',[]):
+        parsed=urlsplit(url);parts=[p for p in parsed.path.split('/') if p]
+        query=parse_qs(parsed.query)
+        job_query={k:v for k,v in query.items() if k.lower() in ('gh_jid','jobid','job_id','postingid','reqid')}
+        if job_query or (len(parts)>=2 and parts[-1].lower() not in ('careers','jobs','openings','positions')):
+            result.add((parsed.hostname,parsed.path.rstrip('/'),tuple(sorted((k,tuple(v)) for k,v in job_query.items()))))
+    return result
+
+
+def job_ids(record):
+    text=' '.join([record.get('title','')]+record.get('urls',[])).lower()
+    return set(re.findall(r'\b(?:jr|req|r)\s?\d{4,}\b',text))
+
+
+def canonical_id(db,ident):
+    row=db.execute('SELECT record_id FROM crm_redirects WHERE alias_id=?',(ident,)).fetchone()
+    return row['record_id'] if row else ident
+
+
+def identity_matches(db,record,exclude_id=None):
+    candidates=[dict(r) for r in db.execute('SELECT * FROM crm_records WHERE kind=? AND id NOT IN (SELECT alias_id FROM crm_redirects) ORDER BY created,id',(record['kind'],))]
     exact=[]; related=[]
     for row in candidates:
+        if row['id']==exclude_id:continue
         current=json.loads(row['body']);kind=record['kind']
         if kind!='company' and current['company_id']!=record['company_id']:continue
         # Imported identities remain aliases after the owner corrects a name/email/title.
         # Otherwise a later report could recreate the old identity as a duplicate.
-        variants=[current]+[json.loads(r['body']) for r in db.execute('SELECT body FROM crm_changes WHERE record_id=? ORDER BY revision DESC',(row['id'],))]
+        variants=[current]+[json.loads(r['body']) for r in db.execute('SELECT body FROM crm_changes WHERE record_id=? OR record_id IN (SELECT alias_id FROM crm_redirects WHERE record_id=?) ORDER BY revision DESC',(row['id'],row['id']))]
+        variants.extend(json.loads(r['body']) for r in db.execute('SELECT body FROM crm_records WHERE id IN (SELECT alias_id FROM crm_redirects WHERE record_id=?)',(row['id'],)))
         strength=None
         for old in variants:
             if kind=='company':
                 same_domain=bool(old.get('domain') and record.get('domain') and old['domain']==record['domain'])
-                if same_domain or normalized(old['name'])==normalized(record['name']):strength='exact';break
+                if same_domain or organization(old['name'])==organization(record['name']):strength='exact';break
             elif kind=='person':
                 if old.get('email') and record.get('email'):
                     if old['email'].casefold()==record['email'].casefold():strength='exact';break
@@ -39,8 +74,13 @@ def identity_matches(db,record):
                 if normalized(old['name'])==normalized(record['name']):strength='related'
             elif kind=='application':
                 if old.get('applied_on') and record.get('applied_on') and old['applied_on']!=record['applied_on']:continue
-                if set(old.get('urls',[])) & set(record.get('urls',[])) or role(old['title'])==role(record['title']):
+                if job_urls(old) & job_urls(record) or job_ids(old) & job_ids(record) or role(old['title'])==role(record['title']):
                     strength='exact';break
+                same_submission=bool(old.get('applied_on') and old['applied_on']==record.get('applied_on'))
+                if same_submission:
+                    a,b=set(role(old['title']).split()),set(role(record['title']).split())
+                    if min(len(a),len(b))>=2 and (a<=b or b<=a):strength='related'
+                    if unknown_role(old['title']) or unknown_role(record['title']):strength='related'
                 if record['stage'] in ('considering','preparing') and current['stage'] in ('applied','screen','interview','offer'):
                     a,b=set(role(old['title']).split()),set(role(record['title']).split())
                     if len(a&b)>=3 and len(a&b)/len(a|b)>=.75:strength='related'
@@ -89,8 +129,12 @@ def merge(db,old,incoming,source_id,observed):
             ranks={'low':0,'medium':1,'high':2}
             if ranks[value]>ranks[present]:current[field]=value
         elif present in ('',None,[],{}) or newer:
+            if field=='title' and unknown_role(value) and present and not unknown_role(present):continue
             # Schema defaults do not roll back a known pipeline stage.
             if field=='stage':
+                if incoming['kind']=='company' and present in ('closed','paused') and value in ('interested','researching'):continue
+                if incoming['kind']=='application' and present in ('rejected','withdrawn') and value in ('considering','preparing','applied'):continue
+                if incoming['kind']=='activity' and present=='cancelled' and value in ('proposed','drafted'):continue
                 order={'company':['interested','researching','pursuing'], 'application':['considering','preparing','applied','screen','interview','offer'], 'person':['suggested','to_contact','drafted','contacted','connected','replied'],'activity':['proposed','drafted','sent','replied','completed']}[incoming['kind']]
                 if present in order and value in order and order.index(value)<order.index(present):continue
             current[field]=value
@@ -113,6 +157,7 @@ def apply_pending(db,source_id):
                 if ref.startswith('$'):
                     if ref[1:] not in targets:unresolved=True;break
                     record[field]=targets[ref[1:]]
+                if record.get(field):record[field]=canonical_id(db,record[field])
             if unresolved:continue
             db.execute('SAVEPOINT crm_auto_record')
             try:
@@ -186,6 +231,7 @@ def resume(store):
     initialize(store);imported=queued=0
     with store.connect() as db:
         db.execute('BEGIN IMMEDIATE')
+        consolidated=consolidate(db)
         for row in db.execute('SELECT id FROM crm_sources ORDER BY created,id').fetchall():
             imported+=apply_pending(db,row['id']);queued+=queue_source(db,row['id'])
         from .models import settings
@@ -198,7 +244,7 @@ def resume(store):
                 db.execute("UPDATE turns SET status='queued',error=NULL WHERE id=?",(turn['id'],))
                 db.execute('INSERT INTO dispatch_attempts VALUES (?,1) ON CONFLICT(turn_id) DO UPDATE SET generation=generation+1',(turn['id'],))
                 queued+=1
-    return {'imported':imported,'extraction_jobs_queued':queued,'requires_owner_review':False}
+    return {'imported':imported,'consolidated':consolidated,'extraction_jobs_queued':queued,'requires_owner_review':False}
 
 
 def job_for_turn(store,ident):
@@ -218,3 +264,49 @@ def retry_failed_job(store,ident):
         db.execute("UPDATE turns SET status='queued',error=NULL WHERE id=?",(ident,))
         db.execute('INSERT INTO dispatch_attempts VALUES (?,1) ON CONFLICT(turn_id) DO UPDATE SET generation=generation+1',(ident,))
     return True
+
+
+def merge_records(db,alias_id,record_id):
+    alias_id=canonical_id(db,alias_id);record_id=canonical_id(db,record_id)
+    if alias_id==record_id:return record_id
+    alias=dict(db.execute('SELECT * FROM crm_records WHERE id=?',(alias_id,)).fetchone())
+    target=dict(db.execute('SELECT * FROM crm_records WHERE id=?',(record_id,)).fetchone())
+    if alias['kind']!=target['kind']:raise ValueError('Cannot merge different record types.')
+    a_locks,t_locks=owner_fields(db,alias_id),owner_fields(db,record_id)
+    if a_locks and t_locks:return None
+    if a_locks:return merge_records(db,record_id,alias_id)
+    value=merge(db,target,json.loads(alias['body']),alias['source_id'],alias['observed_on'])
+    # All reference rewrites, source bindings and history are retained atomically.
+    rows=[dict(r) for r in db.execute('SELECT * FROM crm_records WHERE id NOT IN (SELECT alias_id FROM crm_redirects)')]
+    now=time.time()
+    for row in rows:
+        if row['id']==alias_id:continue
+        body=value if row['id']==record_id else json.loads(row['body'])
+        changed=row['id']==record_id
+        for field in ('company_id','person_id','application_id'):
+            if body.get(field)==alias_id:body[field]=record_id;changed=True
+        if not changed:continue
+        revision=row['revision']+1;encoded=json.dumps(body)
+        provenance=alias if row['id']==record_id and source_time(db,alias['source_id'],alias['observed_on'])>source_time(db,target['source_id'],target['observed_on']) else row
+        db.execute('UPDATE crm_records SET body=?,company_id=?,revision=?,updated=?,source_id=?,evidence=?,observed_on=?,certainty=? WHERE id=?',(encoded,body.get('company_id',''),revision,now,provenance['source_id'],provenance['evidence'],provenance['observed_on'],'uncertain' if row['id']==record_id and 'uncertain' in (alias['certainty'],target['certainty']) else row['certainty'],row['id']))
+        db.execute('INSERT INTO crm_changes(record_id,revision,body,source_id,evidence,actor,created) VALUES (?,?,?,?,?,?,?)',(row['id'],revision,encoded,row['source_id'],row['evidence'],'automatic_merge',now))
+    db.execute('INSERT OR REPLACE INTO crm_redirects VALUES (?,?)',(alias_id,record_id))
+    db.execute('UPDATE crm_redirects SET record_id=? WHERE record_id=?',(record_id,alias_id))
+    db.execute('UPDATE crm_candidates SET accepted_id=? WHERE accepted_id=?',(record_id,alias_id))
+    return record_id
+
+
+def consolidate(db):
+    merged=0
+    for kind in ('company','person','application','activity'):
+        rows=[dict(r) for r in db.execute('SELECT * FROM crm_records WHERE kind=? AND id NOT IN (SELECT alias_id FROM crm_redirects) ORDER BY created,id',(kind,))]
+        for row in rows:
+            if canonical_id(db,row['id'])!=row['id']:continue
+            current=dict(db.execute('SELECT * FROM crm_records WHERE id=?',(row['id'],)).fetchone())
+            matches=identity_matches(db,json.loads(current['body']),exclude_id=row['id'])
+            if not matches:continue
+            other=matches[0]
+            # Keep the first stable identity; owner edits can override this choice.
+            keep,alias=(current,other) if (current['created'],current['id'])<(other['created'],other['id']) else (other,current)
+            if merge_records(db,alias['id'],keep['id']):merged+=1
+    return merged
