@@ -210,8 +210,8 @@ def process(store,job):
             db.execute("UPDATE crm_gmail_connection SET watch_expires=?,watch_renew=?,state=CASE WHEN state='live' THEN 'live' ELSE 'watching' END,error='',updated=? WHERE id=1 AND account=? AND state!='disconnected'",(int(result['expiration'])/1000,time.time()+86400,time.time(),connection['account']))
             enqueue(db,'delta',{'account':connection['account']},'watch:'+str(result['historyId']))
     elif job['kind']=='backfill':
-        terms=scope_terms(store)
-        query='newer_than:90d -in:spam -in:trash {'+' '.join(terms[:120])+ ' subject:interview subject:recruiting subject:"your application"}'
+        terms=scope_terms(store);group=body.get('group',0)
+        query='newer_than:90d -in:spam -in:trash {'+' '.join(terms[group*40:(group+1)*40])+ ' subject:interview subject:recruiting subject:"your application"}'
         result=request(store,'/messages',params={'q':query,'maxResults':25,**({'pageToken':body['page']} if body.get('page') else {})},account=connection['account'])
         threads=set()
         for item in result.get('messages',[]):
@@ -222,7 +222,9 @@ def process(store,job):
             for value in thread.get('messages',[]):
                 if not any(label in value.get('labelIds',[]) for label in ('DRAFT','SPAM','TRASH')):mail.ingest(store,decode_message(value,connection['account']),method='gmail_api',timezone=connection['timezone'])
         if result.get('nextPageToken'):
-            with store.connect() as db:enqueue(db,'backfill',{'account':connection['account'],'page':result['nextPageToken']},connection['account']+':'+result['nextPageToken'])
+            with store.connect() as db:enqueue(db,'backfill',{'account':connection['account'],'page':result['nextPageToken'],'group':group},job['id']+':'+result['nextPageToken'])
+        elif (group+1)*40<len(terms):
+            with store.connect() as db:enqueue(db,'backfill',{'account':connection['account'],'page':None,'group':group+1},job['id']+':group:'+str(group+1))
     else:
         cursor=connection['cursor'];page=None;end=cursor;ids=set()
         try:

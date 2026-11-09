@@ -132,3 +132,46 @@ def test_stale_history_recovers_with_backfill(tmp_path,monkeypatch):
     gmail.process(store,{'kind':'delta','body':json.dumps({'account':'owner@example.net'})})
     assert store.query('SELECT cursor FROM crm_gmail_connection')[0]['cursor']=='200'
     assert store.query('SELECT kind FROM crm_mail_jobs')[0]['kind']=='backfill'
+
+
+def test_backfill_covers_every_identity_and_excludes_drafts(tmp_path,monkeypatch):
+    store=Store(tmp_path);connection(store)
+    monkeypatch.setattr(gmail,'scope_terms',lambda store:['"Company '+str(i)+'"' for i in range(85)])
+    queries=[];captured=[]
+    def request(store,path,**kwargs):
+        if path=='/messages':
+            queries.append(kwargs['params']['q'])
+            return {'messages':[{'id':'one','threadId':'thread'}]}
+        return {'messages':[{'id':'sent','labelIds':['SENT']},{'id':'draft','labelIds':['DRAFT']},{'id':'trash','labelIds':['TRASH']}]}
+    monkeypatch.setattr(gmail,'request',request)
+    monkeypatch.setattr(gmail,'fetch_message',lambda *args:None)
+    monkeypatch.setattr(gmail,'decode_message',lambda value,account:value['id'])
+    monkeypatch.setattr(gmail.mail,'ingest',lambda store,message,**kw:captured.append(message))
+    with store.connect() as db:gmail.enqueue(db,'backfill',{'account':'owner@example.net'},'initial')
+    for i in range(3):assert gmail.process_once(store,now=time.time()+i)
+    assert len(queries)==3 and 'Company 84' in queries[-1]
+    assert captured==['sent']*3
+
+
+def test_finish_consumes_state_and_checks_mailbox_before_storing_tokens(tmp_path,monkeypatch):
+    monkeypatch.setenv('ADMIN_GOOGLE_CLIENT_ID','synthetic-client');monkeypatch.setenv('ADMIN_GOOGLE_CLIENT_SECRET','synthetic-secret');monkeypatch.setenv('PUBLIC_ORIGIN','https://app.example.org')
+    store=Store(tmp_path)
+    state=parse_qs(urlsplit(gmail.begin(store,'owner@example.net','UTC','cookie')).query)['state'][0]
+    verified=[]
+    monkeypatch.setattr(gmail,'verify_identity',lambda token,nonce,email:verified.append(email))
+    requests=[]
+    class Client:
+        def __init__(self,**kw):pass
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+        def post(self,url,**kw):
+            requests.append(kw['data'])
+            return httpx.Response(200,json={'access_token':'synthetic-access','refresh_token':'synthetic-refresh','id_token':'synthetic-id','scope':'openid email '+gmail.SCOPE},request=httpx.Request('POST',url))
+        def get(self,url,**kw):return httpx.Response(200,json={'emailAddress':'owner@example.net','historyId':'100'},request=httpx.Request('GET',url))
+    monkeypatch.setattr(httpx,'Client',Client)
+    assert gmail.finish(store,state,'code','cookie')=='owner@example.net'
+    assert verified==['owner@example.net'] and requests[0]['code_verifier']
+    assert gmail.status(store)['connection']['cursor']=='100'
+    assert gmail.status(store)['jobs'][0]['kind']=='backfill'
+    assert gmail.Vault(store).get('token','gmail')['refresh_token']=='synthetic-refresh'
+    with pytest.raises(ValueError):gmail.finish(store,state,'code','cookie')
