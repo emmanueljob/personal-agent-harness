@@ -63,3 +63,15 @@ def test_authentication_notice_receipts_stay_private_without_cluttering_search(t
     assert mail.messages(store)['total']==0
     assert len(store.query('SELECT * FROM crm_messages'))==1
     assert len(store.query('SELECT * FROM crm_message_versions'))==1
+
+
+def test_sent_filter_finds_older_outreach_before_pagination(tmp_path):
+    store=Store(tmp_path)
+    sent=mail.ingest(store,message('older-outreach'),method='gmail_api')
+    for i in range(35):mail.ingest(store,message('incoming-'+str(i),'inbound'),method='gmail_api')
+    assert not any(r['id']==sent['id'] for r in mail.messages(store)['messages'])
+    outbox=mail.messages(store,direction='outbound')
+    assert outbox['total']==1 and outbox['messages'][0]['id']==sent['id']
+    assert outbox['next_offset'] is None
+    incoming=mail.messages(store,direction='inbound',offset=30)
+    assert incoming['total']==35 and len(incoming['messages'])==5
