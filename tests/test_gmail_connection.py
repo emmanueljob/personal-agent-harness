@@ -181,3 +181,24 @@ def test_empty_html_and_malformed_header_do_not_poison_sync():
     assert gmail.addresses('Local <postmaster@localhost>, Valid <valid@example.org>')==[gmail.mail.Address(name='Valid',email='valid@example.org')]
     value={'id':'empty','threadId':'t','internalDate':'1760000000000','payload':{'mimeType':'text/html','body':{'data':base64.urlsafe_b64encode(b'  ').decode()}}}
     assert gmail.decode_message(value,'owner@example.net').text==''
+
+
+@pytest.mark.parametrize('reason',['rateLimitExceeded','userRateLimitExceeded','quotaExceeded','dailyLimitExceeded','backendError'])
+def test_google_403_quota_response_retries_automatically(tmp_path,monkeypatch,reason):
+    store=Store(tmp_path);connection(store)
+    with store.connect() as db:gmail.enqueue(db,'delta',{'account':'owner@example.net'},'throttled')
+    monkeypatch.setattr(gmail,'token',lambda *args,**kwargs:'synthetic-access')
+    class Client:
+        def __init__(self,**kw):pass
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+        def request(self,method,url,**kw):return httpx.Response(403,json={'error':{'errors':[{'reason':reason}]}},request=httpx.Request(method,url))
+    monkeypatch.setattr(httpx,'Client',Client)
+    assert gmail.process_once(store,now=100)
+    assert gmail.status(store)['connection']['state']=='connected'
+    job=store.query('SELECT * FROM crm_mail_jobs')[0]
+    assert job['state']=='retry' and job['next_run']==130
+    assert not gmail.process_once(Store(tmp_path),now=120)
+    monkeypatch.setattr(gmail,'request',lambda *args,**kw:{'historyId':'101'})
+    assert gmail.process_once(Store(tmp_path),now=131)
+    assert store.query('SELECT state FROM crm_mail_jobs')[0]['state']=='done'
