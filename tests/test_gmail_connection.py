@@ -175,3 +175,9 @@ def test_finish_consumes_state_and_checks_mailbox_before_storing_tokens(tmp_path
     assert gmail.status(store)['jobs'][0]['kind']=='backfill'
     assert gmail.Vault(store).get('token','gmail')['refresh_token']=='synthetic-refresh'
     with pytest.raises(ValueError):gmail.finish(store,state,'code','cookie')
+
+
+def test_empty_html_and_malformed_header_do_not_poison_sync():
+    assert gmail.addresses('Local <postmaster@localhost>, Valid <valid@example.org>')==[gmail.mail.Address(name='Valid',email='valid@example.org')]
+    value={'id':'empty','threadId':'t','internalDate':'1760000000000','payload':{'mimeType':'text/html','body':{'data':base64.urlsafe_b64encode(b'  ').decode()}}}
+    assert gmail.decode_message(value,'owner@example.net').text==''

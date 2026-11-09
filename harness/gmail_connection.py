@@ -154,7 +154,12 @@ def request(store,path,params=None,body=None,account=None):
     r.raise_for_status();return r.json() if r.content else {}
 
 
-def addresses(value):return [mail.Address(name=name[:200],email=email) for name,email in getaddresses([value]) if email and '@' in email]
+def addresses(value):
+    result=[]
+    for name,email in getaddresses([value]):
+        try:result.append(mail.Address(name=name[:200],email=email))
+        except ValueError:continue
+    return result[:100]
 
 
 def decode_message(value,account):
@@ -165,6 +170,7 @@ def decode_message(value,account):
         if raw and part.get('mimeType') in ('text/plain','text/html'):
             text=base64.urlsafe_b64decode(raw+'='*(-len(raw)%4)).decode('utf8',errors='replace')
             if part.get('mimeType')=='text/html':
+                if not text.strip():return []
                 doc=html.fromstring(text,parser=html.HTMLParser(no_network=True))
                 for element in doc.xpath('//script|//style|//iframe'):element.drop_tree()
                 text=' '.join(doc.itertext())
@@ -172,7 +178,7 @@ def decode_message(value,account):
         for child in part.get('parts',[]):result.extend(parts(child))
         return result
     content=parts(payload);plain=[text for kind,text in content if kind=='text/plain'];text='\n\n'.join(plain or [text for _,text in content]);sender=addresses(headers.get('from',''))
-    return mail.Message(provider='gmail',account=account,external_id=value['id'],thread_id=value['threadId'],direction='outbound' if 'SENT' in value.get('labelIds',[]) else 'inbound',occurred_at=datetime.fromtimestamp(int(value['internalDate'])/1000,timezone.utc),sender=sender[0] if sender else mail.Address(),recipients=addresses(headers.get('to',''))+addresses(headers.get('cc','')),subject=headers.get('subject','')[:1000],text=text[:50000],truncated=len(text)>50000,automated=headers.get('auto-submitted','no').casefold()!='no',source_url='https://mail.google.com/mail/?'+urlencode({'authuser':account})+'#all/'+value['threadId'])
+    return mail.Message(provider='gmail',account=account,external_id=value['id'],thread_id=value['threadId'],direction='outbound' if 'SENT' in value.get('labelIds',[]) else 'inbound',occurred_at=datetime.fromtimestamp(int(value['internalDate'])/1000,timezone.utc),sender=sender[0] if sender else mail.Address(),recipients=(addresses(headers.get('to',''))+addresses(headers.get('cc','')))[:100],subject=headers.get('subject','')[:1000],text=text[:50000],truncated=len(text)>50000,automated=headers.get('auto-submitted','no').casefold()!='no',source_url='https://mail.google.com/mail/?'+urlencode({'authuser':account})+'#all/'+value['threadId'])
 
 
 def scope_terms(store):
