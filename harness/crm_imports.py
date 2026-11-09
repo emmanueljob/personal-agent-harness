@@ -201,3 +201,15 @@ def job_for_turn(store,ident):
     if not store or not store.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='crm_import_jobs'"):return None
     rows=store.query('SELECT * FROM crm_import_jobs WHERE turn_id=?',(ident,))
     return rows[0] if rows else None
+
+
+def retry_failed_job(store,ident):
+    """A terminal import failure schedules at most two new workflow generations."""
+    if not job_for_turn(store,ident):return False
+    with store.connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        row=db.execute("SELECT t.status,COALESCE(d.generation,0) AS generation FROM turns t LEFT JOIN dispatch_attempts d ON d.turn_id=t.id WHERE t.id=?",(ident,)).fetchone()
+        if not row or row['status']!='failed' or row['generation']>=2:return False
+        db.execute("UPDATE turns SET status='queued',error=NULL WHERE id=?",(ident,))
+        db.execute('INSERT INTO dispatch_attempts VALUES (?,1) ON CONFLICT(turn_id) DO UPDATE SET generation=generation+1',(ident,))
+    return True

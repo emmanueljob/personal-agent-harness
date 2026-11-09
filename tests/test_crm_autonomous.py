@@ -121,3 +121,17 @@ def test_invalid_model_fields_return_feedback_instead_of_failing_the_activity(tm
     tool=next(t for t in crm.tools({'mode':'private','store':store,'turn_id':'test'}) if t.name=='propose_job_import')
     response=tool.invoke({'source_id':sid,'candidates':[{'key':'co','record':{'kind':'company','name':'Example','follow_up':'unknown'},'excerpt':'Example is a target.'}]})
     assert json.loads(response)['fields'] and not crm.overview(store)['records']
+
+
+def test_terminal_failure_event_retries_only_import_jobs_without_owner_action(tmp_path,monkeypatch):
+    monkeypatch.setattr('harness.models.settings',lambda *a:{'configured':True})
+    store=Store(tmp_path);source(store,'retry-events')
+    ident=crm.overview(store)['import_jobs'][0]['turn_id']
+    from harness.crm_imports import retry_failed_job
+    ordinary=store.enqueue(store.thread('private')['id'],'Ordinary private question')
+    for i in range(3):
+        with store.connect() as db:db.execute("UPDATE turns SET status='failed' WHERE id=?",(ident,))
+        assert retry_failed_job(store,ident)==(i<2)
+    with store.connect() as db:db.execute("UPDATE turns SET status='failed' WHERE id=?",(ordinary,))
+    assert not retry_failed_job(store,ordinary)
+    assert store.query('SELECT status FROM turns WHERE id=?',(ordinary,))[0]['status']=='failed'

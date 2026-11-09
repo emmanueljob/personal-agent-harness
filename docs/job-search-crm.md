@@ -26,7 +26,7 @@ an 8,192-token ceiling. This is actual configured-provider work, not a CI probe.
 On startup the app imports any existing staged records and resumes missing
 extraction work. Reports saved while a model is unconfigured retain their jobs
 as waiting for that model; startup or Process saved reports queues them once a
-model is configured. Failed jobs can retry up to twice on startup/processing,
+model is configured. Terminal import failures automatically retry up to twice; startup/processing can also resume failed jobs within the same limit,
 using the existing explicit-retry workflow generations. No scheduled inbox
 checks, heartbeats, new workflow types or new external permissions are added.
 Muse's web-to-Mac transport remains separate: a received/pasted Muse report uses
