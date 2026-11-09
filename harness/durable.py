@@ -41,6 +41,8 @@ async def reconcile_schedules(client, store):
 async def dispatch_once(client, store):
     # Serial execution for this single-owner SQLite deployment prevents later
     # turns overtaking an interrupted turn while Temporal retries it.
+    from .crm_enrichment import resume as resume_enrichment
+    resume_enrichment(store)
     turns = store.query("SELECT * FROM turns WHERE status IN ('queued','running') ORDER BY created,rowid LIMIT 1")
     if not turns:
         return

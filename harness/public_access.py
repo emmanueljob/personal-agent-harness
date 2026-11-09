@@ -38,8 +38,8 @@ def consume(store, policies):
         db.execute('DELETE FROM public_usage WHERE window < ? AND bucket LIKE ?', (now//3600-2, 'hour:%'))
 
 
-def reserve_model_call(store):
-    if public_only():
+def reserve_model_call(store, mode='public'):
+    if public_only() and mode != 'private':
         consume(store, [('day:model', 86400, int(os.getenv('PUBLIC_DAILY_MODEL_CALLS', '150')))])
 
 

@@ -47,3 +47,54 @@ No dependency changes or workflow types are introduced. New tool names are
 registered through the existing runtime plugin registry; old tools, artifacts,
 record JSON and workflow checkpoints remain compatible. Code deployment leaves
 the mounted application volume and published brain in place.
+
+## Recoverable enrichment and simplified workspace
+
+Priority enrichment is started through the private `/api/admin/crm/enrichment`
+route or `enrich_job_records`. An empty selection includes high-priority companies
+and their linked contacts; explicit IDs let the owner restart only unfinished work.
+Idempotent batch IDs and active-record deduplication prevent accidental duplicate
+runs. Each record/attempt has an isolated private thread, with no unrelated brain
+retrieval or accumulated batch conversation. Record mutations are scoped to the
+assigned entity and current attempt.
+
+Additive `crm_enrichment_batches`, `crm_enrichment_jobs` and
+`crm_enrichment_attempts` tables persist selection, progress and actual save
+receipts. A model saying it finished is not success: a CRM write and its receipt
+commit atomically. A completed reply without a save, or a failed run without a
+save, retries automatically with a fresh attempt after 30, 120 and 480 seconds.
+After four attempts the job shows Needs attention instead of spending indefinitely.
+A failure after a successful save keeps the record and marks the work Saved.
+The existing queue executor resumes this state on restart; no external agent
+inbox polling, heartbeat or new scheduler is introduced.
+
+Private model calls and private web-search model calls no longer consume the
+public demo quota. The public daily cap remains intact. Mode is taken from the
+server-bound thread/activity, never a model-supplied argument. Private provider
+billing limits and service availability still apply. No secrets or deployment
+settings are changed.
+
+Enrichment appends notes, unions source/news URLs and preserves owner corrections,
+existing next actions and application/relationship stages. Automatic research
+changes use the `agent_research` history actor. Optional `summary` fields and
+professional contact `image_url` fields are backward-compatible JSON additions.
+The public page reader exposes observed image/favicon metadata after validating
+public URLs; it does not fetch images or execute page code. Private enrichment
+has six bounded web calls so searches leave room for original-page verification.
+The coordinator retains write tools when research is exhausted, so it can save
+partial findings rather than returning an unsaved narrative.
+
+The UI uses compact company/contact lists, a priority shortlist, tabbed record
+sections, a separate Enrichment progress view and a side assistant. Setup and raw
+import evidence live under workspace settings/Sources. Technical batch prompts
+are kept out of the conversational chat view; persisted history is retained.
+Research references: Attio's record-page tabs and record-details sidebar, folk's
+relationship-focused lists, and HubSpot's overview/activity/association separation.
+No vendor assets or product code are copied. The Sources tab retains original
+reports; snapshots and saved visual artifacts remain available.
+
+No workflow definition or Activity signature is changed. The existing preparation,
+model binding and queue dispatch gain private scope handling; recovery checks must
+run against an isolated Temporal development server before release. Deploy the web
+and workers from the same release, preserving the application volume and existing
+workflow bindings.

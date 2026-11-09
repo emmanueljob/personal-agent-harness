@@ -78,10 +78,10 @@ async def complete(answer: str) -> None:
 
 
 def provide_model(name):
-    store, turn, _ = binding()
+    store, turn, mode = binding()
     config = saved_config(store, turn)
     from .public_access import reserve_model_call
-    reserve_model_call(store)
+    reserve_model_call(store,mode)
     if name != config['provider']+':'+config['model']:
         raise ApplicationError('Unexpected model configuration.', non_retryable=True)
     if config['provider'] == 'ollama':
