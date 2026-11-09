@@ -30,6 +30,8 @@ async def lifespan(app):
     app.state.public_store = store
     from .observability import initialize
     initialize(store)
+    from .crm_imports import resume as resume_crm_imports
+    resume_crm_imports(store)
     executor = os.getenv("EXECUTOR", "local")
     if executor not in ("local", "temporal"):
         raise RuntimeError("EXECUTOR must be local or temporal")

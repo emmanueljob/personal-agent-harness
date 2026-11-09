@@ -76,6 +76,8 @@ async def dispatch_once(client, store):
         with store.connect() as db:
             db.execute("UPDATE turns SET status='failed',error=? WHERE id=? AND status!='completed'",
                        (message, turn["id"]))
+        from .crm_imports import retry_failed_job
+        retry_failed_job(store,turn["id"])
 
 
 async def temporal_dispatcher(store):

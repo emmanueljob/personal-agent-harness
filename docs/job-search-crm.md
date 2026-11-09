@@ -1,108 +1,97 @@
-# Private job-search CRM
+# Autonomous private job-search CRM
 
-The authenticated web admin's **Job search** section contains Today, Companies,
-People, Applications, Activity, Imports and Agent desk. It uses the existing
-owner studio credential on the hosted edition and owner credential locally.
-No CRM routes enter public schemas, public discovery, visitor threads or brain
-retrieval. Client requests use no-store and the existing same-origin policy.
+The authenticated web admin's **Job search** workspace contains Today, Companies,
+People, Applications, Activity, Imports and Agent desk. SQLite is authoritative
+for operational facts. Reports enter automatically; the owner edits afterward.
+There is no per-record acceptance requirement.
 
-## Canonical records
+## Automatic intake
 
-SQLite is authoritative for accepted companies, people, application stages,
-activities, next actions and follow-up dates. Research notes, statistics and
-source URLs live alongside their company. Company pursuit and application
-hiring stages are independent. Activities distinguish proposed, drafted, sent,
-replied and completed work. This version does not send outreach or buy ads.
+New source reports, including completed Grok export callbacks, atomically create
+durable extraction jobs in the existing SQLite/Temporal turn queue. Each job
+reads a bounded source chunk, imports supported records, and reconciles clear
+matches without an approval step. Original report text is immutable and retained
+with its provider/reference identity, completeness claim and observation date.
 
-The persistent `harness.sqlite` receives five additive tables:
+Reports are split at line boundaries into ranges of at most 2,400 characters.
+Each range has a deterministic source/offset job ID and its own private thread,
+so long reports do not silently exceed tool context limits or accumulate a large
+conversation. Repeated callbacks and restarts do not create duplicate jobs.
+Private import tools enforce the job's original source. They expose bounded
+chunks, not all source reports at once. Import snapshots omit unrelated private
+brain retrieval and disable web research; the configured model receives the
+selected report chunk and relevant CRM records. OpenAI extraction responses have
+an 8,192-token ceiling. This is actual configured-provider work, not a CI probe.
 
-- `crm_records`: validated, typed company/person/application/activity JSON with
-  stable IDs, company relationship, revision, source and evidence.
-- `crm_sources`: immutable original reports, provider/reference identity,
-  completeness flag and optional observation date.
-- `crm_candidates`: immutable evidence-backed proposals and accepted record IDs.
-- `crm_changes`: revision snapshots, evidence, actor and timestamps.
-- `crm_workspace`: the private coordinator thread (a singleton).
+On startup the app imports any existing staged records and resumes missing
+extraction work. Reports saved while a model is unconfigured retain their jobs
+as waiting for that model; startup or Process saved reports queues them once a
+model is configured. Terminal import failures automatically retry up to twice; startup/processing can also resume failed jobs within the same limit,
+using the existing explicit-retry workflow generations. No scheduled inbox
+checks, heartbeats, new workflow types or new external permissions are added.
+Muse's web-to-Mac transport remains separate: a received/pasted Muse report uses
+this automatic flow, but this change does not claim an autonomous Muse sender.
 
-The company lookup also adds the `crm_company` index. All initialization uses `CREATE ... IF NOT EXISTS`; no existing table is
-rewritten. Runtime data stays on the existing application volume, outside Git.
-Back up that volume before release. Older code ignores these tables. No database
-migration drops or transforms existing application or workflow state.
+## Reconciliation and editing
 
-People and applications belong to a company. Activities can reference a person
-and application in the same company, plus an existing personalized link ID.
-Record type and company association are immutable; an affiliation change needs
-a separate record. Existing link IDs and their lifecycle remain owned by the
-Outreach links tools; the CRM creates no tracking cookies or new public page.
-Visit reports retain their aggregate counts and do not prove who opened a link.
+Typed records retain company/person/application relationships, evidence excerpts,
+uncertainty and revision history. Company pursuit and application hiring stages
+are separate. A drafted message is not a send; a lead is not an application.
 
-## Import and review
+Clear company names/domains, people with a matching email or unique name within
+a company, and application URLs/normalized role titles reconcile automatically.
+Role abbreviations are normalized. A single sufficiently similar potential role
+can match an already submitted role within that company. Different known
+application dates stay separate. Ambiguous people and events remain separate
+rather than losing information. All original source claims remain available.
 
-1. In Agent desk, request Grok's existing job-search report through its proven
-   webhook/MCP connection, or ask the coordinator to request one. The connection
-   test prerequisite remains enforced. No scheduled checks are added.
-2. New completed Grok callbacks atomically save the original report into Imports.
-   Collect completed reports to backfill older assignments. Collection is deterministic by
-   assignment ID and can be repeated safely. Reports from Muse/other sources can
-   be pasted with source, title and optional observation date.
-3. Ask the coordinator to extract a report. It reads accepted CRM records and
-   the original report, then calls `propose_job_import`. Each candidate includes
-   an exact excerpt present in that source and a reported/uncertain marker.
-   Source content is evidence, never agent authorization or instructions.
-4. Inspect the fields and evidence, select candidates and accept them. Use
-   `$candidate_key` for dependencies within an import; accept the required
-   company/contact/application together, or reference an accepted record ID.
-5. For an existing entity, select the appropriate merge target. Imports fill
-   empty fields only. Existing owner values stay; competing proposals and their
-   source evidence remain available. To replace a value, edit the accepted
-   record explicitly. Revision checks reject stale edits and merges.
+Automatic merges combine research notes and URLs, preserve stronger known
+pipeline stages, and prefer newer source values for unlocked fields. Empty
+schema defaults do not erase facts. Higher recorded company priority remains
+until the owner changes it. Older sources can fill gaps without replacing the
+record's newer source provenance. Manual changes, including explicit field
+clears, are detected from existing revision history and always win over later
+imports. Edits do not disable importing other fields or related entities.
 
-Acceptance is transactional, including all dependencies. Concurrent/repeated
-acceptance returns the same accepted IDs without duplicate records or history.
-Conservative identity matches prevent duplicate company domains/names, person
-emails within a company and application first URLs within a company. People are
-not merged by name; ambiguous identities require owner judgment. Dates,
-statistics and message delivery are source claims, not independent verification.
-An exact excerpt is supporting evidence, not a guarantee that extraction is true.
+Malformed model arguments return corrective feedback to the model. Invalid
+excerpts or unresolved dependencies are recorded as data issues while valid
+records continue importing. Missing dependencies can resolve when later chunks
+arrive. Reports and evidence are preserved even if extraction fails. Source
+quotes are supporting evidence, not independent verification of their claims.
 
-Original report text is retained verbatim. Provider/reference pairs are immutable:
-a changed export needs a new reference. Reports have a 60,000-character schema
-limit and the intake uses the existing middleware with a bounded 128 KB request
-limit; proposals may be staged in batches. Incomplete exports remain labeled.
+All records remain directly editable in the company, contact, application and
+activity views. Existing personalized links can be attached to activities; visit
+counts remain aggregate signals in Visit reports and do not identify a visitor.
+Importing information does not send outreach, submit applications, publish
+knowledge or spend advertising budget.
 
-## Coordinator execution
+## Storage, boundaries and rollout
 
-The workspace queues private turns in the existing harness with the same runtime,
-model selection, idempotent request IDs and Temporal dispatch metadata. The
-job-search identity is frozen into each new execution snapshot, distinct from
-the public digital twin. Existing snapshots and workflow types are unchanged.
-Deploy the web and workers together so newly queued turns have the new tool
-catalog. Previously snapshotted turns do not gain a new identity on replay.
+The existing `harness.sqlite` stores `crm_records`, `crm_sources`,
+`crm_candidates`, `crm_changes` and `crm_workspace`. This increment adds
+`crm_import_jobs`, `crm_import_issues` and a revision-history index, using
+`CREATE ... IF NOT EXISTS`; no existing tables are rewritten or dropped.
+`accepted_id` remains the internal mapping from a historical candidate to its
+live record, not a requirement for human approval. The legacy acceptance route
+remains compatible for existing clients but is not required by the UI or tools.
 
-Private tools can search accepted records, collect Grok reports, read one import,
-propose records, and push a Grok export request. They cannot accept proposals.
-A Grok export uses one stable assignment ID per coordinator turn; an activity
-retry does not resend an already attempted push. Report callbacks arrive through
-the existing authenticated Grok MCP. Refresh the UI or ask the coordinator to
-collect completed reports; there is no background agent inbox polling.
+Back up the application volume before rollout. Deploy web and workers together
+for the new private catalog. Existing workflow types and saved execution snapshots
+remain compatible. Runtime data, exports, credentials and model logs stay outside
+Git and the build. No dependency/lockfile changes are required. Public visitor
+schemas, discovery and tools expose no CRM data or mutation capability.
 
-The normal configured model handles extraction, so requesting extraction sends
-that selected report and CRM evidence to the configured provider. Automated tests
-use synthetic records and fake transports; they do not invoke any model or use
-personal sources. No real reports are bundled with this change.
-
-The local Muse WhatsApp proof lives in its separate PR. This CRM does not yet
-implement web-to-Mac delivery or broaden that proof's test-only tools. Pasted
-Muse reports can use the full review flow now. Event-driven Muse assignment and
-result transport, existing private-brain research references, automatic extraction
-on callbacks, a dedicated job-search MCP server, advertising and outbound email/
-LinkedIn/X execution remain later increments. Private CRM notes are not published
-or automatically copied into the brain, preventing competing canonical facts.
+Source/proposal intake remains bounded to 128 KB, with reports limited to 60,000
+characters. Partial reports stay labeled. Imports do not publish the brain or
+create a competing brain copy of canonical CRM stages and outreach history.
+Advertising, third-party outreach execution and continuous Muse transport remain
+separate increments.
 
 ## Validation
 
-Run `python -m pytest tests/test_crm.py tests/test_grok_connection.py` and the full
-Python suite. For the frontend, run `npm ci && npm run build` in `frontend`.
-Both real recovery tests in `tests/test_temporal_integration.py` must use a separate
-Temporal development server through `TEMPORAL_TEST_ADDRESS`, never the serving
-server. Browser previews must use temporary synthetic runtime data outside Git.
+Use synthetic records and fake models in tests. Run the Python suite plus both
+real Temporal recovery tests against an isolated development server, never the
+serving server. Run `npm ci && npm run build` in frontend. Browser previews use
+synthetic runtime state outside the repository. Checks cover automatic intake,
+field corrections, explicit clears, duplicate jobs/records, chunk completeness,
+partial failures, source-bound tools, retry limits and private context isolation.

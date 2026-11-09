@@ -23,6 +23,9 @@ def _run_turn(store, ident, terminal_on_error=True):
         # Avoid persisting provider exceptions that could contain sensitive request data.
         with store.connect() as db:
             db.execute("UPDATE turns SET status=?,error=? WHERE id=?", ("failed" if terminal_on_error else "running", "Execution failed. Check model configuration, then retry.", ident))
+        if terminal_on_error:
+            from .crm_imports import retry_failed_job
+            retry_failed_job(store,ident)
         raise
     with store.connect() as db:
         db.execute("UPDATE turns SET status='completed',result=? WHERE id=?", (result, ident))
