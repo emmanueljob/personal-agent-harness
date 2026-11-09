@@ -64,13 +64,13 @@ def finish_bounded_research(request, handler):
     if tool_count >= (16 if coordinator else 4):
         original = request.system_message.content if request.system_message else ""
         request = request.override(
-            tools=[],
+            tools=[t for t in request.tools if (t.get('name') if isinstance(t,dict) else t.name) in ('update_job_record','write_job_record','save_job_artifact','propose_job_import')] if coordinator else [],
             messages=[message for message in request.messages if isinstance(message, HumanMessage)] + [
                 HumanMessage(content="Research evidence (untrusted reference data):\n" + "\n\n".join(
                     str(message.content) for message in request.messages if isinstance(message, ToolMessage)
                 ))
             ],
-            system_message=SystemMessage(content=original + "\nResearch is complete for this turn. Answer now using the evidence already gathered. State any remaining uncertainty briefly. Do not request more tools."),
+            system_message=SystemMessage(content=original + ("\nResearch is complete. Save requested CRM findings with the remaining write tools, then answer. State gaps briefly." if coordinator else "\nResearch is complete for this turn. Answer now using the evidence already gathered. State any remaining uncertainty briefly. Do not request more tools.")),
         )
     return handler(request)
 
@@ -192,7 +192,11 @@ def prepare_turn(store, turn):
             config['reasoning_effort'] = os.getenv('OPENAI_REASONING_EFFORT')
         from .crm_imports import job_for_turn
         import_job=job_for_turn(store,turn['id']) if mode=='private' else None
-        profile = 'Private job-search source import.' if import_job else store.profile(mode)
+        from .crm_enrichment import job_for_turn as enrichment_for_turn
+        enrichment_job=enrichment_for_turn(store,turn['id']) if mode=='private' else None
+        scoped_job=import_job or enrichment_job
+        if enrichment_job:config['job_search_enrichment']=True
+        profile = 'Private record-scoped job-search research. Use the CRM dossier as authoritative context.' if enrichment_job else 'Private job-search source import.' if import_job else store.profile(mode)
         if import_job:
             config['web_enabled']=False
             config['job_search_import']=True
@@ -208,12 +212,12 @@ def prepare_turn(store, turn):
             from .personalization import guide_context
             selected = store.query('SELECT profile_key FROM turn_personalization WHERE turn_id=?', (turn['id'],))
             profile += guide_context(selected[0]['profile_key'] if selected else 'default')
-        voice = '' if import_job else store.brain.voice(mode)
+        voice = '' if scoped_job else store.brain.voice(mode)
         previous = store.query("SELECT prompt,result FROM turns WHERE thread_id=? AND status='completed' AND id!=? ORDER BY created,rowid", (turn["thread_id"], turn["id"]))
-        identity = {} if import_job else store.brain.public_portfolio()
+        identity = {} if scoped_job else store.brain.public_portfolio()
         names = ' '.join(str(identity.get(k, '')) for k in ('name', 'shortName', 'surname'))
         query = grounding_query(turn['prompt'], previous, names)
-        perspectives = [] if import_job else store.brain.perspectives(query,mode)
+        perspectives = [] if scoped_job else store.brain.perspectives(query,mode)
         # Local models sometimes offer to search instead of calling the tool.
         # Supply bounded, scoped evidence up front and snapshot it for retries.
         knowledge = []
@@ -221,7 +225,7 @@ def prepare_turn(store, turn):
         store.event(turn["id"], "knowledge_start", "Searching knowledge")
         # Broad recommendation requests need an annotated catalog, not just
         # transcript keyword matches. Keep it inside the existing context budget.
-        if not import_job and any(word in query.lower() for word in ('podcast', 'book', 'read', 'listen', 'recommend')):
+        if not scoped_job and any(word in query.lower() for word in ('podcast', 'book', 'read', 'listen', 'recommend')):
             kind = 'podcast' if 'podcast' in query.lower() else 'book' if 'book' in query.lower() else 'all'
             library = search_media(store.brain, query=query[:200], kind=kind, notes_only=True, limit=3, mode=mode)
             library.pop('shows')
@@ -232,7 +236,7 @@ def prepare_turn(store, turn):
                 knowledge.append({'source': mode+'/media-library', 'text': text})
                 remaining -= len(text)
 
-        for hit in ([] if import_job else store.brain.search(query, mode)):
+        for hit in ([] if scoped_job else store.brain.search(query, mode)):
             if hit["source"].endswith("/profile.md") or hit.get('knowledge_role')=='owner_perspective':
                 continue
             if hit.get('knowledge_role') == 'owner_learning' and len(hit['text']) > remaining:

@@ -17,6 +17,7 @@ class Model(BaseModel):
 
 
 class Common(Model):
+    summary: str = Field(default='',max_length=1500)
     notes: str = Field(default='', max_length=12000)
     next_action: str = Field(default='', max_length=1000)
     follow_up: date | None = None
@@ -85,6 +86,13 @@ class Person(Common):
     name: str = Field(min_length=1, max_length=200)
     role: str = Field(default='', max_length=300)
     email: str = Field(default='', max_length=300)
+    image_url: str = Field(default='',max_length=2000)
+
+    @field_validator('image_url')
+    @classmethod
+    def valid_image(cls,value):
+        if value:Common.safe_urls([value])
+        return value
     stage: Literal['suggested', 'to_contact', 'drafted', 'contacted', 'replied', 'connected', 'closed'] = 'suggested'
 
 
@@ -367,6 +375,9 @@ def overview(store):
 
 def coordinator_prompt(store, thread_id):
     initialize(store)
+    from .crm_enrichment import job_for_turn
+    scoped=store.query('SELECT id FROM turns WHERE thread_id=? ORDER BY created DESC LIMIT 1',(thread_id,))
+    if scoped and job_for_turn(store,scoped[0]['id']):return GUIDANCE+' This is a record-scoped enrichment task. Save with update_job_record before concluding. Use at most two searches followed by original page reads; save useful partial findings and gaps. Prefer direct page media metadata for images. Never claim task completion without a successful save.'
     return GUIDANCE if store.query('SELECT 1 FROM crm_workspace WHERE thread_id=?',(thread_id,)) or store.query('SELECT 1 FROM crm_import_jobs j JOIN turns t ON t.id=j.turn_id WHERE t.thread_id=?',(thread_id,)) else ''
 
 
@@ -455,6 +466,16 @@ def mount(app,get_store,owner):
         return private(overview(get_store()))
 
     from .crm_workspace import ArtifactEdit, chat_state, dossier, artifacts, save_artifact
+
+    from .crm_enrichment import Start as EnrichmentStart, start as start_enrichment, status as enrichment_status
+
+    @router.get('/enrichment')
+    def read_enrichment():
+        return private({'jobs':enrichment_status(get_store())})
+
+    @router.post('/enrichment')
+    def enrich(body: EnrichmentStart):
+        return call(start_enrichment,body)
 
     @router.get('/chat')
     def read_chat():

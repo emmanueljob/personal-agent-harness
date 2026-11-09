@@ -77,12 +77,14 @@ def save_artifact(store, artifact, ident='', revision=0, turn_id=''):
     return {'id':ident,'revision':revision+1}
 
 
-def write(store, record, ident='', revision=0, actor='owner'):
+def write(store, record, ident='', revision=0, actor='owner',turn_id=''):
     crm.initialize(store)
     with store.connect() as db:
         db.execute('BEGIN IMMEDIATE')
         ident=crm.write_record(db,record,ident or str(uuid.uuid4()),revision,actor=actor)
         row=db.execute('SELECT * FROM crm_records WHERE id=?',(ident,)).fetchone()
+        from .crm_enrichment import job_for_turn,note_save
+        if job_for_turn(store,turn_id):note_save(db,turn_id,ident,row['revision'])
     return crm.record_row(row)
 
 
@@ -113,17 +115,21 @@ def chat_state(store):
     for turn in turns:
         turn['events']=store.query('SELECT kind,label,created FROM events WHERE turn_id=? ORDER BY id DESC LIMIT 8',(turn['id'],))[::-1]
         turn['documents']=store.query('SELECT id,title,body FROM artifacts WHERE turn_id=?',(turn['id'],))
-    return {'turns':turns,'artifacts':artifacts(store)}
+    from .crm_enrichment import status as enrichment_status
+    return {'turns':turns,'artifacts':artifacts(store),'enrichment':enrichment_status(store)}
 
 
 def tools(ctx):
     if ctx['mode']!='private':return []
     from langchain.tools import tool
 
-    def allowed():
+    def allowed(record_id=None):
         from .crm_imports import job_for_turn
         if job_for_turn(ctx['store'],ctx.get('turn_id','')):
             raise ValueError('Extraction jobs may only import their source. Use propose_job_import.')
+        from .crm_enrichment import job_for_turn as enrichment_for_turn
+        job=enrichment_for_turn(ctx['store'],ctx.get('turn_id',''))
+        if job and (record_id!=job['record_id'] or job['turn_id']!=ctx.get('turn_id')):raise ValueError('Enrichment writes are restricted to the assigned record.')
 
     @tool
     def read_job_workspace(query: str = '', kind: str = '', stage: str = '', offset: int = 0, limit: int = 20) -> dict:
@@ -145,8 +151,10 @@ def tools(ctx):
     @tool
     def write_job_record(record: crm.Record, record_id: str = '', revision: int = 0) -> dict:
         """Create or edit any CRM field, as the owner can in the UI. Read the latest record revision first; provide the complete record. Explicit owner instructions take effect immediately, with no approval queue. Public research needs source URLs and dated notes; do not invent findings."""
-        allowed()
+        allowed(record_id)
         crm.initialize(ctx['store'])
+        from .crm_enrichment import job_for_turn as enrichment_for_turn
+        if enrichment_for_turn(ctx['store'],ctx.get('turn_id','')):return {'error':'Use update_job_record to preserve existing research.'}
         body=record.model_dump(mode='json')
         editing=bool(record_id)
         if not record_id:
@@ -154,21 +162,48 @@ def tools(ctx):
         existing=ctx['store'].query('SELECT * FROM crm_records WHERE id=?',(record_id,))
         if editing and not existing:return {'error':'Record not found. Omit record_id to create a new record.'}
         if existing and json.loads(existing[0]['body'])==body:return crm.record_row(existing[0])
-        return write(ctx['store'],body,record_id,revision,actor='owner')
+        return write(ctx['store'],body,record_id,revision,actor='owner',turn_id=ctx.get('turn_id',''))
 
     @tool
     def update_job_record(record_id: str, revision: int, changes: dict) -> dict:
         """Edit selected fields on a CRM record without replacing the other fields. Read the latest revision first. All UI fields are supported; schema validation and relation checks are shared with the form. For research append to existing notes instead of replacing owner context."""
-        allowed()
+        allowed(record_id)
         crm.initialize(ctx['store'])
         from .crm_imports import canonical_id
         with ctx['store'].connect() as db:
             record_id=canonical_id(db,record_id)
             old=db.execute('SELECT * FROM crm_records WHERE id=?',(record_id,)).fetchone()
         if not old:return {'error':'Record not found.'}
-        body=crm.RECORD.validate_python({**json.loads(old['body']),**changes}).model_dump(mode='json')
-        if body==json.loads(old['body']):return crm.record_row(old)
-        return write(ctx['store'],body,record_id,revision,actor='owner')
+        current=json.loads(old['body'])
+        from .crm_enrichment import job_for_turn as enrichment_for_turn
+        job=enrichment_for_turn(ctx['store'],ctx.get('turn_id',''))
+        if job:
+            from .crm_imports import owner_fields
+            with ctx['store'].connect() as db:locks=owner_fields(db,record_id)
+            if job['saved_revision'] is not None and revision<old['revision']:return crm.record_row(old)
+            changes={k:v for k,v in changes.items() if k not in ('kind','name','title','company_id','person_id','stage','priority','applied_on','happened_on')}
+            crm.RECORD.validate_python({**current,**changes})
+            for key in list(changes):
+                if key in locks and key not in ('notes','urls','news','stats'):changes.pop(key)
+            if 'notes' in changes:
+                incoming=changes['notes']
+                existing=current.get('notes','')
+                if not isinstance(incoming,str):raise ValueError('Notes must be text.')
+                if existing and not incoming.startswith(existing):incoming=existing if incoming in existing else existing+'\n\n'+incoming
+                if len(incoming)>12000:raise ValueError('Keep existing notes and shorten the added research to fit 12000 characters.')
+                changes['notes']=incoming
+            if 'urls' in changes:changes['urls']=list(dict.fromkeys(current.get('urls',[])+changes['urls']))[:12]
+            if 'news' in changes:
+                merged={n['url']:n for n in changes['news']}
+                merged.update({n['url']:n for n in current.get('news',[])})
+                changes['news']=sorted(merged.values(),key=lambda n:n.get('published_on') or '',reverse=True)[:30]
+            if 'stats' in changes:changes['stats']={**changes['stats'],**current.get('stats',{})}
+            for key in ('next_action','logo_url','image_url'):
+                if current.get(key):changes.pop(key,None)
+        if job and not any(changes.get(k) and changes[k]!=current.get(k) for k in ('notes','summary')):return {'error':'Save a useful new research brief or explicit evidence gap in notes or summary before completing.'}
+        body=crm.RECORD.validate_python({**current,**changes}).model_dump(mode='json')
+        if body==json.loads(old['body']):return {'error':'No new findings were saved. Add a useful dated brief or an explicit evidence gap.'} if job else crm.record_row(old)
+        return write(ctx['store'],body,record_id,revision,actor='agent_research' if job else 'owner',turn_id=ctx.get('turn_id',''))
 
     @tool
     def import_job_report(source: crm.Source) -> dict:
@@ -200,7 +235,20 @@ def tools(ctx):
         from .outreach import report
         return report()
 
-    catalog=[read_job_workspace,read_job_dossier,write_job_record,update_job_record,import_job_report,process_job_reports,read_job_artifacts,save_job_artifact,read_job_links]
+    @tool
+    def enrich_job_records(request_id: str, record_ids: list[str] = []) -> dict:
+        """Enrich selected company/contact IDs, or all high-priority companies and linked contacts when empty. Runs in isolated private tasks, saves directly, retries failures and no-save replies automatically. Reuse request_id on uncertain delivery."""
+        allowed()
+        from .crm_enrichment import Start,start
+        return start(ctx['store'],Start(request_id=request_id,record_ids=record_ids))
+
+    @tool
+    def read_job_enrichment() -> dict:
+        """Read saved/running/retrying enrichment tasks. Saved means a CRM write receipt exists, not just a model completion."""
+        from .crm_enrichment import status
+        return {'jobs':status(ctx['store'])}
+
+    catalog=[enrich_job_records,read_job_enrichment,read_job_workspace,read_job_dossier,write_job_record,update_job_record,import_job_report,process_job_reports,read_job_artifacts,save_job_artifact,read_job_links]
     # Tool execution errors are corrective feedback, not failed coordinator turns.
     for item in catalog:
         original=item.func
