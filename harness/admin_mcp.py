@@ -1,4 +1,5 @@
 """Authenticated admin MCP, separate from the anonymous portfolio agent."""
+import asyncio
 import contextlib
 import html
 import os
@@ -215,6 +216,16 @@ def mount_admin_mcp(app, get_store):
 
     @app.get('/admin-auth/callback',include_in_schema=False)
     async def callback(request:Request,state:str='',code:str=''):
+        if state.startswith('gmail_'):
+            from .gmail_connection import finish as finish_gmail
+            try:
+                if not code or len(code)>4096 or len(state)>128:raise ValueError('Invalid callback')
+                await asyncio.to_thread(finish_gmail,get_store(),state,code,request.cookies.get('portfolio_gmail_oauth'))
+            except Exception:
+                return HTMLResponse('<!doctype html><title>Gmail connection</title><h1>Gmail did not finish connecting</h1><p>Return to your CRM connections page and try again. The Gmail API must be enabled for the Google project, and read-only access must be granted for the selected account.</p>',status_code=403,headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer'})
+            response=HTMLResponse('<!doctype html><title>Gmail connected</title><h1>Gmail is connected</h1><p>You can close this tab and return to the CRM. Existing job-search email is being imported. Connections shows whether live push delivery is configured.</p>',headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer'})
+            response.delete_cookie('portfolio_gmail_oauth',path='/admin-auth',secure=True,httponly=True,samesite='lax')
+            return response
         if not oauth.enabled:
             return JSONResponse({'detail':'Admin sign-in is not configured.'},status_code=404)
         try:

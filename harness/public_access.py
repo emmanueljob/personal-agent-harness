@@ -77,7 +77,7 @@ class PublicAccess(BaseHTTPMiddleware):
             if not oauth_transport and ((origin and origin.rstrip('/') not in expected) or request.headers.get('sec-fetch-site') == 'cross-site'):
                 return JSONResponse({'detail':'Cross-site requests are not accepted.'}, status_code=403)
             try:
-                limit = 512000 if path.startswith('/api/admin/crm/artifacts') else 128000 if path.startswith('/api/admin/crm/records') or path.startswith('/api/model-bridge/') or path == '/grok-mcp' or path.startswith('/api/admin/crm/sources') else 32000
+                limit = 512000 if path.startswith(('/api/admin/crm/artifacts','/api/admin/crm/correspondence/import')) else 128000 if path.startswith('/api/admin/crm/records') or path.startswith('/api/model-bridge/') or path == '/grok-mcp' or path.startswith('/api/admin/crm/sources') else 32000
                 if int(request.headers.get('content-length', '0')) > limit:
                     return JSONResponse({'detail':'Request is too large.'}, status_code=413)
             except ValueError:

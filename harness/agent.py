@@ -116,6 +116,8 @@ from .learning import feedback_tools
 plugins.register("learning", feedback_tools)
 from .crm import tools as crm_tools
 plugins.register("job_crm", crm_tools)
+from .correspondence import tools as correspondence_tools
+plugins.register("correspondence",correspondence_tools)
 
 
 def conversation_input(profile, previous, prompt, config, extra_context=""):
