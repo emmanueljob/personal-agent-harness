@@ -135,3 +135,15 @@ def test_terminal_failure_event_retries_only_import_jobs_without_owner_action(tm
     with store.connect() as db:db.execute("UPDATE turns SET status='failed' WHERE id=?",(ordinary,))
     assert not retry_failed_job(store,ordinary)
     assert store.query('SELECT status FROM turns WHERE id=?',(ordinary,))[0]['status']=='failed'
+
+
+def test_owner_renaming_an_entity_does_not_recreate_its_old_imported_identity(tmp_path):
+    store=Store(tmp_path);sid=source(store,'old-name')
+    stage(store,sid,candidate('co',{'kind':'company','name':'Example'}))
+    row=crm.overview(store)['records'][0]
+    with store.connect() as db:crm.write_record(db,{**row['record'],'name':'Owner corrected company'},row['id'],row['revision'])
+    next_source=source(store,'new-report-old-name')
+    stage(store,next_source,candidate('co',{'kind':'company','name':'Example','next_action':'Research team'}))
+    records=crm.overview(store)['records']
+    assert len(records)==1 and records[0]['record']['name']=='Owner corrected company'
+    assert records[0]['record']['next_action']=='Research team'

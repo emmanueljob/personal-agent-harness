@@ -22,27 +22,32 @@ def identity_matches(db,record):
     candidates=[dict(r) for r in db.execute('SELECT * FROM crm_records WHERE kind=? ORDER BY created,id',(record['kind'],))]
     exact=[]; related=[]
     for row in candidates:
-        old=json.loads(row['body']); kind=record['kind']
-        if kind=='company':
-            same_domain=bool(old.get('domain') and record.get('domain') and old['domain']==record['domain'])
-            same_name=normalized(old['name'])==normalized(record['name'])
-            if same_domain or same_name: exact.append(row)
-            continue
-        if old['company_id']!=record['company_id']: continue
-        if kind=='person':
-            if old.get('email') and record.get('email'):
-                if old['email'].casefold()==record['email'].casefold():exact.append(row)
-                continue
-            if normalized(old['name'])==normalized(record['name']):related.append(row)
-        elif kind=='application':
-            if old.get('applied_on') and record.get('applied_on') and old['applied_on']!=record['applied_on']:continue
-            if set(old.get('urls',[])) & set(record.get('urls',[])) or role(old['title'])==role(record['title']):
-                exact.append(row)
-            elif record['stage'] in ('considering','preparing') and old['stage'] in ('applied','screen','interview','offer'):
-                a,b=set(role(old['title']).split()),set(role(record['title']).split())
-                if len(a&b)>=3 and len(a&b)/len(a|b)>=.75:related.append(row)
-        elif kind=='activity' and all(old.get(k)==record.get(k) for k in ('person_id','happened_on','channel','stage')) and normalized(old['title'])==normalized(record['title']):
-            exact.append(row)
+        current=json.loads(row['body']);kind=record['kind']
+        if kind!='company' and current['company_id']!=record['company_id']:continue
+        # Imported identities remain aliases after the owner corrects a name/email/title.
+        # Otherwise a later report could recreate the old identity as a duplicate.
+        variants=[current]+[json.loads(r['body']) for r in db.execute('SELECT body FROM crm_changes WHERE record_id=? ORDER BY revision DESC',(row['id'],))]
+        strength=None
+        for old in variants:
+            if kind=='company':
+                same_domain=bool(old.get('domain') and record.get('domain') and old['domain']==record['domain'])
+                if same_domain or normalized(old['name'])==normalized(record['name']):strength='exact';break
+            elif kind=='person':
+                if old.get('email') and record.get('email'):
+                    if old['email'].casefold()==record['email'].casefold():strength='exact';break
+                    continue
+                if normalized(old['name'])==normalized(record['name']):strength='related'
+            elif kind=='application':
+                if old.get('applied_on') and record.get('applied_on') and old['applied_on']!=record['applied_on']:continue
+                if set(old.get('urls',[])) & set(record.get('urls',[])) or role(old['title'])==role(record['title']):
+                    strength='exact';break
+                if record['stage'] in ('considering','preparing') and current['stage'] in ('applied','screen','interview','offer'):
+                    a,b=set(role(old['title']).split()),set(role(record['title']).split())
+                    if len(a&b)>=3 and len(a&b)/len(a|b)>=.75:strength='related'
+            elif kind=='activity' and all(old.get(k)==record.get(k) for k in ('person_id','happened_on','channel','stage')) and normalized(old['title'])==normalized(record['title']):
+                strength='exact';break
+        if strength=='exact':exact.append(row)
+        elif strength=='related':related.append(row)
     return exact if exact else related if len(related)==1 else []
 
 
