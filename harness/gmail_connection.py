@@ -203,6 +203,8 @@ def relevant(store,value,account):
     labels=value.get('labelIds',[])
     if 'DRAFT' in labels or any(label in labels for label in ('SPAM','TRASH')):return False
     headers={h['name'].casefold():h['value'] for h in value.get('payload',{}).get('headers',[])}
+    subject=headers.get('subject','').casefold()
+    if mail.is_security_notice(subject):return False
     text=' '.join(headers.values()).casefold()
     prior=store.query('SELECT 1 FROM crm_messages WHERE provider=\'gmail\' AND account=? AND thread_id=? LIMIT 1',(account,value.get('threadId','')))
     return bool(prior or any(term.strip('"').casefold() in text for term in scope_terms(store)) or any(word in headers.get('subject','').casefold() for word in ('interview','recruit','your application','job application','referral')))
@@ -212,7 +214,10 @@ def fetch_message(store,ident,connection):
     metadata=request(store,'/messages/'+ident,params={'format':'metadata','metadataHeaders':['From','To','Cc','Subject']},account=connection['account'])
     if relevant(store,metadata,connection['account']):
         full=request(store,'/messages/'+ident,params={'format':'full'},account=connection['account'])
-        if not any(label in full.get('labelIds',[]) for label in ('DRAFT','SPAM','TRASH')):mail.ingest(store,decode_message(full,connection['account']),method='gmail_api',timezone=connection['timezone'])
+        if relevant(store,full,connection['account']):
+            mail.ingest(store,decode_message(full,connection['account']),method='gmail_api',timezone=connection['timezone'])
+            return True
+    return False
 
 
 def process(store,job):
@@ -229,12 +234,12 @@ def process(store,job):
         result=request(store,'/messages',params={'q':query,'maxResults':25,**({'pageToken':body['page']} if body.get('page') else {})},account=connection['account'])
         threads=set()
         for item in result.get('messages',[]):
-            fetch_message(store,item['id'],connection);threads.add(item['threadId'])
+            if fetch_message(store,item['id'],connection):threads.add(item['threadId'])
         # A thread can contain both sent mail and replies, even when only one matched search.
         for ident in threads:
             thread=request(store,'/threads/'+ident,params={'format':'full'},account=connection['account'])
             for value in thread.get('messages',[]):
-                if not any(label in value.get('labelIds',[]) for label in ('DRAFT','SPAM','TRASH')):mail.ingest(store,decode_message(value,connection['account']),method='gmail_api',timezone=connection['timezone'])
+                if relevant(store,value,connection['account']):mail.ingest(store,decode_message(value,connection['account']),method='gmail_api',timezone=connection['timezone'])
         if result.get('nextPageToken'):
             with store.connect() as db:enqueue(db,'backfill',{'account':connection['account'],'page':result['nextPageToken'],'group':group},job['id']+':'+result['nextPageToken'])
         elif (group+1)*40<len(terms):
