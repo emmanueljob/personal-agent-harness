@@ -43,7 +43,7 @@ a company, and application URLs/normalized role titles reconcile automatically.
 Role abbreviations are normalized. A single sufficiently similar potential role
 can match an already submitted role within that company. Different known
 application dates stay separate. Ambiguous people and events remain separate
-rather than losing information. All original source claims remain available.
+rather than losing information. All original source claims remain available. Clear shorthand-title duplicates and recruiter-label aliases consolidate automatically. Redirects preserve original rows and source bindings while rewiring dependent records atomically; no original record is deleted. Distinct known application dates and different role submissions remain separate. Generic careers-page URLs are not treated as job identifiers. Owner corrections win, and conflicting owner-edited records are kept separate.
 
 Automatic merges combine research notes and URLs, preserve stronger known
 pipeline stages, and prefer newer source values for unlocked fields. Empty
@@ -59,6 +59,8 @@ records continue importing. Missing dependencies can resolve when later chunks
 arrive. Reports and evidence are preserved even if extraction fails. Source
 quotes are supporting evidence, not independent verification of their claims.
 
+Contacts can be affiliated with a different organization from a target company. Unknown-company placeholders resolve to a known contact affiliation with an uncertainty label; originals remain retained. Company associations are editable, and owner-corrected affiliations take precedence over later reports.
+
 All records remain directly editable in the company, contact, application and
 activity views. Existing personalized links can be attached to activities; visit
 counts remain aggregate signals in Visit reports and do not identify a visitor.
@@ -69,7 +71,7 @@ knowledge or spend advertising budget.
 
 The existing `harness.sqlite` stores `crm_records`, `crm_sources`,
 `crm_candidates`, `crm_changes` and `crm_workspace`. This increment adds
-`crm_import_jobs`, `crm_import_issues` and a revision-history index, using
+`crm_import_jobs`, `crm_import_issues`, `crm_redirects` and a revision-history index, using
 `CREATE ... IF NOT EXISTS`; no existing tables are rewritten or dropped.
 `accepted_id` remains the internal mapping from a historical candidate to its
 live record, not a requirement for human approval. The legacy acceptance route

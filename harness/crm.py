@@ -155,6 +155,7 @@ def initialize(store):
         CREATE TABLE IF NOT EXISTS crm_workspace(id INTEGER PRIMARY KEY CHECK(id=1), thread_id TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS crm_import_issues(source_id TEXT NOT NULL,key TEXT NOT NULL,message TEXT NOT NULL,updated REAL NOT NULL,PRIMARY KEY(source_id,key));
         CREATE TABLE IF NOT EXISTS crm_import_jobs(source_id TEXT NOT NULL,offset INTEGER NOT NULL,end_offset INTEGER NOT NULL,turn_id TEXT UNIQUE,PRIMARY KEY(source_id,offset));
+        CREATE TABLE IF NOT EXISTS crm_redirects(alias_id TEXT PRIMARY KEY,record_id TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS crm_history_record ON crm_changes(record_id,revision);
 
         ''')
@@ -172,8 +173,10 @@ def canonical(record):
         return ('domain', record['domain']) if record['domain'] else ('name', record['name'].casefold())
     if record['kind']=='person' and record['email']:
         return 'email', record['company_id']+'|'+record['email'].casefold()
-    if record['kind']=='application' and record['urls']:
-        return 'job', record['company_id']+'|'+record['urls'][0]
+    if record['kind']=='application':
+        from .crm_imports import job_urls
+        urls=job_urls(record)
+        if urls:return 'job',record['company_id']+'|'+repr(sorted(urls)[0])+'|'+str(record.get('applied_on') or '')
     return None
 
 
@@ -181,7 +184,7 @@ def matches(db, record):
     key = canonical(record)
     if not key:
         return []
-    return [r['id'] for r in db.execute('SELECT * FROM crm_records WHERE kind=?',(record['kind'],)) if canonical(json.loads(r['body']))==key]
+    return [r['id'] for r in db.execute('SELECT * FROM crm_records WHERE kind=? AND id NOT IN (SELECT alias_id FROM crm_redirects)',(record['kind'],)) if canonical(json.loads(r['body']))==key]
 
 
 def validate_relations(db, record):
@@ -191,8 +194,8 @@ def validate_relations(db, record):
         if not ident:
             continue
         row = db.execute('SELECT * FROM crm_records WHERE id=? AND kind=?',(ident,kind)).fetchone()
-        if not row or (field!='company_id' and row['company_id']!=company):
-            raise ValueError('Related records must exist and belong to the same company.')
+        if not row:
+            raise ValueError('Related record must exist and have the selected type.')
     if record.get('link_id'):
         from .outreach import report
         if not any(x['id']==record['link_id'] for x in report()['links']):
@@ -201,12 +204,16 @@ def validate_relations(db, record):
 
 def write_record(db, record, ident, revision, source_id=None, evidence='', observed_on=None, certainty='owner_confirmed', actor='owner'):
     record = RECORD.validate_python(record).model_dump(mode='json')
+    from .crm_imports import canonical_id
+    ident=canonical_id(db,ident)
+    for field in ('company_id','person_id','application_id'):
+        if record.get(field):record[field]=canonical_id(db,record[field])
     validate_relations(db,record)
     old = db.execute('SELECT * FROM crm_records WHERE id=?',(ident,)).fetchone()
     if (old and old['revision']!=revision) or (not old and revision!=0):
         raise ValueError('Record changed. Reload before saving.')
-    if old and (old['kind']!=record['kind'] or old['company_id']!=record.get('company_id','')):
-        raise ValueError('Record kind and company cannot change; create a separate relationship record.')
+    if old and old['kind']!=record['kind']:
+        raise ValueError('Record kind cannot change.')
     if any(match!=ident for match in matches(db,record)):
         raise ValueError('A matching record exists. Merge into it or edit its identity first.')
     now=time.time(); body=json.dumps(record)
@@ -238,7 +245,7 @@ def save_source(store, source):
 
 def stage(store, source_id, proposal):
     initialize(store)
-    from .crm_imports import apply_pending
+    from .crm_imports import apply_pending,consolidate
     with store.connect() as db:
         db.execute('BEGIN IMMEDIATE')
         source=db.execute('SELECT body FROM crm_sources WHERE id=?',(source_id,)).fetchone()
@@ -259,8 +266,9 @@ def stage(store, source_id, proposal):
                 continue
             db.execute('INSERT OR IGNORE INTO crm_candidates VALUES (?,?,?,NULL)',(source_id,c.key,body))
         imported=apply_pending(db,source_id)
+        consolidated=consolidate(db)
         issues=[dict(r) for r in db.execute('SELECT key,message FROM crm_import_issues WHERE source_id=?',(source_id,))]
-    return {'source_id':source_id,'imported':imported,'proposed':len(keys)-len(errors),'requires_owner_review':False,'errors':errors,'issues':issues}
+    return {'source_id':source_id,'imported':imported,'proposed':len(keys)-len(errors),'consolidated':consolidated,'requires_owner_review':False,'errors':errors,'issues':issues}
 
 
 def accept(store, source_id, choices):
@@ -318,7 +326,7 @@ def collect_grok(store):
 def overview(store):
     initialize(store)
     with store.connect() as db:
-        records=[record_row(r) for r in db.execute('SELECT * FROM crm_records ORDER BY updated DESC')]
+        records=[record_row(r) for r in db.execute('SELECT * FROM crm_records WHERE id NOT IN (SELECT alias_id FROM crm_redirects) ORDER BY updated DESC')]
         sources=[]
         for s in db.execute('SELECT * FROM crm_sources ORDER BY created DESC'):
             candidates=[]
@@ -348,7 +356,7 @@ def tools(ctx):
     def search_job_crm(query: str = '') -> str:
         """Read accepted private job-search CRM records. SQLite is authoritative; search by company, person, stage or role."""
         initialize(ctx['store'])
-        rows=ctx['store'].query('SELECT * FROM crm_records ORDER BY updated DESC')
+        rows=ctx['store'].query('SELECT * FROM crm_records WHERE id NOT IN (SELECT alias_id FROM crm_redirects) ORDER BY updated DESC')
         query=query.casefold()
         result=[]
         for r in rows:
