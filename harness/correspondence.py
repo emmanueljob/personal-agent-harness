@@ -132,25 +132,25 @@ def write_activity(db,row,timezone='UTC'):
         for key in owner_fields(db,ident):
             if key in current:record[key]=current[key]
         record=crm.RECORD.validate_python(record).model_dump(mode='json')
-        if current==record and existing['certainty']==('provider_observed' if row['method'] in ('gmail_api','linkedin_api') else 'imported_message'):return
-    crm.write_record(db,record,ident,existing['revision'] if existing else 0,certainty='provider_observed' if row['method'] in ('gmail_api','linkedin_api') else 'imported_message',actor='correspondence_sync',evidence=f"{message.provider} message {message.external_id}; {message.direction}; {'automated message' if message.automated else 'message observed'}")
+        if current==record and existing['certainty']==('provider_observed' if row['method'] in ('gmail_api','linkedin_api','linkedin_browser') else 'imported_message'):return
+    crm.write_record(db,record,ident,existing['revision'] if existing else 0,certainty='provider_observed' if row['method'] in ('gmail_api','linkedin_api','linkedin_browser') else 'imported_message',actor='correspondence_sync',evidence=f"{message.provider} message {message.external_id}; {message.direction}; {'automated message' if message.automated else 'message observed'}")
     db.execute('UPDATE crm_messages SET activity_id=? WHERE id=?',(ident,row['id']))
 
 
 def ingest(store,message,method='owner_import',timezone='UTC'):
-    message=message.model_copy(update={'account':message.account.casefold()})
-    initialize(store);body=message.model_dump_json();ident=str(uuid.uuid5(uuid.NAMESPACE_URL,'message:'+message.provider+':'+message.account.casefold()+':'+message.external_id))
+    message=message.model_copy(update={'account':message.account.casefold() if message.provider=='gmail' else message.account})
+    initialize(store);body=message.model_dump_json();ident=str(uuid.uuid5(uuid.NAMESPACE_URL,'message:'+message.provider+':'+message.account+':'+message.external_id))
     with store.connect() as db:
         db.execute('BEGIN IMMEDIATE')
         old=db.execute('SELECT * FROM crm_messages WHERE id=?',(ident,)).fetchone()
         company,person=match(db,message) if not old else (old['company_id'],old['person_id'])
         if old and not company:company,person=match(db,message)
         # Provider-origin evidence cannot be downgraded by an owner-import retry.
-        if old and old['method'] in ('gmail_api','linkedin_api') and method=='owner_import':return {'id':ident,'activity_id':old['activity_id'],'linked':bool(company)}
+        if old and old['method'] in ('gmail_api','linkedin_api','linkedin_browser') and method=='owner_import':return {'id':ident,'activity_id':old['activity_id'],'linked':bool(company)}
         now=time.time()
         db.execute('INSERT OR IGNORE INTO crm_message_versions VALUES (?,?,?,?,?)',(ident,hashlib.sha256(body.encode()).hexdigest(),body,method,now))
-        db.execute('''INSERT INTO crm_messages VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body,thread_id=excluded.thread_id,direction=excluded.direction,occurred_at=excluded.occurred_at,method=excluded.method,company_id=excluded.company_id,person_id=excluded.person_id,updated=excluded.updated''',(ident,message.provider,message.account.casefold(),message.external_id,message.thread_id,message.direction,message.occurred_at.isoformat() if message.occurred_at else None,body,method,company,person,old['activity_id'] if old else '',now,now))
-        for row in list(db.execute('SELECT * FROM crm_messages WHERE provider=? AND account=? AND thread_id=?',(message.provider,message.account.casefold(),message.thread_id))):
+        db.execute('''INSERT INTO crm_messages VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body,thread_id=excluded.thread_id,direction=excluded.direction,occurred_at=excluded.occurred_at,method=excluded.method,company_id=excluded.company_id,person_id=excluded.person_id,updated=excluded.updated''',(ident,message.provider,message.account,message.external_id,message.thread_id,message.direction,message.occurred_at.isoformat() if message.occurred_at else None,body,method,company,person,old['activity_id'] if old else '',now,now))
+        for row in list(db.execute('SELECT * FROM crm_messages WHERE provider=? AND account=? AND thread_id=?',(message.provider,message.account,message.thread_id))):
             if not row['company_id'] and company:
                 db.execute('UPDATE crm_messages SET company_id=? WHERE id=?',(company,row['id']))
                 row=db.execute('SELECT * FROM crm_messages WHERE id=?',(row['id'],)).fetchone()
@@ -252,7 +252,7 @@ def mount(app,get_store,owner):
         except ValueError as error:raise HTTPException(409,str(error)) from error
 
     @router.get('/connections')
-    def connections():return private({'gmail':gmail.status(get_store()),'linkedin':{'connected':False,'method':None,'status':'Connection method not configured'}})
+    def connections():return private({'gmail':gmail.status(get_store()),'linkedin':{'method':'cloud_browser','status_url':'/api/admin/cloud-browser/status'}})
 
     class Connect(BaseModel):
         email:str=Field(min_length=3,max_length=300)

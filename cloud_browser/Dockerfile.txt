@@ -1,0 +1,13 @@
+FROM python:3.13-slim
+RUN pip install --no-cache-dir uv==0.13.7
+WORKDIR /worker
+COPY cloud_browser/pyproject.toml cloud_browser/uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project && .venv/bin/patchright install --with-deps chromium
+COPY cloud_browser/worker ./worker
+COPY cloud_browser/THIRD_PARTY_NOTICES.md ./
+COPY cloud_browser/licenses ./licenses
+RUN useradd --uid 10001 --create-home browser && mkdir -p /data/browser && chown -R browser:browser /data/browser /root/.cache/ms-playwright \
+    && mv /root/.cache/ms-playwright /opt/browsers && chmod -R a+rX /opt/browsers
+ENV PATH="/worker/.venv/bin:$PATH" PLAYWRIGHT_BROWSERS_PATH=/opt/browsers PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+EXPOSE 8090
+CMD ["sh","-c","mkdir -p /data/browser && chown browser:browser /data/browser && chmod 700 /data/browser && exec runuser -u browser -- uvicorn worker.service:app --host :: --port 8090 --no-access-log"]

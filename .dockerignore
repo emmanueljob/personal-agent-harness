@@ -26,3 +26,17 @@ frontend/*
 
 frontend/node_modules/
 frontend/dist/
+
+!cloud_browser/
+cloud_browser/*
+!cloud_browser/Dockerfile.txt
+!cloud_browser/pyproject.toml
+!cloud_browser/uv.lock
+!cloud_browser/worker/
+cloud_browser/worker/*
+!cloud_browser/worker/*.py
+!cloud_browser/THIRD_PARTY_NOTICES.md
+!cloud_browser/licenses/
+cloud_browser/licenses/*
+!cloud_browser/licenses/*.txt
+cloud_browser/**/__pycache__/
