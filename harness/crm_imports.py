@@ -99,7 +99,7 @@ def owner_fields(db,ident):
     for row in db.execute('SELECT body,actor FROM crm_changes WHERE record_id=? ORDER BY revision,id',(ident,)):
         body=json.loads(row['body'])
         if row['actor']=='owner':
-            locked.update(k for k,v in body.items() if (v not in ('',None,[],{}) if not previous else v!=previous.get(k)))
+            locked.update(k for k,v in body.items() if (v not in ('',None,[],{}) if not previous else (v!=previous[k] if k in previous else v not in ('',None,[],{}))))
         previous=body
     return locked
 
