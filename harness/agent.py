@@ -52,14 +52,16 @@ plugins = PluginRegistry()
 def finish_bounded_research(request, handler):
     """Stop repetitive tool loops and ask for an answer from gathered evidence."""
     tool_count = sum(isinstance(message, ToolMessage) for message in request.messages)
+    coordinator = 'job-search coordinator' in str(request.system_message.content if request.system_message else '')
+    latest_tool=next((m for m in reversed(request.messages) if isinstance(m,ToolMessage)),None)
     if tool_count:
         per_result = min(6000, 12000 // tool_count)
         request = request.override(messages=[
             message.model_copy(update={"content": str(message.content)[:per_result] + "\n[Tool evidence shortened for context.]"})
-            if isinstance(message, ToolMessage) and len(str(message.content)) > per_result else message
+            if isinstance(message, ToolMessage) and len(str(message.content)) > per_result and not (coordinator and message is latest_tool) else message
             for message in request.messages
         ])
-    if tool_count >= 4:
+    if tool_count >= (16 if coordinator else 4):
         original = request.system_message.content if request.system_message else ""
         request = request.override(
             tools=[],
@@ -201,6 +203,7 @@ def prepare_turn(store, turn):
             if guidance:
                 config['job_search_workspace'] = True
                 config['job_search_instructions'] = guidance
+                if config['provider']=='openai':config['max_output_tokens']=8192
         if mode == 'public':
             from .personalization import guide_context
             selected = store.query('SELECT profile_key FROM turn_personalization WHERE turn_id=?', (turn['id'],))
