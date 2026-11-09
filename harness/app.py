@@ -37,6 +37,8 @@ async def lifespan(app):
         raise RuntimeError("EXECUTOR must be local or temporal")
     if settings()['agent_runtime']=='deepagents' and executor!='temporal':
         raise RuntimeError('Deep Agents runtime requires EXECUTOR=temporal.')
+    from .gmail_connection import worker as gmail_worker
+    mail_task=asyncio.create_task(gmail_worker(store))
     task = asyncio.create_task(temporal_dispatcher(store) if executor == "temporal" else local_worker(store))
     try:
         async with contextlib.AsyncExitStack() as stack:
@@ -45,6 +47,9 @@ async def lifespan(app):
             await stack.enter_async_context(app.state.grok_mcp_lifespan())
             yield
     finally:
+        mail_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await mail_task
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
@@ -99,6 +104,8 @@ from .grok_connection import mount_grok
 mount_grok(app, lambda:store, studio_owner)
 from .crm import mount as mount_crm
 mount_crm(app, lambda:store, studio_owner)
+from .correspondence import mount as mount_correspondence
+mount_correspondence(app,lambda:store,studio_owner)
 
 
 def access(ident, authorization):
