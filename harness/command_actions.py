@@ -88,8 +88,8 @@ def draft_follow_up(db, card, action_id):
         channel='note', stage='drafted', notes=draft,
         summary='Follow-up draft prepared from a Command Center suggestion. Review and personalize before sending.')
     crm.write_record(db, record.model_dump(mode='json'), ident, 0, actor='command-center-action')
-    return {'status': 'drafted', 'summary': 'Saved a follow-up draft in My Career for review.',
-            'draftId': ident, 'draftText': draft, 'scope': 'Draft saved. Delivery requires a separate send action.'}
+    return {'status': 'drafted', 'summary': 'Saved a starter follow-up draft in My Career for review.',
+            'draftId': ident, 'draftText': draft, 'scope': 'Template draft saved. Review and personalize before a separate send action.'}
 
 
 
