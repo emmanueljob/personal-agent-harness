@@ -115,24 +115,64 @@ def import_cards(db):
         yield ((rank, '9999', -row['created'], entry['id']), entry)
 
 
-def feed(store, scope='all', offset=0):
-    initialize(store)
+def ranked_cards(db, hidden):
     today = date.today().isoformat()
     ranked = []
+    for row in db.execute(ROWS):
+        if row['id'] in hidden:
+            continue
+        entry = card(row, today)
+        if entry:
+            ranked.append(((entry['rank'], entry['due'] or '9999', -row['updated'], entry['id']), entry))
+    ranked.extend(import_cards(db))
+    ranked.sort(key=lambda item: item[0])
+    return [entry for _, entry in ranked]
+
+
+def feed(store, scope='all', offset=0):
+    initialize(store)
     with store.connect() as db:
         db.execute('BEGIN')
-        hidden = career_email.hidden_activity_ids(db)
-        for row in db.execute(ROWS):
-            if row['id'] in hidden:
-                continue
-            entry = card(row, today)
-            if entry:
-                ranked.append(((entry['rank'], entry['due'] or '9999', -row['updated'], entry['id']), entry))
-        ranked.extend(import_cards(db))
-    ranked.sort(key=lambda item: item[0])
-    entries = [entry for _, entry in ranked if scope != 'completed' or entry['reviewed']]
+        entries = ranked_cards(db, career_email.hidden_activity_ids(db))
+    entries = [entry for entry in entries if scope != 'completed' or entry['reviewed']]
     return {'cards': entries[offset:offset+40],
             'nextOffset': offset+40 if offset+40 < len(entries) else None}
+
+
+def chat_summary(entry):
+    return {key: entry[key] for key in (
+        'id', 'title', 'company', 'person', 'stage', 'why', 'action', 'source', 'date', 'reviewed')}
+
+
+def chat_evidence(db, selected_id='', previous_ids=()):
+    """Read inside the send transaction, after initialize(store). Hidden content stays excluded."""
+    hidden = career_email.hidden_activity_ids(db)
+    entries = ranked_cards(db, hidden)
+    by_id = {entry['id']: entry for entry in entries}
+    from .crm_imports import canonical_id
+    references = []
+    # Recheck prior card identities even if they have fallen beyond the home page.
+    identities = list(dict.fromkeys([selected_id, *previous_ids]))[:21]
+    for ident in identities:
+        if not ident:
+            continue
+        current_id = canonical_id(db, ident)
+        if current_id in hidden:
+            references.append({'id': ident, 'eligibility': 'hidden', 'action': ''})
+        elif current_id in by_id:
+            references.append({'requestedId': ident, 'eligibility': 'visible',
+                               **chat_summary(by_id[current_id]),
+                               'evidence': by_id[current_id]['evidence'] if ident == selected_id else ''})
+        else:
+            references.append({'id': ident, 'eligibility': 'unavailable', 'action': ''})
+    return {
+        'surface': 'command-center',
+        'asOf': datetime.now(timezone.utc).isoformat(),
+        'coverage': {'visibleCards': len(entries), 'includedCards': min(8, len(entries)),
+                     'complete': len(entries) <= 8},
+        'cards': [chat_summary(entry) for entry in entries[:8]],
+        'references': references,
+    }
 
 
 def mark_done(store, ident, revision):
