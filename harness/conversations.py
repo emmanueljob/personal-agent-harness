@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import grok_connection as grok
+from . import muse_bridge
 
 
 class NewThread(BaseModel):
@@ -35,11 +36,12 @@ def initialize(store):
                 prompt TEXT NOT NULL, created REAL NOT NULL, UNIQUE(thread_id, request_id));
             CREATE INDEX IF NOT EXISTS agent_turns_thread ON agent_turns(thread_id, created);
         """)
+        muse_bridge.initialize(db)
 
 
 def availability(store, agent):
     if agent == 'muse':
-        return 'Muse companion is unavailable.'
+        return muse_bridge.availability(store)
     if not all(os.getenv(k) for k in ('GROKBOT_WEBHOOK_URL', 'GROKBOT_WEBHOOK_KEY', 'GROKBOT_MCP_TOKEN')):
         return 'Configure the Grokbot connection in admin.'
     proofs = store.query("SELECT result FROM grok_assignments WHERE action='connection_test' AND status='completed'")
@@ -57,9 +59,10 @@ def thread(store, ident):
 
 def transcript(store, ident):
     info = thread(store, ident)
-    turns = store.query("""SELECT t.id,t.text,t.created,a.status,
-            json_extract(a.result,'$.report') AS reply FROM agent_turns t
-            JOIN grok_assignments a ON a.id=t.id WHERE thread_id=? ORDER BY t.rowid""", (ident,))
+    turns = store.query("""SELECT t.id,t.text,t.created,COALESCE(a.status,m.status) AS status,
+            COALESCE(json_extract(a.result,'$.report'),m.reply) AS reply FROM agent_turns t
+            LEFT JOIN grok_assignments a ON a.id=t.id
+            LEFT JOIN muse_turns m ON m.id=t.id WHERE thread_id=? ORDER BY t.rowid""", (ident,))
     return {**info, 'turns': turns}
 
 
@@ -90,9 +93,13 @@ def send(store, ident, body):
         now = time.time()
         db.execute('INSERT INTO agent_turns VALUES (?,?,?,?,?,?,?)',
                    (task_id, ident, body.request_id, message, body.context, prompt, now))
-        db.execute("""INSERT INTO grok_assignments(id,request_id,action,status,created,updated)
+        if info['agent'] == 'muse':
+            db.execute("INSERT INTO muse_turns(id,status) VALUES (?,'queued')", (task_id,))
+        else:
+            db.execute("""INSERT INTO grok_assignments(id,request_id,action,status,created,updated)
                       VALUES (?,?,'conversation','queued',?,?)""", (task_id, task_id, now, now))
-    grok.dispatch_assignment(store, task_id)
+    if info['agent'] == 'grokbot':
+        grok.dispatch_assignment(store, task_id)
     return transcript(store, ident)
 
 
@@ -151,3 +158,4 @@ def mount(app, get_store, owner):
         return private(transcript(db, ident))
 
     app.include_router(router)
+    muse_bridge.mount(app, get_store)
