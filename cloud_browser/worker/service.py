@@ -7,16 +7,16 @@ import hashlib
 import json
 import os
 import random
-import re
 import secrets
 import signal
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import urlsplit
 
 import httpx
-from fastapi import Depends,FastAPI,Header,HTTPException
+from fastapi import Depends,FastAPI,Header,HTTPException,WebSocket,WebSocketDisconnect,WebSocketException
+from starlette.requests import HTTPConnection
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel,Field
 from typing import Literal
@@ -33,39 +33,22 @@ class Worker:
         self.account=self.state.get('account','');self.http=None
 
     async def open(self):
-        from linkedin_mcp_server.core.browser import BrowserManager
-        self.browser=BrowserManager(user_data_dir=self.state.root/'profile',headless=True,channel='chromium',viewport={'width':1280,'height':900},args=['--disable-dev-shm-usage'])
+        from .desktop import Desktop
+        self.browser=Desktop(self.state.root)
         await self.browser.start()
-        await self.browser.context.route('**/*',self.guard)
-        self.browser.page.on('request',self.observe)
-        if self.browser.page.url=='about:blank':
-            try:await self.browser.page.goto(li.BASE+'/login',wait_until='domcontentloaded',timeout=25000)
-            except Exception:self.error='LinkedIn could not be opened automatically. Use the sign-in page button to retry.'
-        self.status='needs_login'
-
-    async def guard(self,route):
-        """Network boundary: no internal navigation, downloads, message writes or read receipts."""
-        request=route.request;parsed=urlsplit(request.url);host=parsed.hostname or ''
-        allowed=parsed.scheme=='https' and (host in ('linkedin.com','www.linkedin.com','www.google.com','www.gstatic.com','www.recaptcha.net','client-api.arkoselabs.com','challenges.cloudflare.com') or any(host.endswith('.'+suffix) for suffix in ('licdn.com','linkedin.com','arkoselabs.com')))
-        messaging_write=request.method not in ('GET','HEAD','OPTIONS') and parsed.path.startswith('/voyager/api/')
-        if not allowed or messaging_write:await route.abort()
-        else:await route.continue_()
-
-    def observe(self,request):
-        parsed=urlsplit(request.url)
-        if parsed.hostname!='www.linkedin.com' or parsed.path!='/voyager/api/voyagerMessagingGraphQL/graphql':return
-        query=parse_qs(parsed.query).get('queryId',[''])[0]
-        for kind,prefix in [('messages','messengerMessages.'),('conversations','messengerConversations.')]:
-            if query.startswith(prefix) and re.fullmatch(r'[A-Za-z]+\.[a-f0-9]+',query):self.state.put('query_'+kind,query)
+        if not self.state.get('native_desktop_initialized',False):
+            if not self.account:self.state.put('paused',True)
+            self.state.put('native_desktop_initialized',True)
+        self.status='waiting_for_signin' if not self.account else 'needs_login'
 
     async def client(self):
-        cookies=await self.browser.context.cookies([li.BASE])
-        jar={r['name']:r['value'] for r in cookies}
-        if not jar.get('li_at') or not jar.get('JSESSIONID'):raise li.LoginRequired('Sign in to LinkedIn in the private browser view.')
-        ua=await self.browser.page.evaluate('navigator.userAgent')
+        jar,ua=await self.browser.session()
+        if not jar.get('li_at') or not jar.get('JSESSIONID'):raise li.LoginRequired('Sign in to LinkedIn in the private Chrome desktop, then start sync.')
         return httpx.AsyncClient(cookies=jar,headers={'user-agent':ua,'csrf-token':jar['JSESSIONID'].strip('"'),'accept':'application/vnd.linkedin.normalized+json+2.1','x-restli-protocol-version':'2.0.0','x-li-recipe-accept':'application/vnd.linkedin.normalized+json+2.1','referer':li.BASE+'/messaging/'},trust_env=False,follow_redirects=False,timeout=httpx.Timeout(45,connect=15))
 
     async def read(self,url):
+        parsed=urlsplit(url)
+        if parsed.scheme!='https' or parsed.hostname!='www.linkedin.com' or parsed.path not in ('/voyager/api/me','/voyager/api/voyagerMessagingGraphQL/graphql'):raise ValueError('Capture reads are limited to LinkedIn messaging and account identity.')
         r=await self.http.get(url)
         if r.status_code in (401,403) or r.status_code in (301,302,303,307,308):raise li.LoginRequired('LinkedIn needs sign-in or verification in the private browser view.')
         r.raise_for_status()
@@ -126,7 +109,7 @@ class Worker:
     async def supervise_browser(self):
         while True:
             await asyncio.sleep(3)
-            try:unhealthy=self.browser.page_crashed or self.browser.page.is_closed()
+            try:unhealthy=not self.browser.healthy()
             except Exception:unhealthy=True
             if unhealthy:
                 # Let the container restart the whole process, reopen the profile,
@@ -138,7 +121,7 @@ class Worker:
         attempt=0
         while True:
             if self.state.get('paused',False):
-                self.status='paused';self.session_ready.clear();await asyncio.sleep(2);continue
+                self.status='paused' if self.account else 'waiting_for_signin';self.session_ready.clear();await asyncio.sleep(2);continue
             try:
                 await self.establish();attempt=0
                 self.reconnect.clear()
@@ -243,7 +226,7 @@ class Worker:
     def snapshot(self):
         with self.state.db() as db:
             errors=[r['error'] for r in db.execute("SELECT DISTINCT error FROM outbox WHERE state='retry' AND error!='' LIMIT 3")]
-        return {'delivery_errors':errors,'state':self.status,'error':self.error,'transport_connected':self.transport,'account':self.account,'paused':self.state.get('paused',False),'last_event':self.state.get('last_event',0),'last_read':self.state.get('last_read',0),'last_saved':self.state.get('last_saved',0),'jobs':self.state.counts('jobs'),'outbox':self.state.counts('outbox')}
+        return {'browser_mode':'native_chrome_desktop','browser_version':self.browser.version if self.browser else '', 'delivery_errors':errors,'state':self.status,'error':self.error,'transport_connected':self.transport,'account':self.account,'paused':self.state.get('paused',False),'last_event':self.state.get('last_event',0),'last_read':self.state.get('last_read',0),'last_saved':self.state.get('last_saved',0),'jobs':self.state.counts('jobs'),'outbox':self.state.counts('outbox')}
 
 worker=None
 
@@ -264,9 +247,11 @@ async def lifespan(app):
         await worker.browser.close();lock.close()
 
 
-def owner(authorization:str=Header(default='')):
+def owner(connection:HTTPConnection,authorization:str=Header(default='')):
     token=os.getenv('BROWSER_WORKER_TOKEN','')
-    if not token or not secrets.compare_digest(authorization.encode(),('Bearer '+token).encode()):raise HTTPException(401,'Private browser requires authorization.')
+    if not token or not secrets.compare_digest(authorization.encode(),('Bearer '+token).encode()):
+        if connection.scope['type']=='websocket':raise WebSocketException(code=1008)
+        raise HTTPException(401,'Private browser requires authorization.')
 
 
 app=FastAPI(lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None,dependencies=[Depends(owner)])
@@ -281,9 +266,30 @@ async def status():return worker.snapshot()
 @app.get('/frame')
 async def frame():
     async with worker.lock:
-        page=worker.browser.page
-        data=await page.screenshot(type='jpeg',quality=65,timeout=15000)
-        return {'image':'data:image/jpeg;base64,'+base64.b64encode(data).decode(),'width':1280,'height':900,'url':page.url}
+        data=await worker.browser.screenshot()
+        return {'image':'data:image/jpeg;base64,'+base64.b64encode(data).decode(),'width':1280,'height':900,'url':'Private Chrome desktop'}
+
+@app.websocket('/desktop')
+async def desktop(socket:WebSocket):
+    reader,writer=await asyncio.open_connection('127.0.0.1',5900)
+    await socket.accept()
+    async def browser_to_owner():
+        while data:=await reader.read(65536):await socket.send_bytes(data)
+    async def owner_to_browser():
+        while True:
+            data=await socket.receive_bytes()
+            if len(data)>4_194_304:raise ValueError('Desktop frame too large.')
+            writer.write(data);await writer.drain()
+    tasks=[asyncio.create_task(browser_to_owner()),asyncio.create_task(owner_to_browser())]
+    try:
+        done,_=await asyncio.wait(tasks,return_when=asyncio.FIRST_COMPLETED)
+        for task in done:await task
+    except (WebSocketDisconnect,ConnectionError):pass
+    finally:
+        for task in tasks:task.cancel()
+        await asyncio.gather(*tasks,return_exceptions=True)
+        writer.close();await writer.wait_closed()
+        with contextlib.suppress(RuntimeError):await socket.close()
 
 class Control(BaseModel):
     action:Literal['navigate','click','type','key','scroll','start','pause','resume','disconnect']
@@ -297,20 +303,13 @@ class Control(BaseModel):
 @app.post('/control')
 async def control(body:Control):
     async with worker.lock:
-        page=worker.browser.page
         if body.action in ('pause','disconnect'):
             worker.state.put('paused',True);worker.session_ready.clear();worker.status='paused';worker.reconnect.set()
             if body.action=='disconnect':
-                await worker.browser.context.clear_cookies();await page.goto(li.BASE+'/login',wait_until='domcontentloaded');worker.status='needs_login'
+                await worker.browser.clear_cookies();worker.status='needs_login'
         elif body.action in ('start','resume'):
             worker.state.put('paused',False);worker.reconnect.set()
-        elif body.action=='navigate':
-            parsed=urlsplit(body.url)
-            if parsed.scheme!='https' or parsed.hostname not in ('linkedin.com','www.linkedin.com') or parsed.port not in (None,443):raise HTTPException(422,'Use a LinkedIn HTTPS URL.')
-            await page.goto(body.url,wait_until='domcontentloaded',timeout=25000)
-        elif body.action=='click':await page.mouse.click(body.x,body.y)
-        elif body.action=='type':await page.keyboard.insert_text(body.text)
-        elif body.action=='key':
-            if body.key:await page.keyboard.press(body.key)
-        elif body.action=='scroll':await page.mouse.wheel(0,body.delta)
+        else:
+            try:await worker.browser.control(body)
+            except ValueError as error:raise HTTPException(422,str(error)) from error
     return {'ok':True}

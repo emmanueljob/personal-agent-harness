@@ -59,7 +59,7 @@ def receive(store,authorization,body):
 
 
 def mount(app,get_store,owner):
-    from fastapi import APIRouter,Depends,HTTPException,Request
+    from fastapi import APIRouter,Depends,HTTPException,Request,WebSocket,WebSocketDisconnect
     from fastapi.responses import JSONResponse
     router=APIRouter(prefix='/api/admin/cloud-browser',dependencies=[Depends(owner)],include_in_schema=False)
     def private(value,status=200):return JSONResponse(value,status_code=status,headers={'Cache-Control':'private, no-store'})
@@ -80,6 +80,50 @@ def mount(app,get_store,owner):
     async def control(body:Control):
         try:return private(await request('/control',body.model_dump()))
         except ValueError as error:raise HTTPException(503,str(error)) from error
+
+    @router.post('/desktop-ticket')
+    def ticket():
+        if not configured():raise HTTPException(503,'Private desktop is not configured.')
+        return private({'ticket':desktop_ticket(get_store()),'expires_in':60})
+
+    @app.websocket('/api/admin/cloud-browser/desktop')
+    async def desktop(socket:WebSocket):
+        import asyncio
+        import contextlib
+        from urllib.parse import urlsplit,urlunsplit
+        from websockets.asyncio.client import connect
+        expected=os.getenv('PUBLIC_ORIGIN','').rstrip('/')
+        protocols=[p.strip() for p in socket.headers.get('sec-websocket-protocol','').split(',')]
+        token=next((p[7:] for p in protocols if p.startswith('ticket.')),'')
+        if not expected or socket.headers.get('origin','').rstrip('/')!=expected or 'desktop' not in protocols or not configured() or not consume_desktop_ticket(get_store(),token):
+            await socket.close(code=1008);return
+        endpoint=urlsplit(os.environ['CLOUD_BROWSER_URL'])
+        if endpoint.scheme not in ('http','https'):
+            await socket.close(code=1008);return
+        target=urlunsplit(('wss' if endpoint.scheme=='https' else 'ws',endpoint.netloc,endpoint.path.rstrip('/')+'/desktop','',''))
+        try:
+            async with connect(target,additional_headers={'Authorization':'Bearer '+os.environ['CLOUD_BROWSER_TOKEN']},proxy=None,max_size=4_194_304,open_timeout=10) as upstream:
+                await socket.accept(subprotocol='desktop')
+                async def to_owner():
+                    async for value in upstream:
+                        if not isinstance(value,bytes):raise ValueError('Expected desktop binary data.')
+                        await socket.send_bytes(value)
+                async def to_worker():
+                    while True:
+                        value=await socket.receive_bytes()
+                        if len(value)>4_194_304:raise ValueError('Desktop frame too large.')
+                        await upstream.send(value)
+                tasks=[asyncio.create_task(to_owner()),asyncio.create_task(to_worker())]
+                try:
+                    async with asyncio.timeout(1800):
+                        done,_=await asyncio.wait(tasks,return_when=asyncio.FIRST_COMPLETED)
+                        for task in done:await task
+                finally:
+                    for task in tasks:task.cancel()
+                    await asyncio.gather(*tasks,return_exceptions=True)
+        except (Exception,asyncio.TimeoutError):pass
+        finally:
+            with contextlib.suppress(RuntimeError):await socket.close(code=1013)
 
     app.include_router(router)
 
@@ -112,3 +156,26 @@ def tools(ctx):
         except ValueError as error:return {'error':str(error)}
 
     return [cloud_browser_status,control_cloud_browser]
+
+
+# Tickets are single-use, short-lived, and hashed at rest. They travel in a
+# WebSocket subprotocol rather than a URL/query string or a browser storage slot.
+def desktop_ticket(store):
+    import hashlib
+    initialize(store)
+    token=secrets.token_urlsafe(32)
+    with store.connect() as db:
+        db.execute('CREATE TABLE IF NOT EXISTS crm_desktop_tickets(digest TEXT PRIMARY KEY,expires REAL NOT NULL)')
+        db.execute('DELETE FROM crm_desktop_tickets WHERE expires<?',(time.time(),))
+        db.execute('INSERT INTO crm_desktop_tickets VALUES (?,?)',(hashlib.sha256(token.encode()).hexdigest(),time.time()+60))
+    return token
+
+
+def consume_desktop_ticket(store,token):
+    import hashlib
+    if not isinstance(token,str) or len(token)>100:return False
+    with store.connect() as db:
+        db.execute('CREATE TABLE IF NOT EXISTS crm_desktop_tickets(digest TEXT PRIMARY KEY,expires REAL NOT NULL)')
+        db.execute('BEGIN IMMEDIATE')
+        row=db.execute('DELETE FROM crm_desktop_tickets WHERE digest=? RETURNING expires',(hashlib.sha256(token.encode()).hexdigest(),)).fetchone()
+    return bool(row and row['expires']>=time.time())

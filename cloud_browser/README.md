@@ -1,10 +1,26 @@
 # Private cloud LinkedIn capture
 
-A separate container runs Chromium through the open-source LinkedIn MCP browser
-core. The main app provides an owner-authenticated screenshot/control view. No CDP,
-VNC, stock MCP HTTP server, or unauthenticated browser port is exposed publicly.
-The private harness tools can inspect/pause/resume capture; credentials are entered
-by the owner in admin, not handed to an LLM.
+A separate container runs stock Google Chrome on Xvfb/Openbox with the Chrome
+sandbox enabled. No Playwright/Patchright runtime, headless mode, automation
+flags, fingerprint overrides, CAPTCHA solvers, or proxy changes are used. The
+owner controls the native desktop through noVNC inside admin.
+
+The desktop's VNC and browser debugging ports bind to loopback only. An owner
+POST creates a hashed, 60-second, single-use desktop ticket. The WebSocket
+requires the configured same-origin Origin plus that ticket in a subprotocol;
+credentials never appear in query strings or browser storage. The authenticated
+app-to-worker bridge alone can reach the desktop relay. Active views reconnect
+with fresh tickets and close after 30 minutes. Closing the view leaves capture
+running. Browser/desktop subprocesses receive a minimal environment with no CRM
+or gateway bearer tokens. Text fallback travels over stdin and a short-lived
+private clipboard, never process arguments or saved screenshots.
+
+The owner signs in manually before starting sync. Once enabled, the capture
+service reads only LinkedIn-domain cookies from the worker's dedicated profile
+through its private local session endpoint. Other account cookies are excluded.
+The Chrome desktop is not controlled by an automation framework. Normal human
+verification remains required by LinkedIn; cloud browser acceptance and live sync
+must be tested with the owner's account before declaring the connection working.
 
 ## Data flow and recovery
 
@@ -25,8 +41,9 @@ attention state. Chrome termination restarts the container, reopens the persiste
 profile and requeues interrupted work. LinkedIn verification still needs the owner.
 
 The integration uses LinkedIn's web protocol, which can change independently of
-this app. It does not have an official LinkedIn messaging API grant. No message
-send or mark-read methods are implemented; browser Voyager API writes are blocked.
+this app. It does not have an official LinkedIn messaging API grant. The capture service
+implements no message-send or mark-read methods. The owner can take normal actions
+directly in the native Chrome desktop; those actions are separate from read-only sync.
 Message bodies remain untrusted evidence, never agent instructions. Attachments
 are represented by available text/fallbacks, not downloaded. Capture is plain text.
 
@@ -68,7 +85,7 @@ also required. A real account is connected only through the private admin view;
 initial historical capture and a subsequent actual event must be verified
 separately before claiming end-to-end live sync.
 
-The main database change is additive (`crm_linkedin_capture`). Existing Gmail and
+The main database changes are additive (`crm_linkedin_capture` and single-use `crm_desktop_tickets`). Existing Gmail and
 Temporal workflow schemas remain compatible; this feature adds no new Temporal
 workflow history. Worker dependencies and durable storage are independent of the
 serving app's volume.
