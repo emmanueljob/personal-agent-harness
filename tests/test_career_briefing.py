@@ -25,12 +25,21 @@ def test_narrative_and_followup_with_existing_correction(tmp_path,monkeypatch):
         assert calls.count(career_briefing.Narrative)==1
         payload = {'question':'Which environments?', 'answer':'The owner said “I like forests”.',
                    'request_id':'synthetic-question'}
+        thread = base+'/conversations/muse'
+        assert client.get(thread).status_code == 401
+        prepared = {k:v for k,v in payload.items() if k != 'answer'}
+        assert client.post(base+'/questions/muse/prepare',headers=AUTH,json=prepared).is_success
+        assert client.get(thread,headers=AUTH).json()['messages'][0]['status']=='handoff'
         ident = client.post(base+'/questions/muse',headers=AUTH,json=payload).json()
+        exchange, = client.get(thread,headers=AUTH).json()['messages']
+        assert exchange['answer'] == payload['answer'] and exchange['status']=='completed'
+        assert not exchange['reviewed']
         assert client.get(base+'/questions',headers=AUTH).json()['pending']==[ident]
         process = base+'/questions/'+ident+'/process'
         assert client.post(process,headers=AUTH).is_success
         assert client.post(process,headers=AUTH).is_success
         assert calls.count(career.Findings)==1
+        assert client.get(thread,headers=AUTH).json()['messages'][0]['reviewed']
         owner,new = career.brief(store)['claims']
         assert owner['source']=='Owner correction'
         assert new['source']=='muse · Which environments?' and new['quote']=='I like forests'
@@ -65,3 +74,11 @@ def test_grok_question_roundtrip_and_duplicate_callback(tmp_path,monkeypatch):
     assert ask.question in sent[-1]['instruction']
     progress=career_briefing.progress(store)
     assert len(progress['pending'])==1 and progress['tasks'][0]['status']=='completed'
+
+    exchange, = career_briefing.conversation(store,'grokbot',10)['messages']
+    assert exchange['question']==ask.question and exchange['answer']=='Owner prefers field work.'
+
+    followup=grok.create_assignment(store,ask.model_copy(update={'request_id':'another-request','question':'Why?'}))['id']
+    assert 'Owner prefers field work.' in deliver(followup,'A previous project informed that preference.')
+    page=career_briefing.conversation(store,'grokbot',1)
+    assert page['more'] and page['messages'][0]['id']==followup
