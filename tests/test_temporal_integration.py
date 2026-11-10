@@ -130,3 +130,52 @@ def test_deepagents_per_call_crash_recovery(tmp_path, monkeypatch):
         for proc in processes:
             if proc.poll() is None:proc.kill()
             proc.wait()
+
+
+def test_company_reads_then_async_browser_status_through_tool_activity(tmp_path, monkeypatch):
+    import json
+    from harness import crm
+
+    queue = 'async-dispatch-' + str(uuid.uuid4())
+    monkeypatch.setenv('AGENT_RUNTIME', 'deepagents')
+    monkeypatch.setenv('TEMPORAL_TASK_QUEUE', queue)
+    store = Store(tmp_path)
+    crm.initialize(store)
+    with store.connect() as db:
+        crm.write_record(db, {'kind': 'company', 'name': 'Synthetic Company'}, 'synthetic-company', 0)
+    from harness import correspondence
+    correspondence.ingest(store, correspondence.Message(
+        provider='linkedin', account='urn:li:fsd_profile:SyntheticOwner',
+        external_id='synthetic-message', thread_id='synthetic-thread',
+        direction='outbound', sender=correspondence.Address(name='Synthetic Owner'),
+        recipients=[correspondence.Address(name='Synthetic Recipient')],
+        subject='Synthetic Company outreach', text='Fictional company lookup fixture.'))
+    ident = store.enqueue(store.thread('private')['id'], 'Read the synthetic company and check browser status')
+    env = {**os.environ, 'DATA_DIR': str(tmp_path), 'BRAIN_DIR': str(tmp_path/'brain'),
+           'BRAIN_BACKEND': 'files', 'MODEL_PROVIDER': 'ollama', 'OLLAMA_MODEL': 'offline-fixture',
+           'OLLAMA_CONTEXT': '16384', 'WEB_SEARCH_PROVIDER': 'disabled', 'EXECUTOR': 'temporal',
+           'TEMPORAL_TASK_QUEUE': queue, 'TEMPORAL_ADDRESS': os.environ['TEMPORAL_TEST_ADDRESS'],
+           'TOOL_SEQUENCE_FIXTURE': '1', 'PYTHONPATH': str(Path.cwd())}
+    async def check():
+        client = await Client.connect(env['TEMPORAL_ADDRESS'])
+        await dispatch_once(client, store)
+        handle = client.get_workflow_handle(store.workflow_id(ident))
+        assert await asyncio.wait_for(handle.result(), 60) == ident
+        turn = store.query('SELECT status,result FROM turns WHERE id=?', (ident,))[0]
+        assert turn == {'status': 'completed', 'result': 'Synthetic company lookup completed'}
+        transcript = json.loads(store.query('SELECT body FROM deep_transcripts WHERE turn_id=?', (ident,))[0]['body'])
+        results = [m['data']['name'] for m in transcript if m['type'] == 'tool']
+        assert results == ['read_job_messages', 'read_job_workspace', 'cloud_browser_status']
+        history = await handle.fetch_history()
+        activities = [e.activity_task_scheduled_event_attributes.activity_type.name
+                      for e in history.events if e.HasField('activity_task_scheduled_event_attributes')]
+        assert activities.count('deepagents.invoke_tool') == 3
+        assert activities.count('deepagents.invoke_model') == 4
+        assert not any(e.HasField('activity_task_failed_event_attributes') for e in history.events)
+    with open(tmp_path/'worker.log', 'w') as log:
+        process = subprocess.Popen([sys.executable, 'tests/deep_worker_fixture.py'], env=env, stdout=log, stderr=log)
+        try:
+            asyncio.run(check())
+        finally:
+            process.kill()
+            process.wait()
