@@ -7,6 +7,8 @@ type Props = {
   onOpenRecord: (recordId: string, cardId: string) => void;
   onOpenMyCareer: () => void;
   returnCardId?: string;
+  selectedCardId?: string;
+  onSelectCard?: (id: string) => void;
   renderChat: (agent: 'grokbot'|'muse', context: string) => ReactNode;
 };
 type Card = {
@@ -58,10 +60,10 @@ function chatContext(card: Card) {
     evidence: card.evidence, date: card.date});
 }
 
-export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, renderChat}: Props) {
+export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, renderChat, selectedCardId, onSelectCard}: Props) {
   const [cards, setCards] = useState<Card[]>([]), [loading, setLoading] = useState(true);
   const [error, setError] = useState(''), [saving, setSaving] = useState('');
-  const [selected, setSelected] = useState(''), [editing, setEditing] = useState('');
+  const [selected, setSelected] = useState(selectedCardId || ''), [editing, setEditing] = useState('');
   const [agent, setAgent] = useState<'grokbot'|'muse'>('grokbot');
   const [generation, setGeneration] = useState(0);
   const restored = useRef(''), chat = useRef<HTMLHeadingElement>(null);
@@ -87,6 +89,8 @@ export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, 
     catch (e) {setError((e as Error).message)}
     finally {setSaving('')}
   }
+  useEffect(() => {setSelected(selectedCardId || '')}, [selectedCardId]);
+  const selectCard = (id: string) => {setSelected(id); onSelectCard?.(id)};
   const current = cards.find(c => c.id===selected);
   return <div className="command-center">
     <header className="cc-header"><h1>Command center</h1>
@@ -112,14 +116,14 @@ export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, 
         <div className="cc-actions">
           {(card.action || card.reviewed) && <button className="admin-primary" disabled={!!saving || loading}
             onClick={() => void complete(card)}>{card.reviewed ? 'Reopen next step' : 'Mark next step done'}</button>}
-          <button onClick={() => {setSelected(card.id); chat.current?.focus()}}>Ask about this</button>
+          <button onClick={() => {selectCard(card.id); chat.current?.focus()}}>Ask about this</button>
         </div>
       </article>)}
     </section><aside className="cc-chat">
       <h2 tabIndex={-1} ref={chat}>Chat</h2>
       <label>Agent<select value={agent} onChange={e => setAgent(e.target.value as typeof agent)}>
         <option value="grokbot">Grokbot</option><option value="muse">Muse</option></select></label>
-      {current && <p>About <strong>{current.title}</strong> <button onClick={() => setSelected('')}>Clear card</button></p>}
+      {current && <p>About <strong>{current.title}</strong> <button onClick={() => selectCard('')}>Clear card</button></p>}
       {renderChat(agent, current && !loading ? chatContext(current) : '')}
     </aside></div>
   </div>;

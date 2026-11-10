@@ -2,6 +2,7 @@ import React,{useCallback,useEffect,useState} from 'react';
 import type {Portfolio} from './portfolio';
 import {LearningStudio} from './learning';
 import './admin.css';
+import {useAdminRoute} from './admin-route';
 import {AgentConversation} from './agent-conversation';
 import {CareerChatSession} from './career-conversation';
 import {CommandCenter} from './command-center';
@@ -25,39 +26,54 @@ function profileName(key:string){if(key==='default')return 'Default experience';
 function rearrange<T>(items:T[],index:number,delta:number){const next=[...items];[next[index],next[index+delta]]=[next[index+delta],next[index]];return next}
 
 export default function AdminPortal(){
- const [password,setPassword]=useState(''),[token,setToken]=useState(''),[config,setConfig]=useState<Config|null>(null),[section,setSection]=useState<Section>('command-center'),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[dirty,setDirty]=useState(false);
- const request=async(secret:string,path:string,method='GET',body?:unknown)=>{const r=await fetch('/api'+path,{method,headers:{Authorization:'Bearer '+secret,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),cache:'no-store'});const d=await r.json();if(!r.ok)throw new Error(typeof d.detail==='string'?d.detail:Array.isArray(d.detail)?d.detail.map((x:{msg:string})=>x.msg).join('; '):'Request failed');return d};
- const api:Api=useCallback((path,method,body)=>request(token,path,method,body),[token]);
+ const [password,setPassword]=useState(''),[restoringSession,setRestoringSession]=useState(true),[config,setConfig]=useState<Config|null>(null),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[dirty,setDirty]=useState(false);
+ const request = async (path: string, method = 'GET', body?: unknown) => {
+   const response = await fetch('/api'+path, {method, credentials: 'same-origin',
+     headers: {'Content-Type': 'application/json'}, body: body === undefined ? undefined : JSON.stringify(body), cache: 'no-store'});
+   const data = await response.json();
+   if (!response.ok) {
+     if (response.status === 401) setConfig(null);
+     throw new Error(typeof data.detail === 'string' ? data.detail : 'Request failed');
+   }
+   return data;
+ };
+ const api: Api = useCallback(request, []);
+ useEffect(() => {
+   let active = true;
+   api('/admin/session').then(() => api('/admin/config'))
+     .then(data => {if (active) setConfig(data)})
+     .catch(() => {}).finally(() => {if (active) setRestoringSession(false)});
+   return () => {active = false};
+ }, [api]);
  const load=async()=>{setConfig(await api('/admin/config'));setDirty(false)};
  const save=async(action:()=>Promise<unknown>)=>{setBusy(true);setNotice('');try{await action();await load();setNotice('Saved. New visits and new guide turns use these settings immediately.')}catch(e){setNotice((e as Error).message)}finally{setBusy(false)}};
  useEffect(()=>{document.title='Portfolio admin';const warn=(e:BeforeUnloadEvent)=>{if(dirty){e.preventDefault();e.returnValue=''}};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn)},[dirty]);
- const [careerEntry, setCareerEntry] = useState<{recordId?: string}>();
- const [returnCardId, setReturnCardId] = useState<string>();
+ const [route, pushRoute] = useAdminRoute(() => {
+   if (dirty && !window.confirm('Discard unsaved changes?')) return false;
+   setDirty(false);
+   setNotice('');
+   return true;
+ });
+ const section: Section = sections.includes(route.section as Section) ? route.section as Section : 'command-center';
  const navigate = (next: Section) => {
    if (dirty && !window.confirm('Discard unsaved changes?')) return;
-   setDirty(false);
-   setNotice('');
-   setCareerEntry(undefined);
-   if (next !== 'command-center') setReturnCardId(undefined);
-   setSection(next);
+   setDirty(false); setNotice('');
+   pushRoute({section: next, card: route.card, selectedCard: route.selectedCard});
  };
- const openMyCareer = (recordId?: string, cardId?: string) => {
-   setReturnCardId(cardId);
-   setCareerEntry({recordId});
-   setSection('Job search');
- };
- const signOut = () => {
+ const openMyCareer = (record?: string, card?: string) =>
+   pushRoute({section: 'Job search', view: 'My Career', record, card, selectedCard: route.selectedCard});
+ const signOut = async () => {
    if (dirty && !window.confirm('Discard unsaved changes and sign out?')) return;
-   setToken('');
-   setConfig(null);
-   setDirty(false);
-   setNotice('');
-   setCareerEntry(undefined);
-   setReturnCardId(undefined);
-   setSection('command-center');
+   setBusy(true);
+   try {
+     await api('/admin/session', 'DELETE');
+     setConfig(null); setDirty(false); setNotice('');
+   } catch (error) {setNotice((error as Error).message)}
+   finally {setBusy(false)}
  };
  const workspace = section === 'Job search' || section === 'command-center';
- if(!config)return <main className="admin-shell admin-login"><a href="/" className="admin-brand">← Portfolio</a><div className="admin-login-card"><span className="admin-eyebrow">OWNER WORKSPACE</span><h1>Your portfolio,<br/>your controls.</h1><p>Manage the experience behind every outreach link.</p><form onSubmit={async e=>{e.preventDefault();setBusy(true);setNotice('');try{const data=await request(password,'/admin/config');setToken(password);setPassword('');setConfig(data)}catch(error){setNotice((error as Error).message)}finally{setBusy(false)}}}><label className="admin-field">Owner password<input type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required/></label><button className="admin-primary" disabled={busy}>{busy?'Signing in…':'Open admin portal'}</button></form><small>Use your existing owner studio password. It stays in memory for this session.</small>{notice&&<p className="admin-notice" role="alert">{notice}</p>}</div></main>;
+ if (restoringSession) return <main className="admin-shell"><p role="status">Opening your workspace…</p></main>;
+ if(!config)return <main className="admin-shell admin-login"><a href="/" className="admin-brand">← Portfolio</a><div className="admin-login-card"><span className="admin-eyebrow">OWNER WORKSPACE</span><h1>Your portfolio,<br/>your controls.</h1><p>Manage the experience behind every outreach link.</p><form onSubmit={async e=>{e.preventDefault();setBusy(true);setNotice('');try{await api('/admin/session','POST',{password});const data=await api('/admin/config');setPassword('');setConfig(data)}catch(error){setNotice((error as Error).message)}finally{setBusy(false)}}}><label className="admin-field">Owner password<input type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required/></label><button className="admin-primary" disabled={busy}>{busy?'Signing in…':'Open admin portal'}</button></form><small>Use your existing owner studio password. Your sign-in continues securely when you refresh.</small>{notice&&<p className="admin-notice" role="alert">{notice}</p>}</div></main>;
  return <CareerChatSession><div className={'admin-shell'+(workspace?' admin-crm':'')}>
    <header className="admin-top">
      {section === 'command-center'
@@ -68,7 +84,7 @@ export default function AdminPortal(){
          {sections.map(name=><option key={name} value={name}>{sectionLabel(name)}</option>)}
        </select>}
        <a href="/" target="_blank" rel="noreferrer">View live site ↗</a>
-       <button onClick={signOut}>Sign out</button>
+       <button disabled={busy} onClick={()=>void signOut()}>Sign out</button>
      </div>
    </header>
    <div className="admin-layout">
@@ -83,7 +99,8 @@ export default function AdminPortal(){
        <div className="admin-heading"><div><span className="admin-eyebrow">PORTFOLIO CONTROL ROOM</span><h1>{sectionLabel(section)}</h1></div>{dirty&&<span className="admin-dirty">Unsaved changes</span>}</div>
        {notice&&<div className="admin-notice" role="status">{notice}<button aria-label="Dismiss message" onClick={()=>setNotice('')}>×</button></div>}
  {section==='command-center'&&<CommandCenter api={api} onOpenMyCareer={()=>openMyCareer()}
-   onOpenRecord={openMyCareer} returnCardId={returnCardId}
+   onOpenRecord={openMyCareer} returnCardId={route.card} selectedCardId={route.selectedCard}
+   onSelectCard={selectedCard=>pushRoute({...route, selectedCard})}
    renderChat={(agent, context)=><AgentConversation api={api} agent={agent} context={context}/>}/>}
  {section==='Profiles & copy'&&<ProfileEditor config={config} busy={busy} dirty={()=>setDirty(true)} discard={()=>setDirty(false)} save={save} api={api}/>}
  {section==='Site & projects'&&<PortfolioEditor config={config} busy={busy} dirty={()=>setDirty(true)} save={save} api={api}/>}
@@ -92,7 +109,7 @@ export default function AdminPortal(){
  {section==='Visit reports'&&<Reports api={api}/>}
  {section==='Contact & guide'&&<SettingsEditor config={config} busy={busy} dirty={()=>setDirty(true)} save={save} api={api}/>}
  {section==='Learning studio'&&<div className="admin-card"><LearningStudio api={api} seed={null}/></div>}
- {section==='Job search'&&<JobCRM api={api} dirty={setDirty} careerEntry={careerEntry}/>}
+ {section==='Job search'&&<JobCRM api={api} dirty={setDirty} route={route} onRoute={pushRoute}/>}
  {section==='System'&&<System config={config}/>}
  </main></div></div></CareerChatSession>;
 }
