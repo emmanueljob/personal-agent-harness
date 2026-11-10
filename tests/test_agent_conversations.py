@@ -51,3 +51,47 @@ def test_isolated_threads_and_reopen(tmp_path, monkeypatch):
         monkeypatch.delenv('GROKBOT_MCP_TOKEN')
         assert client.get(path, headers=OWNER).json() == reopened
         assert client.post(path+'/messages', headers=OWNER, json={**follow, 'request_id': 'unavailable-send'}).status_code == 409
+
+
+def test_home_evidence_resolved_at_send_and_frozen_on_retry(tmp_path, monkeypatch):
+    from harness import command_center, conversations
+    import json
+    module, store = setup(tmp_path, monkeypatch)
+    conversations.initialize(store)
+    monkeypatch.setattr(conversations, 'availability', lambda *_: '')
+    sent, resolved = [], []
+    monkeypatch.setattr(grok, 'push_webhook', lambda payload: sent.append(payload) or 200)
+    state = {'cards': [{'id': 'synthetic-card', 'company': 'Original Company'}]}
+    def hydrate(db, selected_id='', previous_ids=None):
+        assert db.in_transaction
+        resolved.append((selected_id, previous_ids))
+        return state
+    monkeypatch.setattr(command_center, 'chat_evidence', hydrate, raising=False)
+    with TestClient(module.app) as client:
+        def post(path, body):
+            response = client.post(path, headers=OWNER, json=body)
+            assert response.is_success, response.text
+            return response.json()
+        ident = post(ROOT, {'agent':'grokbot'})['id']
+        other = post(ROOT, {'agent':'grokbot'})['id']
+        path = ROOT+'/'+ident+'/messages'
+        marker = json.dumps({'surface':'command-center', 'card':''})
+        body = {'text':'What needs attention?', 'request_id':'synthetic-home-first', 'context':marker}
+        first = post(path, body)
+        assert resolved[-1] == ('', [])
+        task = first['turns'][0]['id']
+        grok.acknowledge(store, task, 'synthetic-home-claim')
+        grok.submit(store, task, 'synthetic-home-claim', grok.Result(
+            submission_id='synthetic-home-result', outcome='completed', report='Historical Original Company'))
+        state = {'cards': [], 'statuses': [{'id':'synthetic-card', 'status':'hidden'}]}
+        assert post(path, body)['turns'][0]['id'] == task
+        assert len(resolved) == 1 and len(sent) == 1
+        follow = post(path, {**body, 'request_id':'synthetic-home-next'})
+        prompt = json.loads(sent[-1]['instruction'].split('\n',1)[1])
+        assert prompt['current_evidence'] == state
+        assert resolved[-1] == ('', ['synthetic-card'])
+        assert 'Original Company' not in json.dumps(prompt['current_evidence'])
+        assert 'supersedes historical' in sent[-1]['instruction']
+        post(ROOT+'/'+other+'/messages', body)
+        assert resolved[-1] == ('', [])
+        assert store.query('SELECT context FROM agent_turns WHERE id=?', (follow['turns'][-1]['id'],))[0]['context'] == marker
