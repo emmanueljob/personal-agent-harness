@@ -85,6 +85,8 @@ export function CareerSummary({api,revision,updated}:{api:Api;revision:number;up
       <small>{statusText[m.status] || m.status} · {new Date(m.updated*1000).toLocaleTimeString()}</small>
       {m.answer && <><details open={i===0}><summary>{provider==='muse'?'Muse':'Grokbot'}’s reply</summary><p style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{m.answer}</p></details>
         {m.status==='completed' && <small>{m.reviewed?'Reviewed for your career brief':'Awaiting career review'}</small>}</>}
+      {provider==='grokbot' && m.status==='blocked' && m.answer?.includes("unsupported action 'career_question'") &&
+        <p>Update the existing Grokbot routine to allow <code>career_question</code>. The routine instructions are in Connections. After updating Grokbot, ask the question again.</p>}
       {m.status==='handoff' && <button disabled={busy||muse} onClick={()=>{setQuestion(m.question);setRequestId(m.id);setAnswer('');setMuse(true)}}>Continue WhatsApp handoff</button>}
       {['queued','delivery_rejected','delivery_unknown'].includes(m.status) && <button disabled={busy}
         onClick={()=>void run(async()=>{await api('/admin/grok/assignments/'+m.id+'/dispatch','POST')})}>Retry delivery</button>}
