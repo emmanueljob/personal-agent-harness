@@ -209,8 +209,8 @@ def review_one(store):
                        'Distinguish base from total pay, floor from target. Explain the job evidence and '
                        'cite the zero-based index of the most relevant preference.',
                        {'preferences': statements, 'company': pending['company'], 'title': job['title'],
-                        'description': job['job_description'][:9000], 'notes': job['notes'][:1800],
-                        'summary': job['summary']})
+                        'description': (job.get('job_description') or '')[:9000], 'notes': (job.get('notes') or '')[:1800],
+                        'summary': job.get('summary') or ''})
     if assessment.preference >= len(statements):
         raise ValueError('The review cited an unknown preference. Retry the review.')
     with store.connect() as db:
@@ -255,7 +255,13 @@ def review_all(store):
                     continue
                 _running.discard(store.root)
                 return
-    except Exception:
+    except Exception as exc:
+        if isinstance(exc, HTTPException) and exc.status_code == 503:
+            message = exc.detail
+        else:
+            import logging
+            logging.getLogger(__name__).warning('Career job review paused (%s)', type(exc).__name__)
+            message = 'A job assessment could not finish. Retry to resume pending reviews.'
         with _review_lock:
-            _errors[store.root] = 'Job review paused. Check the configured model and retry.'
+            _errors[store.root] = message
             _running.discard(store.root)

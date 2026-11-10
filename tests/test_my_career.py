@@ -10,6 +10,9 @@ def test_correct_sourced_preference_reconsiders_job(tmp_path, monkeypatch):
     company_id = add(store, company())
     role = {'kind':'application','company_id':company_id,'title':'Workshop planner'}
     job_id = add(store, role)
+    # Jobs imported before summary was introduced have no such key on disk.
+    with store.connect() as db:
+        db.execute("UPDATE crm_records SET body=json_remove(body,'$.summary') WHERE id=?", (job_id,))
     add(store, {**role,'title':'Past application','stage':'rejected'})
     quote = 'I prefer studio roles exclusively.'
     source(store, 'Owner career preferences: '+quote)
