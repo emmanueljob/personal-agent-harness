@@ -21,6 +21,7 @@ MAX_SCAN = 64_000_000
 BLOCKED_DIRS = {'.runtime','.venv','node_modules','dist','data','brain','state','private','raw','artifacts','previews','downloads','.ssh','.aws','__pycache__','.pytest_cache'}
 BLOCKED_NAMES = {'profile.md','voice.md','portfolio.json','perspectives.json','learning.json','podcast-artwork.json','bookshelf.json','library.json','.ds_store','.gitconfig','.netrc','.npmrc'}
 TEXT_TYPES = {'.py','.ts','.tsx','.js','.mjs','.css','.html','.json','.toml','.md','.txt','.yaml','.yml','.sh','.lock'}
+MAC_SOURCE_ROOT = 'desktop/macos/Sources/'
 # Owner-provided synthetic landscape, visually reviewed; replacements need review.
 PUBLIC_ASSETS = {'frontend/public/images/alpine-panorama.jpeg': '1e2c892c99e2bd1a07c1ae6cfbfd66533a720887291ad0bae4bb895d9d9ea7a7'}
 SPECIAL = {'Dockerfile','.dockerignore','.gitignore','.env.example','.gitleaks.toml','.githooks/pre-commit','.githooks/pre-push'}
@@ -45,7 +46,8 @@ def check_path(path, mode):
         raise Blocked(f'{path}: runtime, dependency or personal-data path.')
     if p.name.lower() in BLOCKED_NAMES or (p.name.startswith('.env') and path != '.env.example'):
         raise Blocked(f'{path}: personal data or environment file.')
-    if path not in PUBLIC_ASSETS and path not in SPECIAL and p.suffix.lower() not in TEXT_TYPES:
+    mac_source = path.startswith(MAC_SOURCE_ROOT) and p.suffix == '.swift'
+    if path not in PUBLIC_ASSETS and path not in SPECIAL and p.suffix.lower() not in TEXT_TYPES and not mac_source:
         raise Blocked(f'{path}: unreviewed file type; only source/configuration text is publishable.')
 
 

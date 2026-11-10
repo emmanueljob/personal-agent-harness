@@ -1,0 +1,65 @@
+import Foundation
+
+struct MessageBatch { let records: [Evidence]; let cursor: Int64; let scanned: Int; let skipped: Int }
+
+enum MessagesSource {
+    static var path: String { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Messages/chat.db").path }
+    static func choices(path: String = path, names: ContactNames = ContactNames()) throws -> [SourceChoice] {
+        let db = try SQL(path, readOnly: true)
+        var participants: [String: [String]] = [:]
+        if !(try db.rows("SELECT name FROM sqlite_master WHERE type='table' AND name='chat_handle_join'")).isEmpty {
+            for row in try db.rows("SELECT c.guid,h.id AS address FROM chat c JOIN chat_handle_join j ON j.chat_id=c.ROWID JOIN handle h ON h.ROWID=j.handle_id ORDER BY c.ROWID,h.ROWID") {
+                if let guid = row["guid"], let address = row["address"] { participants[guid, default: []].append(address) }
+            }
+        }
+        return try db.rows("SELECT ROWID AS id, guid, display_name, chat_identifier FROM chat ORDER BY ROWID DESC").compactMap { row in
+            guard let id = row["id"], let guid = row["guid"], !guid.isEmpty else { return nil }
+            let display = row["display_name"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let address = row["chat_identifier"] ?? ""
+            let addresses = Array(Set(participants[guid] ?? (address.isEmpty ? [] : [address]))).sorted()
+            let labels = addresses.map { names.name(for: $0) ?? $0 }
+            let title = !display.isEmpty ? display : !labels.isEmpty ? labels.joined(separator: ", ") : "Conversation \(id)"
+            return SourceChoice(id: guid, title: title, subtitle: (addresses.isEmpty ? "Local conversation" : addresses.joined(separator: ", ")) + " · \(id)")
+        }
+    }
+    static func batch(thread: SourceChoice, start: Double, end: Double, after: Int64, path: String = path) throws -> MessageBatch {
+        let db = try SQL(path, readOnly: true)
+        let columns = Set(try db.rows("PRAGMA table_info(message)").compactMap { $0["name"] })
+        let required: Set<String> = ["guid", "text", "date", "is_from_me", "handle_id"]
+        guard required.isSubset(of: columns) else { throw BrainFailure(message: "This Messages schema is not supported. No batch was imported.") }
+        let present = try db.rows("SELECT ROWID FROM chat WHERE guid=?", [thread.id])
+        guard !present.isEmpty else { throw BrainFailure(message: "A selected conversation is no longer available. The import is paused.") }
+        let optional = ["service", "date_edited", "date_retracted", "associated_message_type", "associated_message_guid"].filter { columns.contains($0) }.map { "m.\($0)" }.joined(separator: ",")
+        let extra = optional.isEmpty ? "" : "," + optional
+        let rawBody = columns.contains("attributedBody") ? ",hex(m.attributedBody) AS attributed_hex" : ""
+        // Both historical seconds and newer nanoseconds are compared in Apple epoch seconds.
+        let seconds = "(CASE WHEN abs(m.date)>100000000000 THEN m.date/1000000000.0 ELSE m.date END)"
+        let rows = try db.rows("SELECT m.ROWID AS row_id,m.guid,m.text,m.date,m.is_from_me,h.id AS sender\(extra)\(rawBody) FROM message m JOIN chat_message_join j ON j.message_id=m.ROWID JOIN chat c ON c.ROWID=j.chat_id LEFT JOIN handle h ON h.ROWID=m.handle_id WHERE c.guid=? AND m.ROWID>? AND \(seconds)>=CAST(? AS REAL) AND \(seconds)<CAST(? AS REAL) ORDER BY m.ROWID LIMIT 200", [thread.id, String(after), String(start - 978307200), String(end - 978307200)])
+        let richBodies = rows.map { row -> String in
+            let retracted = Double(row["date_retracted"] ?? "0") ?? 0
+            return (row["text"] ?? "").isEmpty && retracted == 0 ? (row["attributed_hex"] ?? "") : ""
+        }
+        let decoded = MemoryWorker.decode(richBodies)
+        var records = [Evidence](); var skipped = 0
+        for (rowIndex, row) in rows.enumerated() {
+            guard let guid = row["guid"], !guid.isEmpty, let date = Double(row["date"] ?? "") else { skipped += 1; continue }
+            let timestamp = (abs(date) > 100000000000 ? date / 1_000_000_000 : date) + 978307200
+            var metadata = row
+            metadata.removeValue(forKey: "text")
+            metadata["speaker"] = row["is_from_me"] == "1" ? "owner" : (row["sender"] ?? "unknown")
+            metadata["thread"] = thread.title
+            let retracted = Double(row["date_retracted"] ?? "0") ?? 0
+            if retracted > 0 {
+                metadata.removeValue(forKey: "attributed_hex")
+                records.append(Evidence(id: "messages:\(thread.id):\(guid)", source: "messages:\(thread.id)", kind: "message", title: thread.title, body: "[Retracted message]", occurred: timestamp, metadata: metadata))
+                continue
+            }
+            let plain = row["text"] ?? ""
+            let rich = decoded.indices.contains(rowIndex) ? decoded[rowIndex] : nil
+            metadata["body_status"] = !plain.isEmpty ? "plain_text" : rich != nil ? "decoded_rich_text" : "rich_body_or_attachment_not_decoded"
+            if rich != nil { metadata["decoder_version"] = "pytypedstream-0.1.0/v1" }
+            records.append(Evidence(id: "messages:\(thread.id):\(guid)", source: "messages:\(thread.id)", kind: "message", title: thread.title, body: !plain.isEmpty ? plain : rich ?? "[Rich message or attachment; unsupported format]", occurred: timestamp, metadata: metadata))
+        }
+        return MessageBatch(records: records, cursor: Int64(rows.last?["row_id"] ?? "") ?? after, scanned: rows.count, skipped: skipped)
+    }
+}

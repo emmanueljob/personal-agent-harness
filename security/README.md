@@ -23,6 +23,11 @@ python3 scripts/privacy_guard.py --all
 
 Keep actual `.env`, profiles, voice notes, library exports, email/Slack material, downloaded covers/spines and runtime databases outside Git. `.env.example` contains blank credentials only. Use a GitHub noreply email for commit metadata when personal contact details should stay private.
 
+Native Mac source uses the additional `.swift` text allowance only beneath
+`desktop/macos/Sources/`. Generated app bundles, executables, plist files and
+local permission receipts are not approved public assets. Swift text still receives
+the same credential and personal-knowledge scans as other source files.
+
 The owner-supplied synthetic Alpine landscape at
 `frontend/public/images/alpine-panorama.jpeg` was visually reviewed for publication.
 The guard permits only its exact SHA-256 in `PUBLIC_ASSETS`; other images and
