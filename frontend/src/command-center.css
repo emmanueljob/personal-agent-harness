@@ -1,0 +1,14 @@
+.command-center {max-width:1380px; margin:0 auto; width:100%; padding:clamp(16px,3vw,40px); overflow-wrap:anywhere}
+.cc-header,.cc-toolbar {display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:20px}
+.command-center .cc-header h1,.command-center .cc-toolbar h2 {margin:0}
+.cc-layout {display:grid; grid-template-columns:minmax(0,1.5fr) minmax(280px,1fr); align-items:start; gap:24px}
+.cc-card,.cc-chat {background:var(--admin-panel,#fff); border:1px solid var(--admin-line,#d9ded5); border-radius:12px; padding:20px}
+.cc-card {margin-bottom:12px}
+.cc-card:focus {outline:2px solid var(--admin-accent,#315945); outline-offset:2px}
+.cc-card h3 {margin:6px 0}
+.cc-card details {border-top:1px solid var(--admin-line,#d9ded5); padding-top:10px}
+.cc-card summary {cursor:pointer}
+.cc-card blockquote {margin:12px 0; padding-left:12px; border-left:3px solid var(--admin-line,#d9ded5); white-space:pre-wrap}
+.cc-actions {display:flex; flex-wrap:wrap; gap:8px; margin:12px 0 0}
+.command-center label {display:block; margin:12px 0}
+@media (max-width:800px) {.cc-layout {grid-template-columns:minmax(0,1fr)}}

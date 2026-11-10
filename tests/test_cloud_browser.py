@@ -214,3 +214,38 @@ def test_worker_desktop_rejects_unauthenticated_websocket(monkeypatch):
     client=TestClient(app)
     with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect('/desktop'):pass
+
+
+def test_sent_outreach_dossier_uses_current_association_and_original_receipt(tmp_path, monkeypatch):
+    from harness import crm
+
+    monkeypatch.setenv('LINKEDIN_CAPTURE_TOKEN', 'synthetic-bridge-access')
+    store = Store(tmp_path)
+    first = add(store, company('Fixture Studio'))
+    second = add(store, company('Fixture Works'))
+    profile = 'https://www.linkedin.com/in/fixture-person/'
+    contact = add(store, {'kind': 'person', 'company_id': first, 'name': 'Riley Test', 'urls': [profile]})
+    corrected = add(store, {'kind': 'person', 'company_id': second, 'name': 'Riley Example'})
+    payload = li.messages(response(outbound=True), ACCOUNT, THREAD, [])[0][0]
+
+    def receive():
+        return gateway.receive(store, 'Bearer synthetic-bridge-access', payload)
+
+    def outreach():
+        return [r for r in crm.overview(store)['records'] if 'outreach_receipt' in r]
+
+    result = receive()
+    activity, = outreach()
+    receipt = activity['outreach_receipt']
+    assert activity['id'] == result['activity_id']
+    assert (activity['record']['company_id'], activity['record']['person_id']) == (first, contact)
+    assert activity['record']['happened_on'] == '2025-10-09'
+    assert receipt == {'id': result['id'], 'occurred_at': payload['occurred_at'], 'recipients': ['Riley Test']}
+
+    mail.link(store, receipt['id'], second, corrected)
+    assert receive() == result
+    activity, = outreach()
+    assert activity['outreach_receipt'] == receipt
+    assert (activity['record']['company_id'], activity['record']['person_id']) == (second, corrected)
+    assert activity['id'] == result['activity_id']
+    assert len(store.query("SELECT id FROM crm_records WHERE kind='activity'")) == 1

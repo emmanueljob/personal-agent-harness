@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from pydantic import Field,field_validator,StringConstraints
-from . import crm
+from . import crm, career_email
 
 
 class Address(crm.Model):
@@ -47,6 +47,7 @@ class Message(crm.Model):
     truncated: bool = False
     source_url: str = Field(default='',max_length=2000)
     automated: bool = False
+    mailing_list: bool = False
 
     @field_validator('occurred_at')
     @classmethod
@@ -139,7 +140,10 @@ def write_activity(db,row,timezone='UTC'):
 
 def ingest(store,message,method='owner_import',timezone='UTC'):
     message=message.model_copy(update={'account':message.account.casefold() if message.provider=='gmail' else message.account})
-    initialize(store);body=message.model_dump_json();ident=str(uuid.uuid5(uuid.NAMESPACE_URL,'message:'+message.provider+':'+message.account+':'+message.external_id))
+    initialize(store)
+    # Keep legacy receipt fingerprints stable when no List-Id header is present.
+    body = message.model_dump_json(exclude={'mailing_list'} if not message.mailing_list else set())
+    ident=str(uuid.uuid5(uuid.NAMESPACE_URL,'message:'+message.provider+':'+message.account+':'+message.external_id))
     with store.connect() as db:
         db.execute('BEGIN IMMEDIATE')
         old=db.execute('SELECT * FROM crm_messages WHERE id=?',(ident,)).fetchone()
@@ -163,15 +167,20 @@ def is_security_notice(subject):
     return bool(re.search(r'verification code|security code|one[- ]time (?:code|password)|verify.{0,30}new device|password reset|reset (?:your )?password|sign[- ]in (?:code|attempt)|new login',subject.casefold()))
 
 
-def messages(store,query='',offset=0,limit=30,direction=''):
+def messages(store,query='',offset=0,limit=30,direction='',visibility='visible'):
     initialize(store)
     result=[]
     if direction not in ('','inbound','outbound'):raise ValueError('Direction must be inbound or outbound.')
-    for row in store.query("SELECT * FROM crm_messages WHERE (?='' OR direction=?) ORDER BY COALESCE(julianday(occurred_at),2440587.5+created/86400) DESC,id",(direction,direction)):
+    for row in store.query("SELECT m.*,v.hidden FROM crm_messages m LEFT JOIN crm_email_visibility v ON v.item_id=m.id WHERE (?='' OR direction=?) ORDER BY COALESCE(julianday(occurred_at),2440587.5+created/86400) DESC,m.id",(direction,direction)):
         value=json.loads(row.pop('body'))
         # Keep the immutable receipt privately, but exclude authentication notices
         # from routine CRM discovery and chat searches. Explicit detail IDs remain readable.
         if row['method']=='gmail_api' and is_security_notice(value['subject']):continue
+        override = row.pop('hidden')
+        if row['provider']=='gmail':
+            row['visibility'] = career_email.message_decision(value, override)
+        hidden = row.get('visibility', {}).get('hidden', False)
+        if hidden != (visibility=='hidden'):continue
         if query.casefold() in json.dumps(value).casefold():result.append({**row,'message':{**value,'text':value['text'][:1000]}})
     offset=max(0,offset);end=offset+max(1,min(limit,50))
     return {'total':len(result),'messages':result[offset:end],'next_offset':end if end<len(result) else None}
@@ -234,13 +243,27 @@ def mount(app,get_store,owner):
     def private(value):return JSONResponse(value,headers={'Cache-Control':'private, no-store'})
 
     @router.get('')
-    def read(query:str='',offset:int=0,limit:int=30,direction:Literal['','inbound','outbound']=''):return private(messages(get_store(),query,offset,limit,direction))
+    def read(query:str='',offset:int=0,limit:int=30,direction:Literal['','inbound','outbound']='',visibility:Literal['visible','hidden']='visible'):
+        return private(messages(get_store(),query,offset,limit,direction,visibility))
+
+    @router.post('/messages/{ident}/visibility')
+    def visibility(ident:str,body:career_email.VisibilityEdit):
+        store = get_store()
+        initialize(store)
+        with store.connect() as db:
+            row=db.execute("SELECT id FROM crm_messages WHERE id=? AND provider='gmail'",(ident,)).fetchone()
+            if not row:raise HTTPException(404,'Email not found.')
+            career_email.set_override(db,ident,body.hidden)
+        return private({'id':ident,'hidden':body.hidden})
 
     @router.get('/messages/{ident}')
     def detail(ident:str):
-        initialize(get_store());rows=get_store().query('SELECT * FROM crm_messages WHERE id=?',(ident,))
+        initialize(get_store());rows=get_store().query('SELECT m.*,v.hidden FROM crm_messages m LEFT JOIN crm_email_visibility v ON v.item_id=m.id WHERE m.id=?',(ident,))
         if not rows:raise HTTPException(404,'Message not found.')
-        row=rows[0];row['message']=json.loads(row.pop('body'));return private(row)
+        row=rows[0];row['message']=json.loads(row.pop('body'))
+        override=row.pop('hidden')
+        if row['provider']=='gmail':row['visibility']=career_email.message_decision(row['message'],override)
+        return private(row)
 
     @router.post('/import')
     def import_messages(body:Import):

@@ -58,6 +58,9 @@ async def lifespan(app):
 app = FastAPI(title="Personal Agent Harness", lifespan=lifespan)
 from .model_bridge import install as install_model_bridge
 install_model_bridge(app)
+from .owner_session import OwnerSessionMiddleware, mount as mount_owner_session
+app.add_middleware(OwnerSessionMiddleware, get_store=lambda: store)
+mount_owner_session(app, lambda: store)
 app.add_middleware(PublicAccess)
 from .visits import router as visits_router
 app.include_router(visits_router)
@@ -106,6 +109,8 @@ from .crm import mount as mount_crm
 mount_crm(app, lambda:store, studio_owner)
 from .correspondence import mount as mount_correspondence
 mount_correspondence(app,lambda:store,studio_owner)
+from .command_center import mount as mount_command_center
+mount_command_center(app, lambda:store, studio_owner)
 from .cloud_browser import mount as mount_cloud_browser
 mount_cloud_browser(app,lambda:store,studio_owner)
 
