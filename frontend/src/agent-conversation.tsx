@@ -1,9 +1,9 @@
 import {useEffect, useRef, useState} from 'react';
 
 type Api = (path: string, method?: string, body?: unknown) => Promise<any>;
-type Agent = 'grokbot' | 'muse';
-type Props = {api: Api; agent: Agent; context?: string; threadId?: string | null; onThreadChange?: (id: string) => void};
-type Turn = {id: string; text: string; reply: string | null; status: string};
+type Agent = 'grokbot' | 'muse' | 'owner';
+type Props = {api: Api; agent: Agent; context?: string; disabled?: boolean; threadId?: string | null; onThreadChange?: (id: string) => void};
+type Turn = {id: string; text: string; reply: string | null; status: string; target?: string};
 type Thread = {id: string; agent: Agent; turns: Turn[]};
 type Summary = {id: string; title: string | null};
 const root = '/admin/conversations';
@@ -13,11 +13,20 @@ export function AgentConversation(props: Props) {
   return <Conversation key={props.agent} {...props}/>;
 }
 
-function Conversation({api, agent, context = '', threadId, onThreadChange}: Props) {
+function Conversation({api, agent, context = '', disabled = false, threadId, onThreadChange}: Props) {
   const [threads, setThreads] = useState<Summary[]>([]);
   const [thread, setThread] = useState<Thread | null>(null);
   const [reason, setReason] = useState('Checking connection…');
-  const [draft, setDraft] = useState('');
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  let target = '', targetLabel = 'Free-form question';
+  try {
+    const scope = JSON.parse(context);
+    target = scope.card || '';
+    targetLabel = scope.title || target || 'Free-form question';
+  } catch {target = context; targetLabel = context || targetLabel;}
+  const draft = drafts[target] || '';
+  const setDraft = (text: string) => setDrafts(old => ({...old, [target]: text}));
+  const [sendingTarget, setSendingTarget] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [generation, refresh] = useState(0);
@@ -25,6 +34,8 @@ function Conversation({api, agent, context = '', threadId, onThreadChange}: Prop
   const [chooseNew, setChooseNew] = useState(false);
   const pending = useRef<{thread: string; text: string; context: string; request_id: string} | null>(null);
   const mounted = useRef(true);
+  const historyElement = useRef<HTMLDivElement>(null), followHistory = useRef(true);
+  const sendLock = useRef(false);
   useEffect(() => { mounted.current = true; return () => {mounted.current = false;}; }, []);
   useEffect(() => {select(threadId || ''); setChooseNew(false);}, [threadId]);
 
@@ -52,31 +63,62 @@ function Conversation({api, agent, context = '', threadId, onThreadChange}: Prop
     setBusy(true);
     setError('');
     try {await action();} catch (e) {if (mounted.current) setError((e as Error).message);}
-    finally {if (mounted.current) setBusy(false);}
+    finally {if (mounted.current) {setBusy(false); setSendingTarget(null);}}
   }
 
   async function send() {
+    if (disabled || busy) return;
+    const originTarget = target;
+    const originContext = context;
+    const originDraft = draft;
+    setSendingTarget(targetLabel);
     const active: Thread = thread || await api(root, 'POST', {agent});
     if (!mounted.current) return;
     setThread(active);
     const previous = pending.current;
-    const payload = previous?.thread === active.id && previous.text === draft && previous.context === context
-      ? previous : {thread: active.id, text: draft, context, request_id: crypto.randomUUID()};
+    const payload = previous?.thread === active.id && previous.text === originDraft && previous.context === originContext
+      ? previous : {thread: active.id, text: originDraft, context: originContext, request_id: crypto.randomUUID()};
     pending.current = payload;
     const data = await api(root + '/' + active.id + '/messages', 'POST',
       {text: payload.text, context: payload.context, request_id: payload.request_id});
     if (!mounted.current) return;
     pending.current = null;
     setThread(data);
-    setDraft('');
+    setDrafts(old => ({...old, [originTarget]: ''}));
     select(active.id);
     onThreadChange?.(active.id);
     refresh(n => n + 1);
   }
 
   const last = thread?.turns.at(-1);
-  return <section aria-label={agent === 'muse' ? 'Muse conversation' : 'Grokbot conversation'}>
-    <label>Conversation <select disabled={busy} value={thread?.id || ''} onChange={e => {
+  useEffect(() => {
+    if (agent==='owner' && followHistory.current && historyElement.current) {
+      historyElement.current.scrollTop=historyElement.current.scrollHeight;
+    }
+  }, [agent,last?.id,last?.status,last?.reply,sendingTarget,error,reason]);
+
+  useEffect(() => {
+    if (agent !== 'owner' || !last || done.includes(last.status)) return;
+    const timer = window.setInterval(() => refresh(n => n + 1), 2000);
+    return () => window.clearInterval(timer);
+  }, [agent, last?.status, last?.id]);
+  const history = <>
+    {reason && <p role="status">{reason}</p>}
+    {sendingTarget && <p role="status">Sending about {sendingTarget}</p>}
+    {error && <p role="alert">{error}</p>}
+    {thread?.turns.map(t => <article key={t.id}>
+      {t.target && <small>About {t.target}</small>}
+      <p><strong>You</strong> {t.text}</p>
+      <p><strong>{agent === 'owner' ? 'Your agent' : agent === 'muse' ? 'Muse' : 'Grokbot'}</strong> {t.reply || t.status.replaceAll('_', ' ')}</p>
+      {t.reply && t.status !== 'completed' && <small>{t.status}</small>}
+      {((agent === 'grokbot' && ['sending', 'queued', 'delivery_unknown', 'delivery_rejected'].includes(t.status)) || (agent === 'owner' && t.status === 'failed')) &&
+        <button type="button" disabled={busy || disabled} onClick={() => void run(async () => {
+          setThread(await api(root + '/' + thread.id + '/turns/' + t.id + '/retry', 'POST'));
+        })}>{agent === 'owner' ? 'Retry response' : 'Retry delivery'}</button>}
+    </article>)}
+  </>;
+  return <section aria-label={agent === 'owner' ? 'Your agent conversation' : agent === 'muse' ? 'Muse conversation' : 'Grokbot conversation'}>
+    <label>Conversation <select disabled={busy || disabled} value={thread?.id || ''} onChange={e => {
       const id = e.target.value;
       setThread(null); setDraft(''); select(id); setChooseNew(!id);
       if (id) onThreadChange?.(id);
@@ -84,21 +126,21 @@ function Conversation({api, agent, context = '', threadId, onThreadChange}: Prop
       <option value="">New conversation</option>
       {threads.map(t => <option key={t.id} value={t.id}>{t.title?.slice(0, 80) || 'Empty conversation'}</option>)}
     </select></label>
-    <button type="button" disabled={busy} onClick={() => refresh(n => n + 1)}>Refresh</button>
-    {reason && <p role="status">{reason}</p>}
-    {error && <p role="alert">{error}</p>}
-    {thread?.turns.map(t => <article key={t.id}>
-      <p><strong>You</strong> {t.text}</p>
-      <p><strong>{agent === 'muse' ? 'Muse' : 'Grokbot'}</strong> {t.reply || t.status.replaceAll('_', ' ')}</p>
-      {t.reply && t.status !== 'completed' && <small>{t.status}</small>}
-      {agent === 'grokbot' && ['sending', 'queued', 'delivery_unknown', 'delivery_rejected'].includes(t.status) &&
-        <button type="button" disabled={busy} onClick={() => void run(async () => {
-          setThread(await api(root + '/' + thread.id + '/turns/' + t.id + '/retry', 'POST'));
-        })}>Retry delivery</button>}
-    </article>)}
-    <form onSubmit={e => {e.preventDefault(); if (!busy) void run(send);}}>
-      <label>Message<textarea maxLength={4000} value={draft} disabled={busy} onChange={e => setDraft(e.target.value)}/></label>
-      <button disabled={busy || !!reason || !draft.trim() || (!!last && !done.includes(last.status))}>Send</button>
+    <button type="button" disabled={busy || disabled} onClick={() => refresh(n => n + 1)}>Refresh</button>
+    {agent==='owner' ? <div className="cc-owner-history" role="log" aria-label="Conversation history"
+      aria-live="polite" aria-relevant="additions text" tabIndex={0} ref={historyElement}
+      onScroll={event => {
+        const element=event.currentTarget;
+        followHistory.current=element.scrollHeight-element.scrollTop-element.clientHeight<36;
+      }}>{history}</div> : history}
+    <form onSubmit={e => {
+      e.preventDefault();
+      if (busy || disabled || sendLock.current) return;
+      sendLock.current = true;
+      void run(send).finally(() => {sendLock.current = false;});
+    }}>
+      <label>Message<textarea aria-label="Message" maxLength={4000} value={draft} disabled={busy || disabled} onChange={e => setDraft(e.target.value)}/></label>
+      <button disabled={busy || disabled || !!reason || !draft.trim() || (!!last && !done.includes(last.status))}>Send</button>
     </form>
   </section>;
 }

@@ -1,21 +1,87 @@
-.command-center {max-width:1380px; margin:0 auto; width:100%; padding:clamp(16px,3vw,40px); overflow-wrap:anywhere}
-.cc-header,.cc-toolbar {display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:20px}
-.command-center .cc-header h1,.command-center .cc-toolbar h2 {margin:0}
-.cc-layout {display:grid; grid-template-columns:minmax(0,1.5fr) minmax(280px,1fr); align-items:start; gap:24px}
-.cc-card,.cc-chat {background:var(--admin-panel,#fff); border:1px solid var(--admin-line,#d9ded5); border-radius:12px; padding:20px}
-.cc-card {margin-bottom:12px}
-.cc-card:focus {outline:2px solid var(--admin-accent,#315945); outline-offset:2px}
-.cc-card h3 {margin:6px 0}
-.cc-card details {border-top:1px solid var(--admin-line,#d9ded5); padding-top:10px}
-.cc-card summary {cursor:pointer}
-.cc-card blockquote {margin:12px 0; padding-left:12px; border-left:3px solid var(--admin-line,#d9ded5); white-space:pre-wrap}
-.cc-actions {display:flex; flex-wrap:wrap; gap:8px; margin:12px 0 0}
-.command-center label {display:block; margin:12px 0}
-@media (max-width:800px) {.cc-layout {grid-template-columns:minmax(0,1fr)}}
-.command-center {max-width:1000px}
-.command-center .cc-chat {margin-top:24px}
-.command-center .cc-toolbar label {margin:0; min-width:180px}
-.command-center .cc-actions {margin-bottom:12px}
-.command-center .cc-card h2 {margin-top:8px}
-@media (max-width:520px) {.cc-header,.cc-toolbar {align-items:flex-start;flex-wrap:wrap}.cc-actions button {flex:1 1 auto}}
-.command-center .cc-result {white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;padding:12px;background:var(--admin-bg,#f4f3ee);border-radius:8px}
+.command-center {
+  width:100%;max-width:860px;margin:0 auto;padding:0;overflow-wrap:anywhere;
+  --cc-accent:#6754c4;--cc-soft:#f5f2fd;
+}
+.cc-header,.cc-toolbar {display:flex;align-items:center;justify-content:space-between;gap:16px}
+.cc-header {margin-bottom:24px}
+.command-center .cc-header h1 {margin:0;font:600 28px/1.2 'DM Sans Variable',system-ui,sans-serif;letter-spacing:-.8px}
+.command-center .cc-toolbar label {margin:0;min-width:190px;font-size:12px;color:var(--admin-muted)}
+.command-center .cc-toolbar select {margin-top:5px}
+.command-center .cc-toolbar>button {font-size:13px}
+.cc-feedback {height:52px;overflow-y:auto;display:flex;align-items:center;font-size:13px;color:var(--admin-muted)}
+.command-center .cc-feedback p {margin:6px 0}
+.cc-card-stack {position:relative;padding:12px 8px 0}
+.cc-stack-layer {position:absolute;inset:6px 20px 12px;border:1px solid #e0daef;background:#efebf8;border-radius:20px;box-shadow:0 -6px 0 -1px #f6f3fc,0 -7px 0 -1px #e8e2f3;pointer-events:none}
+.cc-card-stage {height:430px;position:relative}
+.cc-card {
+  position:absolute;inset:0;display:flex;flex-direction:column;min-width:0;
+  border:1px solid #dcd6ed;border-radius:18px;background:var(--admin-panel,#fff);
+  box-shadow:0 8px 28px #29203f0b;overflow:hidden;transform-origin:50% 75%;
+}
+.cc-card:focus-visible {outline:3px solid #b9ade9;outline-offset:3px}
+.cc-card-content {flex:1;min-height:0;overflow-y:auto;padding:24px 28px 18px;scrollbar-gutter:stable}
+.command-center .cc-card-context {font-size:12px;line-height:1.5;font-weight:550;color:var(--cc-accent);margin:0 0 12px}
+.command-center .cc-card h2 {font:600 clamp(22px,2.5vw,29px)/1.2 'DM Sans Variable',system-ui,sans-serif;letter-spacing:-.7px;margin:0 0 12px;max-width:32ch}
+.command-center .cc-reason {font-size:15px;color:var(--admin-muted);line-height:1.65;margin:0 0 16px;max-width:68ch}
+.cc-next-step {background:var(--cc-soft);border-left:3px solid #9983d7;border-radius:4px 10px 10px 4px;padding:12px 16px;margin:0 0 18px}
+.cc-next-step>span {font-size:11px;font-weight:600;color:#746296}
+.command-center .cc-next-step p {font-size:17px;font-weight:550;line-height:1.5;margin:2px 0 0}
+.cc-card details {font-size:13px}
+.cc-card summary {cursor:pointer;color:#514075;font-weight:550;padding:6px 0}
+.cc-card blockquote {margin:10px 0;padding-left:14px;border-left:2px solid #dcd6ed;white-space:pre-wrap;color:var(--admin-muted)}
+.cc-actions {display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 0}
+.cc-card .cc-actions button {font-size:12px}
+.cc-execution {flex:0 1 auto;max-height:55%;min-height:0;display:flex;flex-direction:column;border-top:1px solid #eeeaf4}
+.cc-execution-content {min-height:0;overflow-y:auto;padding:8px 28px}
+.command-center .cc-execution-content p {margin:6px 0;font-size:12px;color:var(--admin-muted)}
+.command-center .cc-execution-content .cc-operation {font-weight:600;color:var(--admin-text)}
+.cc-decision-bar {flex:none;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:14px 20px;border-top:1px solid #eeeaf4;background:#fdfcfe}
+.command-center .cc-decision-bar button {min-height:42px;padding:9px 8px;font-size:13px;font-weight:550}
+.cc-decision-bar>button:only-child {grid-column:1/-1;justify-self:start;padding-inline:20px}
+.command-center .admin-primary {background:var(--cc-accent);border-color:var(--cc-accent)}
+.command-center .admin-primary:hover:not(:disabled) {background:#5945b4;color:#fff}
+.command-center .cc-result {white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.6 'DM Sans Variable',system-ui,sans-serif;padding:12px;background:var(--cc-soft);border-radius:8px}
+.command-center nav.cc-actions {justify-content:space-between;margin:14px 8px 0}
+.command-center nav.cc-actions button {font-size:13px;min-height:40px;min-width:104px}
+.cc-empty {position:absolute;inset:0;display:grid;place-content:center;padding:24px;color:var(--admin-muted);border:1px dashed #ddd7eb;border-radius:18px;background:var(--admin-panel)}
+.cc-chat {margin-top:24px;border:1px solid var(--admin-line);border-radius:16px;background:var(--admin-panel);padding:24px}
+.cc-chat-heading {display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:36px}
+.command-center .cc-chat h2 {font:600 17px/1.4 'DM Sans Variable',system-ui,sans-serif;margin:0}
+.cc-chat-modes {display:flex;padding:3px;background:#f3f1f8;border-radius:8px;gap:2px;flex:none}
+.command-center .cc-chat-modes button {border:0;background:transparent;font-size:12px;padding:5px 9px;border-radius:6px}
+.command-center .cc-chat-modes button[aria-pressed=true] {background:white;box-shadow:0 1px 3px #30254a15;color:var(--cc-accent)}
+.command-center .cc-chat-target {font-size:12px;color:var(--admin-muted);height:40px;line-height:20px;margin:8px 0 12px;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2}
+.command-center label {display:block;margin:12px 0}
+.cc-chat-body {min-height:180px}
+@media(max-width:520px) {
+  .command-center .cc-header h1 {font-size:25px}
+  .cc-header {gap:8px}
+  .cc-header>button {font-size:12px}
+  .cc-card-stage {height:520px}
+  .cc-card-stack {padding-inline:3px}
+  .cc-card-content {padding:20px 18px 14px}
+  .cc-execution-content {padding:8px 18px}
+  .cc-decision-bar {grid-template-columns:repeat(2,minmax(0,1fr));padding:12px;gap:7px}
+  .cc-chat {padding:18px 16px}
+  .cc-chat-heading {flex-wrap:wrap;min-height:76px;align-content:space-between}
+  .cc-chat-modes {margin-left:0}
+  .cc-toolbar {gap:10px}
+  .command-center .cc-toolbar label {min-width:0;flex:1}
+  .cc-toolbar>button {flex:none}
+  .cc-actions button {max-width:100%}
+}
+@media(prefers-reduced-motion:reduce) {
+  .cc-card {transform:none!important}
+}
+.cc-execution-content:empty {display:none}
+.command-center :is(button,select,textarea,input,.cc-card-content,.cc-execution-content):focus-visible {outline:2px solid var(--cc-accent);outline-offset:3px}
+.cc-card:focus-visible {outline-color:var(--cc-accent)}
+
+.cc-evidence {margin:0 0 12px;padding:0}
+.command-center .cc-evidence blockquote {border:0;margin:0;padding:0;font-size:13px;line-height:1.65;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
+.cc-evidence figcaption {margin-top:4px;font-size:11px;color:var(--admin-muted)}
+.cc-owner-history {height:200px;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding:12px 16px;margin:12px 0;border:1px solid #ece8f4;border-radius:10px;background:#fcfbfe}
+.cc-owner-history:focus-visible {outline:2px solid var(--cc-accent);outline-offset:3px}
+.command-center .cc-owner-history article {border-bottom:1px solid #eeeaf4;padding-bottom:10px;margin-bottom:10px}
+.command-center .cc-owner-history article:last-child {border-bottom:0;margin-bottom:0}
+@media(max-width:520px) {.cc-owner-history {height:180px;padding:10px 12px}}

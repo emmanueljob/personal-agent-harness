@@ -121,7 +121,7 @@ export default function AdminPortal(){
    reviewScope={route.reviewScope} reviewOffset={route.reviewOffset}
    onReviewNavigate={({scope,offset,card})=>pushRoute({...route, card:undefined,
      selectedCard:card, reviewScope:scope, reviewOffset:offset})}
-   renderChat={(agent, context)=><AgentConversation api={api} agent={agent} context={context}/>}/>}
+   renderChat={(_agent, context, disabled=false)=><AgentConversation api={api} agent="owner" context={context} disabled={disabled}/>}/>}
  {section==='Profiles & copy'&&<ProfileEditor config={config} busy={busy} dirty={()=>setDirty(true)} discard={()=>setDirty(false)} save={save} api={api}/>}
  {section==='Site & projects'&&<PortfolioEditor config={config} busy={busy} dirty={()=>setDirty(true)} save={save} api={api}/>}
  {section==='Outreach links'&&<Links config={config} api={api}/>}
