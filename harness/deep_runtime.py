@@ -95,14 +95,14 @@ def provide_model(name):
     return model
 
 
-def invoke_tool(name, kwargs):
+async def invoke_tool(name, kwargs):
     store, turn, mode = binding()
     tools = {t.name: t for t in plugins.tools(context(store, turn, mode, saved_config(store, turn)))}
     if name not in tools:
         raise ApplicationError('Tool unavailable for this execution.', non_retryable=True)
     events = ActivityEvents(store, turn['id'])
     events.on_tool_start({'name': name}, '')
-    result = tools[name].invoke(kwargs)
+    result = await tools[name].ainvoke(kwargs)
     events.on_tool_end(result)
     return result
 
@@ -111,9 +111,9 @@ def register_tools():
     # Factories only construct schemas here. They do not access knowledge or run
     # any tool. Actual calls rebuild the catalog from their Activity binding.
     for original in plugins.tools(dict(mode='private', store=None, thread_id='', turn_id='', web_enabled=True)):
-        def invoke(_name=original.name, **kwargs):
-            return invoke_tool(_name, kwargs)
-        proxy = StructuredTool.from_function(invoke, name=original.name,
+        async def invoke(_name=original.name, **kwargs):
+            return await invoke_tool(_name, kwargs)
+        proxy = StructuredTool.from_function(coroutine=invoke, name=original.name,
                                             description=original.description, args_schema=original.args_schema)
         ROUTED[original.name] = tool_as_activity(proxy, start_to_close_timeout=timedelta(minutes=3),
             activity_options={'retry_policy': RetryPolicy(maximum_attempts=2)})

@@ -44,7 +44,7 @@ def test_public_activity_cannot_invoke_private_tool_or_stale_binding(tmp_path, m
         db.execute('INSERT INTO workflow_turns VALUES (?,?,?)', (wid, ident, 'deepagents'))
         db.execute('INSERT INTO execution_context VALUES (?,?)', (ident, json.dumps({'config': {'web_enabled': False}})))
     with pytest.raises(ApplicationError, match='unavailable'):
-        deep_runtime.invoke_tool('save_artifact', {'title':'probe', 'markdown':'probe'})
+        asyncio.run(deep_runtime.invoke_tool('save_artifact', {'title':'probe', 'markdown':'probe'}))
     assert not store.query('SELECT * FROM artifacts')
     with store.connect() as db:db.execute('INSERT INTO dispatch_attempts VALUES (?,1)', (ident,))
     with pytest.raises(ApplicationError, match='Stale'):deep_runtime.binding()
@@ -62,3 +62,24 @@ def test_middleware_only_exposes_application_tools(monkeypatch):
     assert result.tools == [{'name':'search_knowledge'}] and captured
     result = asyncio.run(middleware[1].awrap_tool_call(SimpleNamespace(tool_call={'name':'execute','id':'probe'}), handler))
     assert isinstance(result, ToolMessage)
+
+
+@pytest.mark.parametrize('asynchronous', [False, True])
+def test_dispatch_preserves_sync_and_async_tool_failures(tmp_path, monkeypatch, asynchronous):
+    from langchain_core.tools import StructuredTool
+
+    store = Store(tmp_path)
+    ident = store.enqueue(store.thread('private')['id'], 'Synthetic failure')
+    turn = store.query('SELECT * FROM turns WHERE id=?', (ident,))[0]
+    monkeypatch.setattr(deep_runtime, 'binding', lambda: (store, turn, 'private'))
+    monkeypatch.setattr(deep_runtime, 'saved_config', lambda *_: {'web_enabled': False})
+    def fail():
+        raise ValueError('Synthetic tool failure')
+    async def async_fail():
+        raise ValueError('Synthetic tool failure')
+    tool = StructuredTool.from_function(
+        func=None if asynchronous else fail, coroutine=async_fail if asynchronous else None,
+        name='fixture_failure', description='Fail with a synthetic error.')
+    monkeypatch.setattr(deep_runtime.plugins, 'tools', lambda _: [tool])
+    with pytest.raises(ValueError, match='Synthetic tool failure'):
+        asyncio.run(deep_runtime.invoke_tool('fixture_failure', {}))
