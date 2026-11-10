@@ -27,8 +27,10 @@ function Conversation({api, agent, context = '', disabled = false, threadId, onT
   const draft = drafts[target] || '';
   const setDraft = (text: string) => setDrafts(old => ({...old, [target]: text}));
   const [sendingTarget, setSendingTarget] = useState<string | null>(null);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(''), [pollError, setPollError] = useState('');
   const [busy, setBusy] = useState(false);
+  const foregroundBusy = useRef(false);
+  foregroundBusy.current=busy;
   const [generation, refresh] = useState(0);
   const [selected, select] = useState(threadId || '');
   const [chooseNew, setChooseNew] = useState(false);
@@ -42,7 +44,7 @@ function Conversation({api, agent, context = '', disabled = false, threadId, onT
   useEffect(() => {
     let current = true;
     setBusy(true);
-    setError('');
+    setError(''); setPollError('');
     const load = async () => {
       const [availability, list] = await Promise.all([api(root + '/agents'), api(root + '?agent=' + agent)]);
       const entry = availability.agents.find((a: {id: string}) => a.id === agent);
@@ -95,17 +97,35 @@ function Conversation({api, agent, context = '', disabled = false, threadId, onT
     if (agent==='owner' && followHistory.current && historyElement.current) {
       historyElement.current.scrollTop=historyElement.current.scrollHeight;
     }
-  }, [agent,last?.id,last?.status,last?.reply,sendingTarget,error,reason]);
+  }, [agent,last?.id,last?.status,last?.reply,sendingTarget,error,pollError,reason]);
 
   useEffect(() => {
-    if (agent !== 'owner' || !last || done.includes(last.status)) return;
-    const timer = window.setInterval(() => refresh(n => n + 1), 2000);
-    return () => window.clearInterval(timer);
-  }, [agent, last?.status, last?.id]);
+    if (agent !== 'owner' || !thread || !last || done.includes(last.status)) return;
+    let current = true, polling = false;
+    const poll = async () => {
+      if (polling || foregroundBusy.current || sendLock.current) return;
+      polling = true;
+      try {
+        const data: Thread = await api(root+'/'+thread.id);
+        if (!current || foregroundBusy.current || sendLock.current) return;
+        if (data.id!==thread.id || data.agent!==agent) throw new Error('This response belongs to another conversation.');
+        setThread(previous => {
+          const latest = previous?.turns.at(-1);
+          return previous?.id===thread.id && latest?.id===last.id && latest?.status===last.status ? data : previous;
+        });
+        setPollError('');
+      } catch (e) {
+        if (current && !foregroundBusy.current && !sendLock.current) setPollError('Could not refresh the reply. '+(e as Error).message);
+      } finally {polling = false}
+    };
+    const timer = window.setInterval(() => {void poll()}, 2000);
+    return () => {current = false; window.clearInterval(timer)};
+  }, [api, agent, thread?.id, last?.status, last?.id]);
   const history = <>
     {reason && <p role="status">{reason}</p>}
     {sendingTarget && <p role="status">Sending about {sendingTarget}</p>}
     {error && <p role="alert">{error}</p>}
+    {pollError && <p role="alert">{pollError}</p>}
     {thread?.turns.map(t => <article key={t.id}>
       {t.target && <small>About {t.target}</small>}
       <p><strong>You</strong> {t.text}</p>
