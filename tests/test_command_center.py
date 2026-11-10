@@ -111,3 +111,46 @@ def test_completed_steps_remain_reachable_beyond_forty_cards(tmp_path, monkeypat
         assert len(found) == 46 and len(set(found)) == 46 and target in found
         assert client.get(HOME+'?offset=-1', headers=AUTH).status_code == 422
         assert client.get(HOME+'?scope=unknown', headers=AUTH).status_code == 422
+
+
+def test_chat_reads_live_visible_evidence_and_rechecks_prior_cards(tmp_path):
+    from harness.command_center import chat_evidence, initialize, mark_done
+    from harness.store import Store
+
+    store = Store(tmp_path)
+    first = add(store, company('Fixture Instruments', domain='example.org'))
+    second = add(store, company('Fixture Studio'))
+    sent = correspondence.ingest(store, message())
+    reply = correspondence.ingest(store, message('recruiter', 'inbound'))
+    initialize(store)
+
+    def context(selected='', previous=()):
+        with store.connect() as db:
+            return chat_evidence(db, selected, previous)
+
+    initial = context()
+    assert initial['cards'][0]['id'] == reply['activity_id']
+    assert initial['cards'][0]['action'] == 'Review the reply'
+    correspondence.link(store, reply['id'], second)
+    corrected = context(reply['activity_id'])
+    assert corrected['references'][0]['company'] == 'Fixture Studio'
+    assert 'Synthetic correspondence' in corrected['references'][0]['evidence']
+    with store.connect() as db:
+        db.execute('INSERT INTO crm_email_visibility(item_id,hidden) VALUES (?,1)', (reply['id'],))
+    hidden = context(previous=[reply['activity_id']])
+    assert reply['activity_id'] not in [c['id'] for c in hidden['cards']]
+    assert hidden['references'] == [{'id': reply['activity_id'], 'eligibility': 'hidden', 'action': ''}]
+    assert 'Synthetic correspondence' not in str(hidden)
+    with store.connect() as db:
+        db.execute('UPDATE crm_email_visibility SET hidden=0 WHERE item_id=?', (reply['id'],))
+    visible = context(previous=[reply['activity_id']])
+    assert visible['references'][0]['eligibility'] == 'visible'
+    row = store.query('SELECT revision FROM crm_records WHERE id=?', (reply['activity_id'],))[0]
+    mark_done(store, reply['activity_id'], row['revision'])
+    completed = context(previous=[reply['activity_id']])
+    assert completed['references'][0]['reviewed'] and not completed['references'][0]['action']
+    for n in range(12):
+        add(store, company(f'Visible fixture {n}', next_action='Review'))
+    limited = context(previous=[reply['activity_id']])
+    assert len(limited['cards']) == 8 and not limited['coverage']['complete']
+    assert limited['references'][0]['reviewed']
