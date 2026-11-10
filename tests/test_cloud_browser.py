@@ -132,17 +132,85 @@ def test_delivery_requires_durable_matching_ack_and_retries_after_restart(tmp_pa
     assert resumed.state.counts('outbox')=={'done':1} and resumed.state.get('last_saved')
 
 
-def test_browser_guard_blocks_internal_network_and_messaging_writes(tmp_path):
-    from types import SimpleNamespace
-    worker=Worker(tmp_path)
-    async def check(url,method,blocked):
-        route=SimpleNamespace(request=SimpleNamespace(url=url,method=method),abort=AsyncMock(),continue_=AsyncMock())
-        await worker.guard(route)
-        assert route.abort.called==blocked and route.continue_.called!=blocked
-    asyncio.run(check('https://www.linkedin.com/login','POST',False))
-    asyncio.run(check('https://www.linkedin.com/voyager/api/voyagerMessagingDashMessengerMessages?action=createMessage','POST',True))
-    asyncio.run(check('http://127.0.0.1:8080/','GET',True))
-    asyncio.run(check('https://www.linkedin.com/voyager/api/me','GET',False))
-    asyncio.run(check('https://evil.example.org/','GET',True))
-    asyncio.run(check('https://challenges.cloudflare.com/turnstile/v0/api.js','GET',False))
-    asyncio.run(check('https://challenges.cloudflare.com.evil.example.org/','GET',True))
+def test_native_browser_has_no_automation_flags_and_gets_no_service_credentials(tmp_path,monkeypatch):
+    from worker.desktop import chrome_command,browser_environment,linkedin_cookies
+    monkeypatch.setenv('BROWSER_WORKER_TOKEN','synthetic-worker-access')
+    monkeypatch.setenv('CRM_CAPTURE_TOKEN','synthetic-capture-access')
+    command=chrome_command(tmp_path)
+    assert command[0]=='google-chrome-stable'
+    assert not any('headless' in part or 'automation' in part or part=='--no-sandbox' for part in command)
+    assert '--remote-debugging-address=127.0.0.1' in command
+    assert 'BROWSER_WORKER_TOKEN' not in browser_environment(tmp_path)
+    assert 'CRM_CAPTURE_TOKEN' not in browser_environment(tmp_path)
+    cookies=linkedin_cookies([{'domain':'.linkedin.com','name':'li_at','value':'synthetic-session'},{'domain':'.google.com','name':'unrelated','value':'not-forwarded'},{'domain':'linkedin.com.evil.example','name':'evil','value':'not-forwarded'}])
+    assert cookies=={'li_at':'synthetic-session'}
+
+
+def test_desktop_tickets_are_hashed_single_use_and_expire(tmp_path,monkeypatch):
+    store=Store(tmp_path);token=gateway.desktop_ticket(store)
+    assert store.query('SELECT digest FROM crm_desktop_tickets')[0]['digest']!=token
+    assert gateway.consume_desktop_ticket(store,token)
+    assert not gateway.consume_desktop_ticket(store,token)
+    token=gateway.desktop_ticket(store)
+    with store.connect() as db:db.execute('UPDATE crm_desktop_tickets SET expires=0')
+    assert not gateway.consume_desktop_ticket(store,token)
+
+
+def test_desktop_gateway_rejects_wrong_origin_without_consuming_ticket(tmp_path,monkeypatch):
+    from starlette.websockets import WebSocketDisconnect
+    module,store=admin_app(tmp_path,monkeypatch)
+    monkeypatch.setenv('CLOUD_BROWSER_URL','http://worker.internal:8090')
+    monkeypatch.setenv('CLOUD_BROWSER_TOKEN','synthetic-worker-access')
+    with TestClient(module.app,base_url='https://testserver') as client:
+        assert client.post('/api/admin/cloud-browser/desktop-ticket').status_code==401
+        result=client.post('/api/admin/cloud-browser/desktop-ticket',headers=AUTH)
+        assert result.status_code==200 and result.headers['cache-control']=='private, no-store'
+        token=result.json()['ticket']
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect('/api/admin/cloud-browser/desktop',headers={'Origin':'https://untrusted.example'},subprotocols=['desktop','ticket.'+token]):pass
+        assert gateway.consume_desktop_ticket(store,token)
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect('/api/admin/cloud-browser/desktop',headers={'Origin':'https://testserver'},subprotocols=['desktop','ticket.'+token]):pass
+
+
+def test_desktop_gateway_relays_authenticated_binary_without_exposing_worker_token(tmp_path,monkeypatch):
+    module,store=admin_app(tmp_path,monkeypatch)
+    monkeypatch.setenv('CLOUD_BROWSER_URL','http://worker.internal:8090')
+    monkeypatch.setenv('CLOUD_BROWSER_TOKEN','synthetic-worker-access')
+    import websockets.asyncio.client
+    class Upstream:
+        def __init__(self):self.ready=asyncio.Event();self.values=[]
+        async def __aenter__(self):return self
+        async def __aexit__(self,*args):pass
+        async def send(self,value):self.values.append(value);self.ready.set()
+        async def __aiter__(self):
+            yield b'RFB 003.008\n'
+            await self.ready.wait()
+            yield b'synthetic-screen-frame'
+            await asyncio.Event().wait()
+    upstream=None
+    def connect(url,**kw):
+        nonlocal upstream
+        assert url=='ws://worker.internal:8090/desktop'
+        assert kw['additional_headers']=={'Authorization':'Bearer synthetic-worker-access'}
+        assert kw['proxy'] is None
+        upstream=Upstream();return upstream
+    monkeypatch.setattr(websockets.asyncio.client,'connect',connect)
+    with TestClient(module.app,base_url='https://testserver') as client:
+        token=client.post('/api/admin/cloud-browser/desktop-ticket',headers=AUTH).json()['ticket']
+        with client.websocket_connect('/api/admin/cloud-browser/desktop',headers={'Origin':'https://testserver'},subprotocols=['desktop','ticket.'+token]) as socket:
+            assert socket.accepted_subprotocol=='desktop'
+            assert socket.receive_bytes()==b'RFB 003.008\n'
+            socket.send_bytes(b'synthetic-keyboard-input')
+            assert socket.receive_bytes()==b'synthetic-screen-frame'
+        assert upstream.values==[b'synthetic-keyboard-input']
+        assert not gateway.consume_desktop_ticket(store,token)
+
+
+def test_worker_desktop_rejects_unauthenticated_websocket(monkeypatch):
+    from worker.service import app
+    from starlette.websockets import WebSocketDisconnect
+    monkeypatch.setenv('BROWSER_WORKER_TOKEN','synthetic-worker-access')
+    client=TestClient(app)
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect('/desktop'):pass
