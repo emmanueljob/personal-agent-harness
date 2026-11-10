@@ -13,9 +13,10 @@ type Props = {
 
 export function CommandCard({children, id, direction, locked, cardRef, onEntered, onEntering}: Props) {
   const present = useIsPresent();
-  const focused = useRef(false);
+  const focused = useRef(false), heldFocus = useRef(false);
   useEffect(() => {
-    if (present && !locked && !focused.current && cardRef.current?.id==='cc-'+id) {
+    if (present && !locked && (!focused.current || (heldFocus.current && document.activeElement===document.body))
+      && cardRef.current?.id==='cc-'+id) {
       cardRef.current.focus({preventScroll:true});
       focused.current=true;
     }
@@ -23,6 +24,11 @@ export function CommandCard({children, id, direction, locked, cardRef, onEntered
   const reducedMotion = useReducedMotion();
   const liveDirection = (usePresenceData() as number | undefined) ?? direction;
   return <motion.article ref={cardRef} className="cc-card" id={'cc-'+id} tabIndex={-1}
+    onFocusCapture={() => {heldFocus.current=true}}
+    onBlurCapture={event => {
+      const next=event.relatedTarget;
+      if (next && next!==document.body && !event.currentTarget.contains(next as Node)) heldFocus.current=false;
+    }}
     aria-labelledby={'cc-title-'+id} aria-hidden={!present} inert={!present || locked}
     initial={{opacity: reducedMotion ? 1 : 0, x: reducedMotion ? 0 : direction*24, scale: reducedMotion ? 1 : .985}}
     animate={{opacity:1, x:0, scale:1}}

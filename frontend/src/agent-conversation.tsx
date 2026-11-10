@@ -34,6 +34,7 @@ function Conversation({api, agent, context = '', disabled = false, threadId, onT
   const [chooseNew, setChooseNew] = useState(false);
   const pending = useRef<{thread: string; text: string; context: string; request_id: string} | null>(null);
   const mounted = useRef(true);
+  const historyElement = useRef<HTMLDivElement>(null), followHistory = useRef(true);
   const sendLock = useRef(false);
   useEffect(() => { mounted.current = true; return () => {mounted.current = false;}; }, []);
   useEffect(() => {select(threadId || ''); setChooseNew(false);}, [threadId]);
@@ -91,20 +92,17 @@ function Conversation({api, agent, context = '', disabled = false, threadId, onT
 
   const last = thread?.turns.at(-1);
   useEffect(() => {
+    if (agent==='owner' && followHistory.current && historyElement.current) {
+      historyElement.current.scrollTop=historyElement.current.scrollHeight;
+    }
+  }, [agent,last?.id,last?.status,last?.reply,sendingTarget,error,reason]);
+
+  useEffect(() => {
     if (agent !== 'owner' || !last || done.includes(last.status)) return;
     const timer = window.setInterval(() => refresh(n => n + 1), 2000);
     return () => window.clearInterval(timer);
   }, [agent, last?.status, last?.id]);
-  return <section aria-label={agent === 'owner' ? 'Your agent conversation' : agent === 'muse' ? 'Muse conversation' : 'Grokbot conversation'}>
-    <label>Conversation <select disabled={busy || disabled} value={thread?.id || ''} onChange={e => {
-      const id = e.target.value;
-      setThread(null); setDraft(''); select(id); setChooseNew(!id);
-      if (id) onThreadChange?.(id);
-    }}>
-      <option value="">New conversation</option>
-      {threads.map(t => <option key={t.id} value={t.id}>{t.title?.slice(0, 80) || 'Empty conversation'}</option>)}
-    </select></label>
-    <button type="button" disabled={busy || disabled} onClick={() => refresh(n => n + 1)}>Refresh</button>
+  const history = <>
     {reason && <p role="status">{reason}</p>}
     {sendingTarget && <p role="status">Sending about {sendingTarget}</p>}
     {error && <p role="alert">{error}</p>}
@@ -118,6 +116,23 @@ function Conversation({api, agent, context = '', disabled = false, threadId, onT
           setThread(await api(root + '/' + thread.id + '/turns/' + t.id + '/retry', 'POST'));
         })}>{agent === 'owner' ? 'Retry response' : 'Retry delivery'}</button>}
     </article>)}
+  </>;
+  return <section aria-label={agent === 'owner' ? 'Your agent conversation' : agent === 'muse' ? 'Muse conversation' : 'Grokbot conversation'}>
+    <label>Conversation <select disabled={busy || disabled} value={thread?.id || ''} onChange={e => {
+      const id = e.target.value;
+      setThread(null); setDraft(''); select(id); setChooseNew(!id);
+      if (id) onThreadChange?.(id);
+    }}>
+      <option value="">New conversation</option>
+      {threads.map(t => <option key={t.id} value={t.id}>{t.title?.slice(0, 80) || 'Empty conversation'}</option>)}
+    </select></label>
+    <button type="button" disabled={busy || disabled} onClick={() => refresh(n => n + 1)}>Refresh</button>
+    {agent==='owner' ? <div className="cc-owner-history" role="log" aria-label="Conversation history"
+      aria-live="polite" aria-relevant="additions text" tabIndex={0} ref={historyElement}
+      onScroll={event => {
+        const element=event.currentTarget;
+        followHistory.current=element.scrollHeight-element.scrollTop-element.clientHeight<36;
+      }}>{history}</div> : history}
     <form onSubmit={e => {
       e.preventDefault();
       if (busy || disabled || sendLock.current) return;

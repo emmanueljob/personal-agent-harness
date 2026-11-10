@@ -167,6 +167,8 @@ export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, 
       }
       if (active) {
         setCards(data.cards); setDetached(extra); setNextOffset(data.nextOffset);
+        const resolvedId = selected || data.cards[selectLast.current ? data.cards.length-1 : 0]?.id || '';
+        if (resolvedId===previousCard.current?.id) setAnimating(false);
         if (!selected) {
           const nextId = data.cards[selectLast.current ? data.cards.length-1 : 0]?.id || '';
           setSelected(nextId);
@@ -308,7 +310,7 @@ export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, 
       <div className="cc-chat-body">
         {renderChat('owner', JSON.stringify({surface:'command-center',card:target,
           ...(!freeChat && current ? {revision:current.revision,dispositionVersion:current.dispositionVersion,title:current.title} : {})}),
-          transitioning || (!freeChat && !current))}
+          transitioning || saving || (!freeChat && !current))}
       </div>
     </section>
   </div>;
