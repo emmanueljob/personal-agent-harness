@@ -268,3 +268,56 @@ def test_compensation_rule_applies_with_owner_guide_overrides(tmp_path,monkeypat
     monkeypatch.setattr(site_config,'settings',lambda:site_config.Settings(guide_instructions='Focus on leadership.'))
     assert 'Focus on leadership.' in guide_context('default')
     assert 'do not volunteer salary' in guide_context('default')
+
+
+@pytest.mark.parametrize('state', ['absent', 'zero_byte', 'empty_sqlite'])
+def test_empty_outreach_report_is_read_only(tmp_path, monkeypatch, state):
+    import sqlite3
+    from harness.outreach import report
+
+    path = tmp_path / 'outreach.sqlite'
+    monkeypatch.setenv('PORTFOLIO_LINKS_DB', str(path))
+    if state == 'zero_byte':
+        path.touch()
+    elif state == 'empty_sqlite':
+        with sqlite3.connect(path) as db:
+            db.execute('VACUUM')
+    before = path.read_bytes() if path.exists() else None
+    assert report() == {'tags': [], 'counts': [], 'links': []}
+    assert (path.read_bytes() if path.exists() else None) == before
+
+
+def test_legacy_outreach_report_without_optional_tables(tmp_path, monkeypatch):
+    import sqlite3
+    from harness.outreach import report
+
+    path = tmp_path / 'outreach.sqlite'
+    monkeypatch.setenv('PORTFOLIO_LINKS_DB', str(path))
+    with sqlite3.connect(path) as db:
+        db.execute('CREATE TABLE outreach_tags (token TEXT, field TEXT, profile_key TEXT, label TEXT, created REAL)')
+        db.execute('INSERT INTO outreach_tags VALUES (?,?,?,?,?)', ('t_fixture', 'utm_source', 'source:fixture', 'Fixture', 1))
+    before = path.read_bytes()
+    assert report() == {
+        'tags': [{'token': 't_fixture', 'field': 'utm_source', 'profile_key': 'source:fixture', 'label': 'Fixture', 'active': True}],
+        'counts': [], 'links': [],
+    }
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize('state', ['invalid_bytes', 'malformed_tags', 'unrelated_schema'])
+def test_damaged_outreach_report_preserves_errors(tmp_path, monkeypatch, state):
+    import sqlite3
+    from harness.outreach import report
+
+    path = tmp_path / 'outreach.sqlite'
+    monkeypatch.setenv('PORTFOLIO_LINKS_DB', str(path))
+    if state == 'invalid_bytes':
+        path.write_bytes(b'Synthetic invalid SQLite file')
+    else:
+        with sqlite3.connect(path) as db:
+            table = 'outreach_tags' if state == 'malformed_tags' else 'unrelated'
+            db.execute(f'CREATE TABLE {table} (unexpected TEXT)')
+    before = path.read_bytes()
+    with pytest.raises(sqlite3.DatabaseError):
+        report()
+    assert path.read_bytes() == before
