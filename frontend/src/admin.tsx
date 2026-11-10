@@ -118,7 +118,9 @@ export default function AdminPortal(){
        {notice&&<div className="admin-notice" role="status">{notice}<button aria-label="Dismiss message" onClick={()=>setNotice('')}>×</button></div>}
  {section==='command-center'&&<CommandCenter api={api} onOpenMyCareer={()=>openMyCareer()}
    onOpenRecord={openMyCareer} returnCardId={route.card} selectedCardId={route.selectedCard}
-   onSelectCard={selectedCard=>pushRoute({...route, selectedCard})}
+   reviewScope={route.reviewScope} reviewOffset={route.reviewOffset}
+   onReviewNavigate={({scope,offset,card})=>pushRoute({...route, card:undefined,
+     selectedCard:card, reviewScope:scope, reviewOffset:offset})}
    renderChat={(agent, context)=><AgentConversation api={api} agent={agent} context={context}/>}/>}
  {section==='Profiles & copy'&&<ProfileEditor config={config} busy={busy} dirty={()=>setDirty(true)} discard={()=>setDirty(false)} save={save} api={api}/>}
  {section==='Site & projects'&&<PortfolioEditor config={config} busy={busy} dirty={()=>setDirty(true)} save={save} api={api}/>}

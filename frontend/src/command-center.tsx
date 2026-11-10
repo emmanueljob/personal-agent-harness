@@ -1,5 +1,6 @@
 import {useCallback, useEffect, useRef, useState, type ReactNode} from 'react';
 import './command-center.css';
+import type {ReviewScope} from './admin-route';
 
 type Api = (path: string, method?: string, body?: unknown) => Promise<any>;
 type Props = {
@@ -9,6 +10,9 @@ type Props = {
   returnCardId?: string;
   selectedCardId?: string;
   onSelectCard?: (id: string) => void;
+  reviewScope?: ReviewScope;
+  reviewOffset?: number;
+  onReviewNavigate?: (location: {scope: ReviewScope; offset: number; card: string}) => void;
   renderChat: (agent: 'grokbot'|'muse', context: string) => ReactNode;
 };
 type Card = {
@@ -112,21 +116,32 @@ function CardExecution({api, card, busy, onBusy, open}: {
   </section>;
 }
 
-export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, renderChat, selectedCardId, onSelectCard}: Props) {
+export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, renderChat, selectedCardId, onSelectCard, reviewScope, reviewOffset, onReviewNavigate}: Props) {
   const [cards, setCards] = useState<Card[]>([]), [loading, setLoading] = useState(true);
   const [error, setError] = useState(''), [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState(selectedCardId || returnCardId || ''), [editing, setEditing] = useState('');
   const [detached, setDetached] = useState<Card>();
   const [agent, setAgent] = useState<'grokbot'|'muse'>('grokbot');
-  const [scope, setScope] = useState('review'), [freeChat, setFreeChat] = useState(false);
-  const [offset, setOffset] = useState(0), [nextOffset, setNextOffset] = useState<number|null>(null);
+  const [scope, setScope] = useState<ReviewScope>(reviewScope || 'review'), [freeChat, setFreeChat] = useState(false);
+  const [offset, setOffset] = useState(reviewOffset || 0), [nextOffset, setNextOffset] = useState<number|null>(null);
   const [generation, setGeneration] = useState(0), [notice, setNotice] = useState('');
   const pending = useRef<{id: string; body: unknown; state: string} | undefined>(undefined);
   const inFlight = useRef(false);
   const cardElement = useRef<HTMLElement>(null);
   const selectLast = useRef(false);
   const refresh = useCallback(() => {pending.current=undefined; setLoading(true); setGeneration(g => g+1)}, []);
-  useEffect(() => {setSelected(selectedCardId || returnCardId || '')}, [selectedCardId, returnCardId]);
+  useEffect(() => {
+    const nextCard = selectedCardId || returnCardId || '';
+    const nextScope = reviewScope || 'review', nextOffset = reviewOffset || 0;
+    if (nextCard!==selected || nextScope!==scope || nextOffset!==offset) {
+      setLoading(true); setSelected(nextCard); setScope(nextScope); setOffset(nextOffset);
+      setEditing('');
+    }
+  }, [selectedCardId, returnCardId, reviewScope, reviewOffset]);
+  const notifyLocation = (id: string, nextScope = scope, nextOffset = offset) => {
+    if (onReviewNavigate) onReviewNavigate({scope:nextScope,offset:nextOffset,card:id});
+    else onSelectCard?.(id);
+  };
   useEffect(() => {
     let active = true;
     setError(''); setLoading(true); setDetached(undefined);
@@ -138,9 +153,10 @@ export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, 
       }
       if (active) {
         setCards(data.cards); setDetached(extra); setNextOffset(data.nextOffset);
-        if (selectLast.current && data.cards.length) {
-          setSelected(data.cards[data.cards.length-1].id);
-          onSelectCard?.(data.cards[data.cards.length-1].id);
+        if (!selected) {
+          const nextId = data.cards[selectLast.current ? data.cards.length-1 : 0]?.id || '';
+          setSelected(nextId);
+          notifyLocation(nextId);
         }
         selectLast.current=false;
       }
@@ -153,20 +169,22 @@ export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, 
   useEffect(() => {
     if (!loading && current) {
       cardElement.current?.focus();
-      if (!selected) {setSelected(current.id); onSelectCard?.(current.id)}
     }
-  }, [loading, current?.id, selected, onSelectCard]);
-  const selectCard = (id: string) => {setLoading(true); setEditing(''); setSelected(id); onSelectCard?.(id)};
+  }, [loading, current?.id, selected]);
+  const selectCard = (id: string, nextScope = scope, nextOffset = offset) => {
+    setLoading(true); setEditing(''); setSelected(id); setScope(nextScope); setOffset(nextOffset);
+    if (id) notifyLocation(id, nextScope, nextOffset);
+  };
   const move = (direction: number) => {
     const index = cards.findIndex(c => c.id===current?.id);
     const next = cards[index+direction];
     if (next) selectCard(next.id);
-    else if (direction>0 && nextOffset!==null) {setOffset(nextOffset); selectCard('')}
-    else if (direction<0 && offset>0) {selectLast.current=true; setOffset(Math.max(0,offset-40)); selectCard('')}
+    else if (direction>0 && nextOffset!==null) {selectCard('', scope, nextOffset)}
+    else if (direction<0 && offset>0) {selectLast.current=true; selectCard('', scope, Math.max(0,offset-40))}
   };
-  const changeScope = (next: string) => {
+  const changeScope = (next: ReviewScope) => {
     if (next===scope) return;
-    selectLast.current=false; setScope(next); setOffset(0); selectCard('');
+    selectLast.current=false; selectCard('', next, 0);
   };
   async function decide(state: string) {
     if (!current || inFlight.current) return;
@@ -195,7 +213,7 @@ export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, 
     <header className="cc-header"><h1>Command center</h1><button onClick={onOpenMyCareer}>My Career</button></header>
     <section aria-label="Review suggestions">
       <div className="cc-toolbar">
-        <label>View<select value={scope} disabled={saving} onChange={e => changeScope(e.target.value)}>
+        <label>View<select value={scope} disabled={saving} onChange={e => changeScope(e.target.value as ReviewScope)}>
           <option value="review">Suggestions</option><option value="all">All activity</option>
           <option value="completed">Completed steps</option><option value="later">Later</option>
           <option value="dismissed">Won’t do</option>
