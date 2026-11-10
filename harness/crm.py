@@ -7,7 +7,7 @@ from datetime import date
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
-from fastapi import BackgroundTasks, APIRouter, Depends, HTTPException
+from fastapi import Query, BackgroundTasks, APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, StringConstraints, field_validator
 
@@ -498,6 +498,14 @@ def mount(app,get_store,owner):
             raise HTTPException(409,str(e)) from e
 
     from . import career_email
+
+    @router.get('/activity-duplicates')
+    def activity_duplicates(offset:int=Query(default=0,ge=0),limit:int=Query(default=20,ge=1,le=50)):
+        from .activity_duplicates import preview
+        with get_store().connect() as db:
+            db.execute('PRAGMA query_only=ON')
+            db.execute('BEGIN')
+            return private(preview(db,offset,limit))
 
     @router.get('/hidden-email-activities')
     def hidden_email_activities():
