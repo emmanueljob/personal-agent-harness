@@ -1,0 +1,50 @@
+/* One shell for all signed-in tools. CRM detail and assistant controls stay local. */
+.private-shell {
+  --admin-bg: #f8f9fb;
+  --admin-panel: #fff;
+  --admin-text: #242733;
+  --admin-muted: #707684;
+  --admin-line: #e9eaef;
+  --admin-accent: #6754c4;
+  font-size: 14px;
+}
+.private-shell .admin-top {position:sticky;top:0;z-index:40;height:64px;padding:10px 24px;gap:16px}
+.private-shell .admin-top>div {gap:14px;margin-left:auto}
+.private-shell .private-home {font-weight:650;border:0;background:transparent;padding:8px}
+.private-location {font-size:13px;color:var(--admin-muted)}
+.private-shell .private-menu {display:none}
+.private-shell .admin-layout {max-width:none;grid-template-columns:216px minmax(0,1fr)}
+.private-shell .admin-sidebar {padding:18px 12px;min-height:calc(100vh - 64px);background:#fcfcfd;position:sticky;top:64px;height:calc(100vh - 64px);overflow-y:auto}
+.private-shell .admin-sidebar nav {margin:0;gap:3px}
+.private-shell .admin-sidebar h2 {font:600 11px/1.5 'DM Sans Variable',system-ui,sans-serif;color:var(--admin-muted);margin:22px 10px 6px}
+.private-shell .admin-sidebar button {font-size:12px;padding:8px 11px;border-radius:6px}
+.private-shell .admin-sidebar nav button[aria-current=page] {background:#efedf8;color:#6550bb;font-weight:600}
+.private-shell .admin-main {padding:28px 32px;min-width:0}
+.private-shell .admin-main:has(>.crm-embedded) {padding:0}
+.private-shell .admin-heading h1 {font:550 27px/1.25 'DM Sans Variable',system-ui,sans-serif;letter-spacing:-.7px}
+.private-shell .admin-main:has(>.crm-embedded)>.private-return {margin:16px 32px 0}
+.private-shell .private-return {margin-bottom:14px;font-size:12px}
+.private-shell .admin-dirty {display:inline-block;margin:10px 16px}
+.private-shell .crm-v2.crm-embedded {grid-template-columns:minmax(0,1fr);min-height:calc(100vh - 64px)}
+.private-shell .crm-v2.crm-embedded.with-assistant {grid-template-columns:minmax(0,1fr) 360px}
+.private-shell .crm-embedded .crm-main {padding:28px 32px}
+.private-shell button:hover:not(:disabled) {background:#f1eff9}
+.private-shell button:focus-visible {outline-color:#b9ade9}
+.private-shell .admin-card {border-radius:10px;box-shadow:none}
+@media(max-width:1100px) {
+  .private-shell .crm-v2.crm-embedded.with-assistant {grid-template-columns:minmax(0,1fr)}
+  .private-shell .crm-embedded .crm-assistant:not([hidden]) {position:fixed;right:0;top:64px;bottom:0;width:min(390px,100vw);z-index:30;background:var(--admin-panel)}
+}
+@media(max-width:700px) {
+  .private-shell .admin-top {padding:8px 12px;gap:8px;flex-wrap:wrap;height:auto;min-height:64px}
+  .private-shell .admin-top>div {gap:8px}
+  .private-shell .admin-top a[target] {display:none}
+  .private-shell .private-location {display:none}
+  .private-shell .private-menu {display:inline-block}
+  .private-shell .admin-layout {display:block}
+  .private-shell .admin-sidebar {position:static;height:auto;overflow:visible;display:none;min-height:0;border-right:0;border-bottom:1px solid var(--admin-line)}
+  .private-shell .admin-sidebar.is-open {display:block}
+  .private-shell .admin-sidebar nav {display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+  .private-shell .admin-sidebar h2 {grid-column:1/-1}
+  .private-shell .admin-main,.private-shell .crm-embedded .crm-main {padding:20px 16px}
+}
