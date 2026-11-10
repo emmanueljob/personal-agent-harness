@@ -139,8 +139,11 @@ export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, 
   }, [api, generation, scope, offset, selected]);
   const current = cards.find(c => c.id===selected) || detached || (!selected ? cards[0] : undefined);
   useEffect(() => {
-    if (!loading && current) cardElement.current?.focus();
-  }, [loading, current?.id]);
+    if (!loading && current) {
+      cardElement.current?.focus();
+      if (!selected) {setSelected(current.id); onSelectCard?.(current.id)}
+    }
+  }, [loading, current?.id, selected, onSelectCard]);
   const selectCard = (id: string) => {setLoading(true); setEditing(''); setSelected(id); onSelectCard?.(id)};
   const move = (direction: number) => {
     const index = cards.findIndex(c => c.id===current?.id);
