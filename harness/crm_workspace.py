@@ -132,6 +132,16 @@ def tools(ctx):
         if job and (record_id!=job['record_id'] or job['turn_id']!=ctx.get('turn_id')):raise ValueError('Enrichment writes are restricted to the assigned record.')
 
     @tool
+    def read_career_preferences() -> dict:
+        """Read current private career preferences and source excerpts before recommending jobs."""
+        allowed()
+        from .my_career import brief
+        current = brief(ctx['store'])
+        return {'revision': current['revision'], 'claims': [
+            {k: claim[k] for k in ('statement', 'source', 'quote')} for claim in current['claims']
+        ]}
+
+    @tool
     def read_job_workspace(query: str = '', kind: str = '', stage: str = '', offset: int = 0, limit: int = 20) -> dict:
         """Read CRM totals, source IDs and paginated records. Search full research notes. Use read_job_dossier for full evidence and history."""
         crm.initialize(ctx['store'])
@@ -248,7 +258,7 @@ def tools(ctx):
         from .crm_enrichment import status
         return {'jobs':status(ctx['store'])}
 
-    catalog=[enrich_job_records,read_job_enrichment,read_job_workspace,read_job_dossier,write_job_record,update_job_record,import_job_report,process_job_reports,read_job_artifacts,save_job_artifact,read_job_links]
+    catalog=[read_career_preferences,enrich_job_records,read_job_enrichment,read_job_workspace,read_job_dossier,write_job_record,update_job_record,import_job_report,process_job_reports,read_job_artifacts,save_job_artifact,read_job_links]
     # Tool execution errors are corrective feedback, not failed coordinator turns.
     for item in catalog:
         original=item.func
