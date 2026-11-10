@@ -120,6 +120,11 @@ def report():
         return {'tags': [], 'counts': [], 'links': []}
     with sqlite3.connect(path.as_uri()+'?mode=ro', uri=True, timeout=2) as db:
         db.row_factory = sqlite3.Row
+        # First use creates the file before its schema. Keep one read snapshot
+        # while distinguishing that empty state from a damaged existing schema.
+        db.execute('BEGIN')
+        if not db.execute('SELECT 1 FROM sqlite_master LIMIT 1').fetchone():
+            return {'tags': [], 'counts': [], 'links': []}
         disabled = {row[0] for row in db.execute('SELECT token FROM outreach_disabled_tags')} if db.execute("SELECT 1 FROM sqlite_master WHERE name='outreach_disabled_tags'").fetchone() else set()
         tags = [{**dict(row),'active':row['token'] not in disabled} for row in db.execute('SELECT token,field,label,profile_key FROM outreach_tags ORDER BY created DESC LIMIT 1000')]
         exists = db.execute("SELECT 1 FROM sqlite_master WHERE name='outreach_counts'").fetchone()
