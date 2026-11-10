@@ -17,4 +17,4 @@ COPY cloud_browser/licenses ./licenses
 RUN useradd --uid 10001 --create-home browser && mkdir -p /data/browser && chown browser:browser /data/browser
 ENV PATH="/worker/.venv/bin:$PATH" PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 EXPOSE 8090
-CMD ["sh","-c","mkdir -p /data/browser && chown browser:browser /data/browser && chmod 700 /data/browser && exec runuser -u browser -- uvicorn worker.service:app --host :: --port 8090 --no-access-log --ws-max-size 4194304"]
+CMD ["sh","-c","mkdir -p /data/browser && chown browser:browser /data/browser && chmod 700 /data/browser && exec setpriv --reuid=10001 --regid=10001 --init-groups uvicorn worker.service:app --host :: --port 8090 --no-access-log --ws-max-size 4194304"]

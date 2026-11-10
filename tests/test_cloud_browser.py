@@ -249,3 +249,29 @@ def test_sent_outreach_dossier_uses_current_association_and_original_receipt(tmp
     assert (activity['record']['company_id'], activity['record']['person_id']) == (second, corrected)
     assert activity['id'] == result['activity_id']
     assert len(store.query("SELECT id FROM crm_records WHERE kind='activity'")) == 1
+
+
+def test_account_identity_resolves_only_the_explicit_authenticated_profile_reference():
+    reference='urn:li:fs_miniProfile:FixtureOwner'
+    decoy={'entityUrn':'urn:li:fs_miniProfile:UnrelatedMember'}
+    owner={'entityUrn':reference}
+    assert li.me({'data':{'*miniProfile':reference},'included':[decoy,owner]})==ACCOUNT
+    assert li.me({'miniProfile':owner})==ACCOUNT
+    assert li.me({'data':{'miniProfile':owner}})==ACCOUNT
+    with pytest.raises(li.SchemaError):li.me({'data':{'*miniProfile':reference},'included':[decoy]})
+    with pytest.raises(li.SchemaError):li.me({'data':{'*miniProfile':reference},'included':[owner,owner]})
+    with pytest.raises(li.SchemaError):li.me({'data':{'miniProfile':decoy,'*miniProfile':reference},'included':[owner]})
+
+
+def test_native_shutdown_keeps_display_available_until_chrome_exits(tmp_path):
+    from worker.desktop import Desktop
+    events=[]
+    class Process:
+        def __init__(self,name):self.name=name;self.returncode=None
+        def terminate(self):events.append('stop '+self.name);self.returncode=0
+        async def wait(self):events.append('wait '+self.name);return self.returncode
+        def kill(self):raise AssertionError('No forced kill is needed for a clean shutdown.')
+    desktop=Desktop(tmp_path)
+    desktop.processes=[Process(name) for name in ('display','window-manager','chrome','vnc')]
+    asyncio.run(desktop.close())
+    assert events==['stop vnc','wait vnc','stop chrome','wait chrome','stop window-manager','wait window-manager','stop display','wait display']
