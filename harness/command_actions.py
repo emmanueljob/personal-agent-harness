@@ -70,7 +70,12 @@ def captured_replies(db, card):
         WHERE provider=? AND account=? AND thread_id=? AND direction='inbound'
         AND occurred_at>? ORDER BY occurred_at,id""",
         (receipt['provider'], receipt['account'], receipt['thread_id'], receipt['occurred_at'])).fetchall()
-    replies = [dict(row) for row in rows if row['activity_id'] not in hidden]
+    from .crm_imports import canonical_id
+    replies = []
+    for row in rows:
+        activity_id = canonical_id(db, row['activity_id'])
+        if activity_id not in hidden:
+            replies.append({**dict(row), 'activity_id': activity_id})
     return {'status': 'completed', 'summary': (
         f"Found {len(replies)} later captured reply/replies in this conversation."
         if replies else 'No later visible reply is captured in this conversation.'),

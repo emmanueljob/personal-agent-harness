@@ -136,3 +136,22 @@ def test_company_and_person_cards_target_their_own_entities(tmp_path, monkeypatc
             draft = json.loads(saved['body'])
             assert draft['company_id']==co
             assert draft['person_id']==(person if ident==person else '')
+
+
+def test_captured_reply_alias_uses_canonical_visibility_and_identity(tmp_path):
+    from harness.store import Store
+    store = Store(tmp_path)
+    co = add(store, company('Fixture alias company', domain='example.org'))
+    sent = correspondence.ingest(store, message())
+    reply = correspondence.ingest(store, message('alias-reply', 'inbound'))
+    canonical = add(store, dict(kind='activity', company_id=co, title='Canonical reply', stage='replied'))
+    with store.connect() as db:
+        db.execute('INSERT INTO crm_redirects(alias_id,record_id) VALUES (?,?)', (reply['activity_id'], canonical))
+        db.execute('INSERT INTO crm_email_visibility(item_id,hidden) VALUES (?,1)', (reply['id'],))
+    with store.connect() as db:
+        hidden = actions.captured_replies(db, {'receiptId': sent['id']})
+        assert hidden['replies']==[]
+        db.execute('UPDATE crm_email_visibility SET hidden=0 WHERE item_id=?', (reply['id'],))
+    with store.connect() as db:
+        visible = actions.captured_replies(db, {'receiptId': sent['id']})
+    assert visible['replies'][0]['activity_id']==canonical

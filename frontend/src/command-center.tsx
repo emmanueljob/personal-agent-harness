@@ -124,6 +124,7 @@ export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, 
   const pending = useRef<{id: string; body: unknown; state: string} | undefined>(undefined);
   const inFlight = useRef(false);
   const cardElement = useRef<HTMLElement>(null);
+  const selectLast = useRef(false);
   const refresh = useCallback(() => {pending.current=undefined; setLoading(true); setGeneration(g => g+1)}, []);
   useEffect(() => {setSelected(selectedCardId || returnCardId || '')}, [selectedCardId, returnCardId]);
   useEffect(() => {
@@ -135,7 +136,14 @@ export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, 
       if (selected && !data.cards.some((c: Card) => c.id===selected)) {
         extra = await api(root+'/cards/'+encodeURIComponent(selected));
       }
-      if (active) {setCards(data.cards); setDetached(extra); setNextOffset(data.nextOffset)}
+      if (active) {
+        setCards(data.cards); setDetached(extra); setNextOffset(data.nextOffset);
+        if (selectLast.current && data.cards.length) {
+          setSelected(data.cards[data.cards.length-1].id);
+          onSelectCard?.(data.cards[data.cards.length-1].id);
+        }
+        selectLast.current=false;
+      }
     }
     load().catch(e => {if (active) {setError(e.message); setCards([])}})
       .finally(() => {if (active) setLoading(false)});
@@ -154,11 +162,11 @@ export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, 
     const next = cards[index+direction];
     if (next) selectCard(next.id);
     else if (direction>0 && nextOffset!==null) {setOffset(nextOffset); selectCard('')}
-    else if (direction<0 && offset>0) {setOffset(Math.max(0,offset-40)); selectCard('')}
+    else if (direction<0 && offset>0) {selectLast.current=true; setOffset(Math.max(0,offset-40)); selectCard('')}
   };
   const changeScope = (next: string) => {
     if (next===scope) return;
-    setScope(next); setOffset(0); selectCard('');
+    selectLast.current=false; setScope(next); setOffset(0); selectCard('');
   };
   async function decide(state: string) {
     if (!current || inFlight.current) return;
