@@ -154,3 +154,69 @@ def test_chat_reads_live_visible_evidence_and_rechecks_prior_cards(tmp_path):
     limited = context(previous=[reply['activity_id']])
     assert len(limited['cards']) == 8 and not limited['coverage']['complete']
     assert limited['references'][0]['reviewed']
+
+
+def test_durable_dispositions_retry_expiry_reversal_and_legacy_completion(tmp_path, monkeypatch):
+    from datetime import datetime, timezone
+    module, store = admin_app(tmp_path, monkeypatch)
+    target = add(store, company('Fixture decision', next_action='Review the role'))
+    legacy = add(store, company('Earlier completion', next_action='Review earlier role'))
+    with TestClient(module.app, base_url='https://testserver') as client:
+        def get(scope):
+            return client.get(HOME+'?scope='+scope, headers=AUTH).json()['cards']
+        def decide(entry, state, request):
+            return client.post(HOME+'/cards/'+entry['id']+'/disposition', headers=AUTH, json={
+                'revision': entry['revision'], 'disposition_version': entry['dispositionVersion'],
+                'state': state, 'request_id': request,
+            })
+        card = next(c for c in get('review') if c['id']==target)
+        assert client.post(HOME+'/cards/'+legacy+'/complete', headers=AUTH, json={'revision': 1}).status_code==200
+        assert legacy in [c['id'] for c in get('completed')]
+        later = decide(card, 'later', 'fixture-later')
+        assert later.status_code==200
+        due = later.json()['resumeAt']
+        assert datetime.fromisoformat(due) > datetime.now(timezone.utc)
+        assert target not in [c['id'] for c in get('review')]
+        assert get('later')[0]['resumeAt']==due
+        assert decide(card, 'later', 'fixture-later').json()==later.json()
+        assert decide(card, 'dismissed', 'fixture-conflict').status_code==409
+        assert decide(card, 'dismissed', 'fixture-later').status_code==409
+        with store.connect() as db:
+            db.execute("UPDATE command_center_dispositions SET resume_at='2000-01-01T00:00:00+00:00' WHERE card_id=?", (target,))
+        returned = next(c for c in get('review') if c['id']==target)
+        assert returned['disposition']=='active' and not get('later')
+        assert decide(returned, 'dismissed', 'fixture-dismiss').status_code==200
+        dismissed = get('dismissed')[0]
+        assert target not in [c['id'] for c in get('all')]
+        assert decide(dismissed, 'active', 'fixture-restore').status_code==200
+        restored = next(c for c in get('review') if c['id']==target)
+        assert restored['action']=='Review the role'
+        assert decide(restored, 'done', 'fixture-done').status_code==200
+        done = next(c for c in get('completed') if c['id']==target)
+        assert not done['action']
+        assert decide(done, 'active', 'fixture-reopen').status_code==200
+        assert next(c for c in get('review') if c['id']==target)['action']=='Review the role'
+        legacy_card = next(c for c in get('completed') if c['id']==legacy)
+        assert decide(legacy_card, 'active', 'fixture-old-reopen').status_code==200
+        assert legacy in [c['id'] for c in get('review')]
+        assert client.get(HOME+'/cards/'+target).status_code==401
+
+
+def test_concurrent_card_decisions_apply_once(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from fastapi import HTTPException
+    from harness.command_center import Disposition, disposition
+    from harness.store import Store
+
+    store = Store(tmp_path)
+    ident = add(store, company('Fixture concurrency', next_action='Review'))
+    def run(state):
+        body = Disposition(revision=1, disposition_version=0, state=state, request_id='fixture-'+state)
+        try:
+            return disposition(store, ident, body)
+        except HTTPException as error:
+            return error.status_code
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(run, ['later', 'dismissed']))
+    assert sum(isinstance(r, dict) for r in results)==1
+    assert 409 in results
