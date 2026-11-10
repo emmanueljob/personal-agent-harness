@@ -15,3 +15,9 @@
 .crm-career-section article p { max-width: 75ch; }
 .crm-career-section details { margin: .5rem 0; }
 .crm-career-section blockquote { margin: .5rem 1rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.crm-duplicate-preview>.crm-surface{margin:20px 0}
+.crm-duplicate-preview>.crm-surface>details{margin-top:16px;overflow-wrap:anywhere}
+.crm-duplicate-preview td{white-space:pre-wrap;overflow-wrap:anywhere;min-width:180px;max-width:360px}
+.crm-duplicate-preview th small{display:block;overflow-wrap:anywhere;font-weight:400;margin-top:8px}
+.crm-duplicate-preview .crm-source-item{border-top:1px solid var(--admin-line);padding:8px 0}

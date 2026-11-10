@@ -37,16 +37,18 @@ def activity_decisions(db):
     """Return canonical email activity IDs and their reviewable visibility decisions."""
     from .correspondence import is_security_notice
     decisions = {}
+    overrides = {}
+    if db.execute("SELECT 1 FROM sqlite_master WHERE name='crm_email_visibility'").fetchone():
+        overrides = dict(db.execute('SELECT item_id,hidden FROM crm_email_visibility'))
     # CRM can be used before the first correspondence connection exists.
     if db.execute("SELECT 1 FROM sqlite_master WHERE name='crm_messages'").fetchone():
         for row in db.execute("""
-            SELECT m.id, m.body, m.method, COALESCE(r.record_id,m.activity_id) AS activity_id, v.hidden
+            SELECT m.id, m.body, m.method, COALESCE(r.record_id,m.activity_id) AS activity_id
             FROM crm_messages m LEFT JOIN crm_redirects r ON r.alias_id=m.activity_id
-            LEFT JOIN crm_email_visibility v ON v.item_id=m.id
             WHERE m.provider='gmail' AND m.activity_id!='' ORDER BY m.created,m.id
         """):
             message = json.loads(row['body'])
-            choice = message_decision(message, row['hidden'])
+            choice = message_decision(message, overrides.get(row['id']))
             if row['method']=='gmail_api' and is_security_notice(message['subject']):
                 choice = {'hidden': True, 'reason': 'Authentication notice.', 'reviewable': False}
             # If consolidation joined receipts, keep the activity out of routine
@@ -56,15 +58,14 @@ def activity_decisions(db):
                 decisions[ident] = {**choice, 'message_id': row['id']}
 
     for row in db.execute("""
-        SELECT r.id,r.body,v.hidden FROM crm_records r
-        LEFT JOIN crm_email_visibility v ON v.item_id=r.id
+        SELECT r.id,r.body FROM crm_records r
         WHERE r.kind='activity' AND json_extract(r.body,'$.channel')='email'
           AND r.id NOT IN (SELECT alias_id FROM crm_redirects)
     """):
         if row['id'] not in decisions:
             record = json.loads(row['body'])
             decisions[row['id']] = decision(record['title'], record.get('notes',''),
-                                              outbound=record['stage']=='sent', override=row['hidden'])
+                                              outbound=record['stage']=='sent', override=overrides.get(row['id']))
     return decisions
 
 
