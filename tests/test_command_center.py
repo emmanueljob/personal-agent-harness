@@ -86,3 +86,28 @@ def test_home_explains_import_progress_and_failure_without_exposing_worker_detai
     failed = feed(store)['cards'][0]
     assert failed['stage'] == 'failed' and '1 failed' in failed['evidence']
     assert 'Internal fixture diagnostic' not in str(failed)
+
+
+def test_completed_steps_remain_reachable_beyond_forty_cards(tmp_path, monkeypatch):
+    module, store = admin_app(tmp_path, monkeypatch)
+    target = add(store, company('Synthetic completed company', next_action='Arrange a discussion'))
+    for n in range(45):
+        add(store, company(f'Other pending company {n}', next_action='Review opportunity'))
+    with TestClient(module.app, base_url='https://testserver') as client:
+        # Completion is possible even when an older card lies on a later page.
+        assert client.post(HOME+'/cards/'+target+'/complete', headers=AUTH, json={'revision': 1}).status_code == 200
+        assert target not in [c['id'] for c in client.get(HOME, headers=AUTH).json()['cards']]
+        completed = client.get(HOME+'?scope=completed', headers=AUTH).json()
+        assert completed['cards'][0]['id'] == target and completed['cards'][0]['reviewed']
+        assert client.post(HOME+'/cards/'+target+'/reopen', headers=AUTH,
+                           json={'revision': completed['cards'][0]['revision']}).status_code == 200
+        assert not client.get(HOME+'?scope=completed', headers=AUTH).json()['cards']
+        found = []
+        offset = 0
+        while offset is not None:
+            page = client.get(HOME+f'?offset={offset}', headers=AUTH).json()
+            found.extend(c['id'] for c in page['cards'])
+            offset = page['nextOffset']
+        assert len(found) == 46 and len(set(found)) == 46 and target in found
+        assert client.get(HOME+'?offset=-1', headers=AUTH).status_code == 422
+        assert client.get(HOME+'?scope=unknown', headers=AUTH).status_code == 422

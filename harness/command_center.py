@@ -2,9 +2,10 @@
 import json
 from datetime import date, datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import Field
+from typing import Literal
 
 from . import career_email, correspondence, crm
 
@@ -114,7 +115,7 @@ def import_cards(db):
         yield ((rank, '9999', -row['created'], entry['id']), entry)
 
 
-def feed(store):
+def feed(store, scope='all', offset=0):
     initialize(store)
     today = date.today().isoformat()
     ranked = []
@@ -129,7 +130,9 @@ def feed(store):
                 ranked.append(((entry['rank'], entry['due'] or '9999', -row['updated'], entry['id']), entry))
         ranked.extend(import_cards(db))
     ranked.sort(key=lambda item: item[0])
-    return {'cards': [entry for _, entry in ranked[:40]]}
+    entries = [entry for _, entry in ranked if scope != 'completed' or entry['reviewed']]
+    return {'cards': entries[offset:offset+40],
+            'nextOffset': offset+40 if offset+40 < len(entries) else None}
 
 
 def mark_done(store, ident, revision):
@@ -185,8 +188,8 @@ def mount(app, get_store, owner):
         return JSONResponse(data, headers={'Cache-Control': 'private, no-store'})
 
     @router.get('')
-    def home():
-        return private(feed(get_store()))
+    def home(scope: Literal['all', 'completed'] = 'all', offset: int = Query(default=0, ge=0)):
+        return private(feed(get_store(), scope, offset))
 
     @router.get('/contacts')
     def contacts():
