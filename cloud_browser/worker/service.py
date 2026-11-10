@@ -78,7 +78,7 @@ class Worker:
     async def stream(self):
         heartbeat=None;frame=[];size=0
         try:
-            async with self.http.stream('GET',li.BASE+'/realtime/connect?rc=1',headers={'accept':'text/event-stream'},timeout=httpx.Timeout(100,connect=20)) as response:
+            async with self.http.stream('GET',li.BASE+'/realtime/connect?rc=1',headers={'accept':'text/event-stream','x-li-track':json.dumps({'mpName':'voyager-web'})},timeout=httpx.Timeout(100,connect=20)) as response:
                 if response.status_code in (401,403):raise li.LoginRequired('LinkedIn session needs verification.')
                 response.raise_for_status()
                 if 'text/event-stream' not in response.headers.get('content-type',''):raise li.SchemaError('LinkedIn realtime stream format changed.')

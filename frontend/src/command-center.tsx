@@ -54,12 +54,6 @@ function Correction({api, card, saved, cancel}: {
   </form>;
 }
 
-function chatContext(card: Card) {
-  return JSON.stringify({card: card.id, title: card.title, company: card.company, contact: card.person,
-    status: card.stage, reason: card.why, nextStep: card.action, source: card.source,
-    evidence: card.evidence, date: card.date});
-}
-
 export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, renderChat, selectedCardId, onSelectCard}: Props) {
   const [cards, setCards] = useState<Card[]>([]), [loading, setLoading] = useState(true);
   const [error, setError] = useState(''), [saving, setSaving] = useState('');
@@ -141,7 +135,7 @@ export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, 
       <label>Agent<select value={agent} onChange={e => setAgent(e.target.value as typeof agent)}>
         <option value="grokbot">Grokbot</option><option value="muse">Muse</option></select></label>
       {current && <p>About <strong>{current.title}</strong> <button onClick={() => selectCard('')}>Clear card</button></p>}
-      {renderChat(agent, current && !loading ? chatContext(current) : '')}
+      {renderChat(agent, JSON.stringify({surface: 'command-center', card: selected}))}
     </aside></div>
   </div>;
 }

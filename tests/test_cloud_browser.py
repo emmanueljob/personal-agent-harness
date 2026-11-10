@@ -54,6 +54,28 @@ def test_protocol_url_and_realtime_event_parser():
     assert list(li.sse_data([': comment','data: '+json.dumps(event),'']))==[event]
 
 
+def test_realtime_connection_supplies_application_name_and_queues_events(tmp_path):
+    import httpx
+    event={'com.linkedin.realtimefrontend.DecoratedEvent':{'topic':'urn:li:messagesTopic:urn:li-realtime:fixture','payload':{'event':{'conversationUrn':THREAD}}}}
+    def provider(request):
+        track=json.loads(request.headers.get('x-li-track','{}'))
+        if track.get('mpName')!='voyager-web':
+            return httpx.Response(400,text='Application name is required.')
+        return httpx.Response(200,headers={'content-type':'text/event-stream'},text='data: '+json.dumps(event)+'\n\n')
+    worker=Worker(tmp_path)
+    async def capture():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(provider)) as client:
+            rejected=await client.get(li.BASE+'/realtime/connect?rc=1')
+            assert rejected.status_code==400
+            worker.http=client
+            await worker.stream()
+    asyncio.run(capture())
+    assert worker.state.counts('jobs')=={'queued':1}
+    assert json.loads(worker.state.take('jobs')['body'])['thread']==THREAD
+    assert worker.state.get('last_event')>0
+    assert not worker.transport
+
+
 def test_restart_preserves_outbox_and_requeues_inflight_jobs(tmp_path):
     state=State(tmp_path);messages,_,_=li.messages(response(),ACCOUNT,THREAD,[])
     state.enqueue('thread',{'thread':THREAD},'event-one');assert state.take('jobs')['id']=='event-one'
