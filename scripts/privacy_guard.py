@@ -25,6 +25,9 @@ MAC_SOURCE_ROOT = 'desktop/macos/Sources/'
 # Owner-provided synthetic landscape, visually reviewed; replacements need review.
 PUBLIC_ASSETS = {'frontend/public/images/alpine-panorama.jpeg': '1e2c892c99e2bd1a07c1ae6cfbfd66533a720887291ad0bae4bb895d9d9ea7a7'}
 SPECIAL = {'Dockerfile','.dockerignore','.gitignore','.env.example','.gitleaks.toml','.githooks/pre-commit','.githooks/pre-push'}
+# Reviewed source patch for the separately built companion; still scanned as text.
+# Do not permit arbitrary patch exports (which can contain runtime/knowledge data).
+SPECIAL.add('integrations/whatsapp-muse/companion.patch')
 
 
 class Blocked(Exception):
