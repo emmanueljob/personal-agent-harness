@@ -76,7 +76,7 @@ export function CareerSummary({api,revision,updated}:{api:Api;revision:number;up
     {!brief && !summaryError && <p role="status">Writing your summary…</p>}
     {summaryError && <p role="alert">{summaryError} <button onClick={()=>setSummaryRetry(n=>n+1)}>Retry summary</button></p>}
     {brief && !brief.summary && <p>Your summary will appear once there are sourced preferences.</p>}
-    <h3>Conversations</h3>
+    <details><summary>Career brief questions and replies</summary>
     <div className="crm-filter-tabs">{(['grokbot','muse'] as const).map(p=><button key={p} aria-pressed={provider===p}
       disabled={busy || muse} onClick={()=>{if(p!==provider){setProvider(p);setMessages([]);setMore(false);setLimit(10);setNotice('')}}}>{p==='grokbot'?'Grokbot':'Muse'}</button>)}</div>
     {!messages.length && <p>No career questions to show yet.</p>}
@@ -108,5 +108,6 @@ export function CareerSummary({api,revision,updated}:{api:Api;revision:number;up
       <button disabled={busy} onClick={()=>setMuse(false)}>Back</button></>}
     {notice && <p role="status">{notice}</p>}
     {error && <p role="alert">{error} <button onClick={()=>{setError('');setEpoch(n=>n+1)}}>Refresh replies</button></p>}
+    </details>
   </section>;
 }

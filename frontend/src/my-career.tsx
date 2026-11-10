@@ -1,3 +1,4 @@
+import {CareerConversation} from './career-conversation';
 import {CareerSummary} from './career-summary';
 import { useCallback, useEffect, useState } from 'react';
 
@@ -78,6 +79,7 @@ export function MyCareer({api, open, mark}: {api: Api; open: (id: string) => voi
   const reconsidered = (job: Job) => !job.pending && job.previous==='ruled_out' && job.disposition!=='ruled_out';
   const jobs = [...(view?.jobs || [])].sort((a,b) => Number(reconsidered(b))-Number(reconsidered(a)));
   return <>
+    <CareerConversation api={api}/>
     {error && <p role="alert">{error} <button onClick={retry}>Retry</button></p>}
     {busy && <p role="status">{busy}…</p>}
     {view && <><CareerSummary api={api} revision={view.revision} updated={retry}/><section className="crm-surface crm-career-section"><h2>What I’m looking for</h2>
