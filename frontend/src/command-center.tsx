@@ -65,17 +65,21 @@ export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, 
   const [error, setError] = useState(''), [saving, setSaving] = useState('');
   const [selected, setSelected] = useState(selectedCardId || ''), [editing, setEditing] = useState('');
   const [agent, setAgent] = useState<'grokbot'|'muse'>('grokbot');
+  const [scope, setScope] = useState<'all'|'completed'>('all');
+  const [offset, setOffset] = useState(0), [nextOffset, setNextOffset] = useState<number|null>(null);
   const [generation, setGeneration] = useState(0);
   const restored = useRef(''), chat = useRef<HTMLHeadingElement>(null);
   const refresh = useCallback(() => {setLoading(true); setGeneration(g => g+1)}, []);
   useEffect(() => {
     let active = true;
-    setError('');
-    api(root).then(data => {if (active) setCards(data.cards)})
+    setError(''); setLoading(true);
+    api(root+'?scope='+scope+'&offset='+offset).then(data => {
+      if (active) {setCards(data.cards); setNextOffset(data.nextOffset)}
+    })
       .catch(e => {if (active) {setError(e.message); setCards([])}})
       .finally(() => {if (active) setLoading(false)});
     return () => {active = false};
-  }, [api, generation]);
+  }, [api, generation, scope, offset]);
   useEffect(() => {
     if (returnCardId && restored.current!==returnCardId && !loading) {
       const element = document.getElementById('cc-'+returnCardId);
@@ -91,15 +95,24 @@ export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, 
   }
   useEffect(() => {setSelected(selectedCardId || '')}, [selectedCardId]);
   const selectCard = (id: string) => {setSelected(id); onSelectCard?.(id)};
+  const changeScope = (next: 'all'|'completed') => {
+    if (next===scope) return;
+    setLoading(true); setCards([]); setEditing(''); setOffset(0); setScope(next);
+  };
+  const changePage = (next: number) => {setLoading(true); setCards([]); setEditing(''); setOffset(next)};
   const current = cards.find(c => c.id===selected);
   return <div className="command-center">
     <header className="cc-header"><h1>Command center</h1>
       <button onClick={onOpenMyCareer}>My Career</button></header>
     <div className="cc-layout"><section aria-label="Career activity">
       <div className="cc-toolbar"><h2>Career activity</h2><button disabled={loading} onClick={refresh}>Refresh feed</button></div>
+      <div className="cc-actions" aria-label="Feed view">
+        <button aria-pressed={scope==='all'} onClick={() => changeScope('all')}>All activity</button>
+        <button aria-pressed={scope==='completed'} onClick={() => changeScope('completed')}>Completed steps</button>
+      </div>
       {error && <p role="alert">{error}</p>}
       {loading && <p role="status">Loading career activity…</p>}
-      {!loading && !cards.length && !error && <p>No career activity to show yet.</p>}
+      {!loading && !cards.length && !error && <p>{scope==='completed' ? 'No completed next steps on this page.' : 'No career activity to show yet.'}</p>}
       {cards.map(card => <article className="cc-card" key={card.id} tabIndex={-1} id={'cc-'+card.id}>
         <small>{[card.company, card.person, card.date].filter(Boolean).join(' · ')}</small>
         <h3>{card.title}</h3><p>{card.why}</p>
@@ -119,6 +132,10 @@ export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, 
           <button onClick={() => {selectCard(card.id); chat.current?.focus()}}>Ask about this</button>
         </div>
       </article>)}
+      <div className="cc-actions">
+        {offset>0 && <button disabled={loading} onClick={() => changePage(Math.max(0,offset-40))}>Previous page</button>}
+        {nextOffset!==null && <button disabled={loading} onClick={() => changePage(nextOffset)}>Next page</button>}
+      </div>
     </section><aside className="cc-chat">
       <h2 tabIndex={-1} ref={chat}>Chat</h2>
       <label>Agent<select value={agent} onChange={e => setAgent(e.target.value as typeof agent)}>
