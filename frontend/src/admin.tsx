@@ -1,13 +1,15 @@
-import React,{useCallback,useEffect,useState} from 'react';
+import React,{useCallback,useEffect,useRef,useState} from 'react';
 import type {Portfolio} from './portfolio';
 import {LearningStudio} from './learning';
 import './admin.css';
+import type {AdminRoute} from './admin-route';
 import {useAdminRoute} from './admin-route';
 import {AgentConversation} from './agent-conversation';
 import {CareerChatSession} from './career-conversation';
 import {CommandCenter} from './command-center';
 import {JobCRM} from './job-crm';
 import {VisitorDashboard} from './visitors';
+import './private-shell.css';
 
 type Profile={key:string;enabled:boolean;headline:string;pitch:string;featured:string[];questions:string[];system_note:string;cta:string;banner:string;company:string;first90:string[]};
 type Settings={contact_heading:string;email_button_text:string;booking_button_text:string;contact_email:string;booking_url:string;tracking_enabled:boolean;plausible_domain:string;linkedin_partner_id:string;x_pixel_id:string;guide_instructions:string};
@@ -18,7 +20,10 @@ type Report={tags:{token:string;field:string;label:string;profile_key:string;act
 type Api=(path:string,method?:string,body?:unknown)=>Promise<any>;
 const sections=['command-center','Profiles & copy','Site & projects','Outreach links','Visit reports','Visitors & conversations','Contact & guide','Learning studio','Job search','System'] as const;
 type Section=typeof sections[number];
-const sectionLabel = (section: Section) => section === 'command-center' ? 'Command Center' : section;
+const careerViews = ['Overview','Companies','People','Applications','Activity','Enrichment','Artifacts','Sources','Connections'];
+const adminSections = sections.filter(section => section !== 'command-center' && section !== 'Job search');
+const sectionLabel = (section: Section) => section === 'command-center' ? 'Home' : section;
+
 function download(filename:string,text:string,type='application/json'){const url=URL.createObjectURL(new Blob([text],{type}));const a=document.createElement('a');a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
 function Field({label,value,onChange,multiline=false,hint}:{label:string;value:string;onChange:(v:string)=>void;multiline?:boolean;hint?:string}){const help=React.useId();return <label className="admin-field"><span>{label}</span>{multiline?<textarea aria-label={label} aria-describedby={hint?help:undefined} rows={4} value={value} onChange={e=>onChange(e.target.value)}/>:<input aria-label={label} aria-describedby={hint?help:undefined} value={value} onChange={e=>onChange(e.target.value)}/>} {hint&&<small id={help}>{hint}</small>}</label>}
 function Move({index,total,move}:{index:number;total:number;move:(delta:number)=>void}){return <span className="admin-move"><button type="button" aria-label="Move up" disabled={index===0} onClick={()=>move(-1)}>↑</button><button type="button" aria-label="Move down" disabled={index===total-1} onClick={()=>move(1)}>↓</button></span>}
@@ -54,11 +59,18 @@ export default function AdminPortal(){
    setNotice('');
    return true;
  });
+ const [menuOpen, setMenuOpen] = useState(false);
+ const lastRecord = useRef<AdminRoute | undefined>(undefined);
+ useEffect(() => {if (route.section === 'Job search' && route.record) lastRecord.current = route}, [route]);
  const section: Section = sections.includes(route.section as Section) ? route.section as Section : 'command-center';
- const navigate = (next: Section) => {
+ const navigate = (next: AdminRoute) => {
+   if (next.section === section && (next.view || 'Overview') === (route.view || 'Overview') && next.record === route.record) {
+     setMenuOpen(false);
+     return;
+   }
    if (dirty && !window.confirm('Discard unsaved changes?')) return;
-   setDirty(false); setNotice('');
-   pushRoute({section: next, card: route.card, selectedCard: route.selectedCard});
+   setDirty(false); setNotice(''); setMenuOpen(false);
+   pushRoute({...next, card: route.card, selectedCard: route.selectedCard});
  };
  const openMyCareer = (record?: string, card?: string) =>
    pushRoute({section: 'Job search', view: 'My Career', record, card, selectedCard: route.selectedCard});
@@ -67,36 +79,41 @@ export default function AdminPortal(){
    setBusy(true);
    try {
      await api('/admin/session', 'DELETE');
-     setConfig(null); setDirty(false); setNotice('');
+     setConfig(null); setDirty(false); setNotice(''); lastRecord.current = undefined;
    } catch (error) {setNotice((error as Error).message)}
    finally {setBusy(false)}
  };
- const workspace = section === 'Job search' || section === 'command-center';
+ const currentView = route.view || 'Overview';
+ const locationLabel = section === 'Job search' ? (currentView === 'Overview' ? 'Job search' : currentView) : sectionLabel(section);
  if (restoringSession) return <main className="admin-shell"><p role="status">Opening your workspace…</p></main>;
  if(!config)return <main className="admin-shell admin-login"><a href="/" className="admin-brand">← Portfolio</a><div className="admin-login-card"><span className="admin-eyebrow">OWNER WORKSPACE</span><h1>Your portfolio,<br/>your controls.</h1><p>Manage the experience behind every outreach link.</p><form onSubmit={async e=>{e.preventDefault();setBusy(true);setNotice('');try{await api('/admin/session','POST',{password});const data=await api('/admin/config');setPassword('');setConfig(data)}catch(error){setNotice((error as Error).message)}finally{setBusy(false)}}}><label className="admin-field">Owner password<input type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required/></label><button className="admin-primary" disabled={busy}>{busy?'Signing in…':'Open admin portal'}</button></form><small>Use your existing owner studio password. Your sign-in continues securely when you refresh.</small>{notice&&<p className="admin-notice" role="alert">{notice}</p>}</div></main>;
- return <CareerChatSession><div className={'admin-shell'+(workspace?' admin-crm':'')}>
+ return <CareerChatSession><div className="admin-shell private-shell">
    <header className="admin-top">
-     {section === 'command-center'
-       ? <span className="admin-brand">Private workspace</span>
-       : <button className="admin-brand" onClick={()=>navigate('command-center')}>← Command Center</button>}
+     <button className="private-home" onClick={()=>navigate({section: 'command-center'})}>Home</button>
+     <span className="private-location">{locationLabel}</span>
      <div>
-       {workspace && <select aria-label="Workspace" value={section} onChange={e=>navigate(e.target.value as Section)}>
-         {sections.map(name=><option key={name} value={name}>{sectionLabel(name)}</option>)}
-       </select>}
-       <a href="/" target="_blank" rel="noreferrer">View live site ↗</a>
+       <button className="private-menu" aria-expanded={menuOpen} aria-controls="private-navigation" onClick={()=>setMenuOpen(open=>!open)}>Navigation</button>
+       <a href="/" target="_blank" rel="noreferrer">View public site ↗</a>
        <button disabled={busy} onClick={()=>void signOut()}>Sign out</button>
      </div>
    </header>
    <div className="admin-layout">
-     <aside className="admin-sidebar">
-       <span className="admin-eyebrow">OWNER WORKSPACE</span>
-       <nav aria-label="Admin sections">{sections.map(name=>
-         <button key={name} aria-current={section===name?'page':undefined} onClick={()=>navigate(name)}>{sectionLabel(name)}</button>
-       )}</nav>
-       <p>Copy and settings save to your private app volume. No code deploy needed.</p>
+     <aside id="private-navigation" className={'admin-sidebar'+(menuOpen?' is-open':'')}>
+       <nav aria-label="Private app">
+         <button aria-current={section==='command-center'?'page':undefined} onClick={()=>navigate({section:'command-center'})}>Home</button>
+         <button aria-current={section==='Job search'&&currentView==='My Career'?'page':undefined} onClick={()=>navigate({section:'Job search',view:'My Career'})}>My Career</button>
+         <h2>Job search</h2>
+         {careerViews.map(view=><button key={view} aria-current={section==='Job search'&&currentView===view?'page':undefined}
+           onClick={()=>navigate({section:'Job search',view})}>{view==='Sources'?'Sources & imports':view==='Connections'?'Connections':view}</button>)}
+         <h2>Admin tools</h2>
+         {adminSections.map(name=><button key={name} aria-current={section===name?'page':undefined}
+           onClick={()=>navigate({section:name})}>{name}</button>)}
+       </nav>
      </aside>
-     <main className="admin-main">
-       <div className="admin-heading"><div><span className="admin-eyebrow">PORTFOLIO CONTROL ROOM</span><h1>{sectionLabel(section)}</h1></div>{dirty&&<span className="admin-dirty">Unsaved changes</span>}</div>
+     <main className="admin-main" id="private-content">
+       {section!=='command-center'&&section!=='Job search'&&<div className="admin-heading"><h1>{locationLabel}</h1></div>}
+       {dirty&&<span className="admin-dirty" role="status">Unsaved changes</span>}
+       {!route.record&&lastRecord.current&&<button className="private-return" onClick={()=>navigate(lastRecord.current!)}>Return to record</button>}
        {notice&&<div className="admin-notice" role="status">{notice}<button aria-label="Dismiss message" onClick={()=>setNotice('')}>×</button></div>}
  {section==='command-center'&&<CommandCenter api={api} onOpenMyCareer={()=>openMyCareer()}
    onOpenRecord={openMyCareer} returnCardId={route.card} selectedCardId={route.selectedCard}
@@ -109,7 +126,7 @@ export default function AdminPortal(){
  {section==='Visit reports'&&<Reports api={api}/>}
  {section==='Contact & guide'&&<SettingsEditor config={config} busy={busy} dirty={()=>setDirty(true)} save={save} api={api}/>}
  {section==='Learning studio'&&<div className="admin-card"><LearningStudio api={api} seed={null}/></div>}
- {section==='Job search'&&<JobCRM api={api} dirty={setDirty} route={route} onRoute={pushRoute}/>}
+ {section==='Job search'&&<JobCRM embedded api={api} dirty={setDirty} route={route} onRoute={pushRoute}/>}
  {section==='System'&&<System config={config}/>}
  </main></div></div></CareerChatSession>;
 }
