@@ -376,6 +376,23 @@ def overview(store):
     initialize(store)
     with store.connect() as db:
         records=visible_records(db)
+        # Correspondence storage is initialized on first use. Older CRM stores
+        # can have manually recorded outreach without a captured message.
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='crm_messages'").fetchone():
+            receipts = db.execute("""
+                SELECT activity_id, id, occurred_at, json_extract(body, '$.recipients') AS recipients
+                FROM crm_messages
+                WHERE provider='linkedin' AND direction='outbound' AND activity_id!=''
+            """)
+            by_activity = {
+                r['activity_id']: {
+                    'id': r['id'], 'occurred_at': r['occurred_at'],
+                    'recipients': [p.get('name') or p.get('profile_url') or p.get('email') for p in json.loads(r['recipients'] or '[]')],
+                } for r in receipts
+            }
+            for record in records:
+                if record['id'] in by_activity:
+                    record['outreach_receipt'] = by_activity[record['id']]
         sources=[]
         for s in db.execute('SELECT * FROM crm_sources ORDER BY created DESC'):
             candidates=[]
