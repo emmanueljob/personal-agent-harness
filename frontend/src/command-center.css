@@ -12,3 +12,10 @@
 .cc-actions {display:flex; flex-wrap:wrap; gap:8px; margin:12px 0 0}
 .command-center label {display:block; margin:12px 0}
 @media (max-width:800px) {.cc-layout {grid-template-columns:minmax(0,1fr)}}
+.command-center {max-width:1000px}
+.command-center .cc-chat {margin-top:24px}
+.command-center .cc-toolbar label {margin:0; min-width:180px}
+.command-center .cc-actions {margin-bottom:12px}
+.command-center .cc-card h2 {margin-top:8px}
+@media (max-width:520px) {.cc-header,.cc-toolbar {align-items:flex-start;flex-wrap:wrap}.cc-actions button {flex:1 1 auto}}
+.command-center .cc-result {white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;padding:12px;background:var(--admin-bg,#f4f3ee);border-radius:8px}
