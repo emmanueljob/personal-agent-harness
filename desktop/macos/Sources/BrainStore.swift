@@ -94,6 +94,27 @@ final class BrainStore {
         try sql.run("BEGIN IMMEDIATE")
         do {
             for record in records {
+                // Repair adds decoder state after import. Compare the source
+                // semantically so Python/Swift JSON serialization cannot churn
+                // the revision of an unchanged repaired message.
+                if record.kind == "message",
+                   record.metadata["body_status"] == "rich_body_or_attachment_not_decoded",
+                   let raw = record.metadata["attributed_hex"], !raw.isEmpty,
+                   let stored = try sql.rows("SELECT payload FROM evidence WHERE id=?", [record.id]).first?["payload"] {
+                    let previous = try JSONDecoder().decode(Evidence.self, from: Data(stored.utf8))
+                    var incomingMetadata = record.metadata
+                    var storedMetadata = previous.metadata
+                    for key in ["decode_attempt", "decoder_version", "body_status"] {
+                        incomingMetadata.removeValue(forKey: key)
+                        storedMetadata.removeValue(forKey: key)
+                    }
+                    if previous.metadata["decode_attempt"] != nil,
+                       previous.source == record.source, previous.kind == record.kind,
+                       previous.title == record.title, previous.occurred == record.occurred,
+                       incomingMetadata == storedMetadata {
+                        continue
+                    }
+                }
                 let payload = try encode(record)
                 let hash = SHA256.hash(data: Data(payload.utf8)).map { String(format: "%02x", $0) }.joined()
                 try sql.run("INSERT INTO evidence(id,source,kind,title,body,occurred,payload,hash) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET source=excluded.source,kind=excluded.kind,title=excluded.title,body=excluded.body,occurred=excluded.occurred,payload=excluded.payload,hash=excluded.hash,revision=evidence.revision+1 WHERE evidence.hash<>excluded.hash", [record.id, record.source, record.kind, record.title, record.body, String(record.occurred), payload, hash])
