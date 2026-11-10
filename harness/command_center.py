@@ -86,9 +86,10 @@ def card(row, today):
     source = f'{provider} message' if provider else row['certainty'].replace('_', ' ')
     return {
         'id': row['id'], 'revision': row['revision'], 'kind': row['kind'],
-        'title': record.get('title') or record['name'], 'company': row['company'] or '',
-        'companyId': record.get('company_id', ''), 'person': row['person'] or '',
-        'personId': record.get('person_id', ''), 'stage': stage, 'action': action,
+        'title': record.get('title') or record['name'], 'company': record['name'] if row['kind'] == 'company' else row['company'] or '',
+        'companyId': row['id'] if row['kind'] == 'company' else record.get('company_id', ''),
+        'person': record['name'] if row['kind'] == 'person' else row['person'] or '',
+        'personId': row['id'] if row['kind'] == 'person' else record.get('person_id', ''), 'stage': stage, 'action': action,
         'why': why, 'source': source, 'evidence': evidence[:400],
         'date': (row['occurred_at'] or record.get('happened_on') or '')[:10],
         'sourceUrl': row['source_url'] or '', 'receiptId': row['receipt_id'],

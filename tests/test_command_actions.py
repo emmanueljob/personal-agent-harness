@@ -119,3 +119,20 @@ def test_review_brief_is_persisted_without_claiming_owner_completion(tmp_path, m
         assert client.get(path+'/execution', headers=AUTH).json()['result'] == result
         record = json.loads(store.query('SELECT body FROM crm_records WHERE id=?', (receipt['activity_id'],))[0]['body'])
         assert record['stage'] == 'replied'
+
+
+def test_company_and_person_cards_target_their_own_entities(tmp_path, monkeypatch):
+    module, store = admin_app(tmp_path, monkeypatch)
+    co = add(store, company('Fixture own company', next_action='Follow up'))
+    person = add(store, dict(kind='person', company_id=co, name='Fixture Contact', next_action='Follow up'))
+    with TestClient(module.app, base_url='https://testserver') as client:
+        for ident in (co, person):
+            info = client.get(ROOT+ident+'/execution', headers=AUTH).json()
+            assert info['supported'] and info['kind']=='draft_follow_up'
+            payload = {k: info[k] for k in ('kind','revision','dispositionVersion')}
+            result = client.post(ROOT+ident+'/execute', headers=AUTH,
+                                 json={**payload, 'request_id':'fixture-'+ident}).json()['result']
+            saved = store.query('SELECT body FROM crm_records WHERE id=?', (result['draftId'],))[0]
+            draft = json.loads(saved['body'])
+            assert draft['company_id']==co
+            assert draft['person_id']==(person if ident==person else '')
