@@ -97,8 +97,7 @@ def dossier(store, ident):
         if not row:raise ValueError('Record not found.')
         row=crm.record_row(row)
         related=[]
-        for other in db.execute('SELECT * FROM crm_records WHERE id NOT IN (SELECT alias_id FROM crm_redirects)'):
-            r=crm.record_row(other)
+        for r in crm.visible_records(db):
             if ident in [r['record'].get(f) for f in ('company_id','person_id','application_id')]:related.append(r)
         evidence=[]
         for candidate in db.execute('SELECT c.*,s.body AS source FROM crm_candidates c JOIN crm_sources s ON s.id=c.source_id WHERE c.accepted_id=?',(ident,)):
@@ -163,7 +162,8 @@ def tools(ctx):
     def read_job_workspace(query: str = '', kind: str = '', stage: str = '', offset: int = 0, limit: int = 20) -> dict:
         """Read CRM totals, source IDs and paginated records. Search full research notes. Use read_job_dossier for full evidence and history."""
         crm.initialize(ctx['store'])
-        rows=[crm.record_row(r) for r in ctx['store'].query('SELECT * FROM crm_records WHERE id NOT IN (SELECT alias_id FROM crm_redirects) ORDER BY updated DESC,id')]
+        with ctx['store'].connect() as db:
+            rows=crm.visible_records(db)
         from collections import Counter
         matching=[r for r in rows if (not kind or r['kind']==kind) and (not stage or r['record']['stage']==stage) and query.casefold() in json.dumps(r['record']).casefold()]
         offset=max(0,offset);end=offset+max(1,min(limit,30))

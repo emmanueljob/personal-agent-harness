@@ -1,0 +1,207 @@
+"""Owner home cards derived from current career records and their evidence."""
+import json
+from datetime import date, datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
+from pydantic import Field
+
+from . import career_email, correspondence, crm
+
+
+class Review(crm.Model):
+    revision: int = Field(ge=1)
+
+
+def initialize(store):
+    correspondence.initialize(store)
+    with store.connect() as db:
+        db.execute("""CREATE TABLE IF NOT EXISTS command_center_reviews (
+            record_id TEXT PRIMARY KEY, stage TEXT NOT NULL, next_action TEXT NOT NULL, follow_up TEXT)""")
+
+
+ROWS = """
+    SELECT r.id, r.kind, r.body, r.revision, r.evidence, r.certainty, r.updated,
+           json_extract(c.body,'$.name') AS company, json_extract(p.body,'$.name') AS person,
+           m.id AS receipt_id, m.provider, m.direction, m.occurred_at,
+           json_extract(m.body,'$.subject') AS subject,
+           substr(json_extract(m.body,'$.text'),1,400) AS excerpt,
+           json_extract(m.body,'$.source_url') AS source_url, seen.stage AS reviewed_stage,
+           EXISTS (SELECT 1 FROM crm_messages later WHERE later.provider=m.provider
+              AND later.account=m.account AND later.thread_id=m.thread_id AND later.direction='inbound'
+              AND later.occurred_at>m.occurred_at) AS has_reply
+    FROM crm_records r
+    LEFT JOIN crm_records c ON c.id=r.company_id
+    LEFT JOIN crm_records p ON p.id=json_extract(r.body,'$.person_id')
+    LEFT JOIN crm_messages m ON m.activity_id=r.id
+    LEFT JOIN command_center_reviews seen ON seen.record_id=r.id
+    WHERE r.id NOT IN (SELECT alias_id FROM crm_redirects)
+      AND (r.kind='activity' OR json_extract(r.body,'$.next_action')!=''
+                             OR json_extract(r.body,'$.follow_up') IS NOT NULL OR seen.record_id IS NOT NULL)
+"""
+
+
+def card(row, today):
+    record = json.loads(row['body'])
+    stage = record['stage']
+    if stage in ('cancelled', 'closed', 'withdrawn', 'rejected'):
+        return None
+    due = record.get('follow_up')
+    action = record.get('next_action') or ''
+    if due and not action:
+        action = 'Follow up'
+    why = ''
+    rank = 4
+    if action:
+        rank = 0 if due and due <= today else 2
+        why = f'Follow-up scheduled for {due}.' if due else 'My Career has a next step for this record.'
+    elif row['receipt_id'] and row['direction'] == 'outbound' and not row['has_reply']:
+        rank, action = 2, 'Check for a reply'
+        why = 'Outreach was sent. No later reply is recorded in this conversation.'
+    elif stage == 'replied':
+        rank, action, why = 1, 'Review the reply', 'A reply was recorded after outreach.'
+    elif stage in ('drafted', 'proposed'):
+        rank, action, why = 3, 'Review the plan', 'This activity is still in preparation.'
+    elif row['has_reply']:
+        why = 'A later reply is recorded in this conversation.'
+    else:
+        why = 'Recorded in My Career.'
+    reviewed = row['reviewed_stage'] == stage and not record.get('next_action') and not due
+    if reviewed:
+        action, rank, why = '', 4, 'The next step was marked done.'
+    evidence = row['excerpt'] or row['evidence'] or record.get('summary') or record.get('notes') or ''
+    provider = {'linkedin': 'LinkedIn', 'gmail': 'Gmail'}.get(row['provider'])
+    source = f'{provider} message' if provider else row['certainty'].replace('_', ' ')
+    return {
+        'id': row['id'], 'revision': row['revision'], 'kind': row['kind'],
+        'title': record.get('title') or record['name'], 'company': row['company'] or '',
+        'companyId': record.get('company_id', ''), 'person': row['person'] or '',
+        'personId': record.get('person_id', ''), 'stage': stage, 'action': action,
+        'why': why, 'source': source, 'evidence': evidence[:400],
+        'date': (row['occurred_at'] or record.get('happened_on') or '')[:10],
+        'sourceUrl': row['source_url'] or '', 'receiptId': row['receipt_id'],
+        'rank': rank, 'reviewed': reviewed, 'due': due,
+    }
+
+
+def import_cards(db):
+    """Show the latest status per report without exposing report bodies or worker errors."""
+    rows = db.execute("""SELECT s.id, s.created, json_extract(s.body,'$.title') AS title,
+               s.provider, count(*) AS total,
+               sum(CASE WHEN t.status='failed' THEN 1 ELSE 0 END) AS failed,
+               sum(CASE WHEN t.status='completed' THEN 1 ELSE 0 END) AS completed,
+               sum(CASE WHEN t.status IN ('running','queued') THEN 1 ELSE 0 END) AS active
+        FROM crm_import_jobs j JOIN crm_sources s ON s.id=j.source_id
+        LEFT JOIN turns t ON t.id=j.turn_id GROUP BY s.id
+        ORDER BY s.created DESC, s.id""")
+    for row in rows:
+        if row['failed']:
+            stage, rank, why = 'failed', 0, 'Part of this career report could not be imported.'
+        elif row['completed'] == row['total']:
+            stage, rank, why = 'completed', 4, 'The career report finished importing.'
+        elif row['active']:
+            stage, rank, why = 'working', 3, 'Your agent is importing this career report.'
+        else:
+            stage, rank, why = 'waiting', 3, 'This career report is waiting for a model.'
+        entry = {
+            'id': 'import-' + row['id'], 'kind': 'import', 'revision': 0,
+            'title': row['title'], 'company': '', 'companyId': '', 'person': '', 'personId': '',
+            'stage': stage, 'action': '', 'why': why, 'source': row['provider'] + ' career report',
+            'evidence': f"{row['completed']} of {row['total']} parts completed; {row['failed']} failed.",
+            'date': datetime.fromtimestamp(row['created'], timezone.utc).date().isoformat(),
+            'sourceUrl': '', 'receiptId': None, 'rank': rank, 'reviewed': False, 'due': None,
+        }
+        yield ((rank, '9999', -row['created'], entry['id']), entry)
+
+
+def feed(store):
+    initialize(store)
+    today = date.today().isoformat()
+    ranked = []
+    with store.connect() as db:
+        db.execute('BEGIN')
+        hidden = career_email.hidden_activity_ids(db)
+        for row in db.execute(ROWS):
+            if row['id'] in hidden:
+                continue
+            entry = card(row, today)
+            if entry:
+                ranked.append(((entry['rank'], entry['due'] or '9999', -row['updated'], entry['id']), entry))
+        ranked.extend(import_cards(db))
+    ranked.sort(key=lambda item: item[0])
+    return {'cards': [entry for _, entry in ranked[:40]]}
+
+
+def mark_done(store, ident, revision):
+    initialize(store)
+    with store.connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        row = db.execute(ROWS + ' AND r.id=?', (ident,)).fetchone()
+        if not row or ident in career_email.hidden_activity_ids(db):
+            raise HTTPException(404, 'This card is no longer available.')
+        if row['revision'] != revision:
+            raise HTTPException(409, 'The record changed. Refresh before completing this step.')
+        entry = card(row, date.today().isoformat())
+        if not entry or not (entry['action'] or entry['reviewed']):
+            raise HTTPException(409, 'This step is no longer pending.')
+        record = json.loads(row['body'])
+        if entry['reviewed']:
+            return {'id': ident, 'revision': revision}
+        previous_action, previous_due = record.get('next_action', ''), record.get('follow_up')
+        if previous_action or previous_due:
+            record.update(next_action='', follow_up=None)
+            crm.write_record(db, record, ident, revision)
+            revision += 1
+        db.execute('INSERT OR REPLACE INTO command_center_reviews VALUES (?,?,?,?)',
+                   (ident, record['stage'], previous_action, previous_due))
+    return {'id': ident, 'revision': revision}
+
+
+def reopen(store, ident, revision):
+    initialize(store)
+    with store.connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        row = db.execute(ROWS + ' AND r.id=?', (ident,)).fetchone()
+        if not row or ident in career_email.hidden_activity_ids(db):
+            raise HTTPException(404, 'This card is no longer available.')
+        entry = card(row, date.today().isoformat())
+        if not entry or not entry['reviewed'] or row['revision'] != revision:
+            raise HTTPException(409, 'The record changed. Refresh before reopening this step.')
+        previous = db.execute('SELECT next_action, follow_up FROM command_center_reviews WHERE record_id=?',
+                              (ident,)).fetchone()
+        if previous['next_action'] or previous['follow_up']:
+            record = json.loads(row['body'])
+            record.update(next_action=previous['next_action'], follow_up=previous['follow_up'])
+            crm.write_record(db, record, ident, revision)
+        db.execute('DELETE FROM command_center_reviews WHERE record_id=?', (ident,))
+    return {'id': ident}
+
+
+def mount(app, get_store, owner):
+    router = APIRouter(prefix='/api/admin/command-center', dependencies=[Depends(owner)],
+                       include_in_schema=False)
+
+    def private(data):
+        return JSONResponse(data, headers={'Cache-Control': 'private, no-store'})
+
+    @router.get('')
+    def home():
+        return private(feed(get_store()))
+
+    @router.get('/contacts')
+    def contacts():
+        store = get_store()
+        crm.initialize(store)
+        return private(store.query("""SELECT id,kind,company_id,json_extract(body,'$.name') AS name
+            FROM crm_records WHERE kind IN ('company','person')
+              AND id NOT IN (SELECT alias_id FROM crm_redirects) ORDER BY name,id"""))
+
+    @router.post('/cards/{ident}/complete')
+    def complete(ident: str, body: Review):
+        return private(mark_done(get_store(), ident, body.revision))
+
+    @router.post('/cards/{ident}/reopen')
+    def undo(ident: str, body: Review):
+        return private(reopen(get_store(), ident, body.revision))
+
+    app.include_router(router)
