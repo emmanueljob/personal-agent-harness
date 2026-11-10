@@ -186,7 +186,7 @@ def decode_message(value,account):
         for child in part.get('parts',[]):result.extend(parts(child))
         return result
     content=parts(payload);plain=[text for kind,text in content if kind=='text/plain'];text='\n\n'.join(plain or [text for _,text in content]);sender=addresses(headers.get('from',''))
-    return mail.Message(provider='gmail',account=account,external_id=value['id'],thread_id=value['threadId'],direction='outbound' if 'SENT' in value.get('labelIds',[]) else 'inbound',occurred_at=datetime.fromtimestamp(int(value['internalDate'])/1000,timezone.utc),sender=sender[0] if sender else mail.Address(),recipients=(addresses(headers.get('to',''))+addresses(headers.get('cc','')))[:100],subject=headers.get('subject','')[:1000],text=text[:50000],truncated=len(text)>50000,automated=headers.get('auto-submitted','no').casefold()!='no',source_url='https://mail.google.com/mail/?'+urlencode({'authuser':account})+'#all/'+value['threadId'])
+    return mail.Message(provider='gmail',account=account,external_id=value['id'],thread_id=value['threadId'],direction='outbound' if 'SENT' in value.get('labelIds',[]) else 'inbound',occurred_at=datetime.fromtimestamp(int(value['internalDate'])/1000,timezone.utc),sender=sender[0] if sender else mail.Address(),recipients=(addresses(headers.get('to',''))+addresses(headers.get('cc','')))[:100],subject=headers.get('subject','')[:1000],text=text[:50000],truncated=len(text)>50000,mailing_list=bool(headers.get('list-id')),automated=headers.get('auto-submitted','no').casefold()!='no',source_url='https://mail.google.com/mail/?'+urlencode({'authuser':account})+'#all/'+value['threadId'])
 
 
 def scope_terms(store):

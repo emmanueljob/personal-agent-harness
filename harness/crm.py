@@ -186,6 +186,7 @@ def initialize(store):
         CREATE TABLE IF NOT EXISTS crm_workspace(id INTEGER PRIMARY KEY CHECK(id=1), thread_id TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS crm_import_issues(source_id TEXT NOT NULL,key TEXT NOT NULL,message TEXT NOT NULL,updated REAL NOT NULL,PRIMARY KEY(source_id,key));
         CREATE TABLE IF NOT EXISTS crm_import_jobs(source_id TEXT NOT NULL,offset INTEGER NOT NULL,end_offset INTEGER NOT NULL,turn_id TEXT UNIQUE,PRIMARY KEY(source_id,offset));
+        CREATE TABLE IF NOT EXISTS crm_email_visibility(item_id TEXT PRIMARY KEY,hidden INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS crm_redirects(alias_id TEXT PRIMARY KEY,record_id TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS crm_history_record ON crm_changes(record_id,revision);
 
@@ -354,10 +355,27 @@ def collect_grok(store):
     return {'reports_available':count}
 
 
+def visible_records(db, *, hidden=False):
+    from .career_email import activity_decisions
+    decisions = activity_decisions(db)
+    records = []
+    for row in db.execute('SELECT * FROM crm_records WHERE id NOT IN (SELECT alias_id FROM crm_redirects) ORDER BY updated DESC,id'):
+        visibility = decisions.get(row['id'])
+        if visibility and not visibility.get('reviewable', True):
+            continue
+        if bool(visibility and visibility['hidden']) != hidden:
+            continue
+        value = record_row(row)
+        if visibility:
+            value['visibility'] = visibility
+        records.append(value)
+    return records
+
+
 def overview(store):
     initialize(store)
     with store.connect() as db:
-        records=[record_row(r) for r in db.execute('SELECT * FROM crm_records WHERE id NOT IN (SELECT alias_id FROM crm_redirects) ORDER BY updated DESC')]
+        records=visible_records(db)
         sources=[]
         for s in db.execute('SELECT * FROM crm_sources ORDER BY created DESC'):
             candidates=[]
@@ -390,12 +408,13 @@ def tools(ctx):
     def search_job_crm(query: str = '') -> str:
         """Read accepted private job-search CRM records. SQLite is authoritative; search by company, person, stage or role."""
         initialize(ctx['store'])
-        rows=ctx['store'].query('SELECT * FROM crm_records WHERE id NOT IN (SELECT alias_id FROM crm_redirects) ORDER BY updated DESC')
+        with ctx['store'].connect() as db:
+            rows=visible_records(db)
         query=query.casefold()
         result=[]
         for r in rows:
-            if query in r['body'].casefold():
-                value=record_row(r)
+            if query in json.dumps(r['record']).casefold():
+                value=r
                 if len(json.dumps(result+[value]))>24000:
                     continue
                 result.append(value)
@@ -460,6 +479,26 @@ def mount(app,get_store,owner):
             return private(fn(get_store(),*args))
         except ValueError as e:
             raise HTTPException(409,str(e)) from e
+
+    from . import career_email
+
+    @router.get('/hidden-email-activities')
+    def hidden_email_activities():
+        store = get_store()
+        initialize(store)
+        with store.connect() as db:
+            return private(visible_records(db, hidden=True))
+
+    @router.post('/records/{ident}/visibility')
+    def activity_visibility(ident:str, body:career_email.VisibilityEdit):
+        store = get_store()
+        initialize(store)
+        with store.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            choice = career_email.activity_decisions(db).get(ident)
+            if not choice or not choice.get('reviewable', True):raise HTTPException(404,'Email activity not found.')
+            career_email.set_override(db, choice.get('message_id', ident), body.hidden)
+        return private({'id':ident,'hidden':body.hidden})
 
     @router.get('')
     def read():
