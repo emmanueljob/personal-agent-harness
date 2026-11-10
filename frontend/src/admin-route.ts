@@ -1,10 +1,11 @@
 import {useEffect, useRef, useState} from 'react';
 
-export type AdminRoute = {section: string; view?: string; record?: string; card?: string; selectedCard?: string};
+export type AdminRoute = {section: string; view?: string; record?: string; card?: string; selectedCard?: string; returnRecord?: string; returnView?: string};
 export function readAdminRoute(): AdminRoute {
   const params = new URLSearchParams(location.hash.slice(1));
   return {section: params.get('section') || 'command-center', view: params.get('view') || undefined,
-    record: params.get('record') || undefined, card: params.get('card') || undefined, selectedCard: params.get('selectedCard') || undefined};
+    record: params.get('record') || undefined, card: params.get('card') || undefined, selectedCard: params.get('selectedCard') || undefined,
+    returnRecord: params.get('returnRecord') || undefined, returnView: params.get('returnView') || undefined};
 }
 function routeUrl(route: AdminRoute) {
   const params = new URLSearchParams();
@@ -31,7 +32,11 @@ export function useAdminRoute(leave: () => boolean) {
     window.addEventListener('popstate', pop);
     return () => window.removeEventListener('popstate', pop);
   }, []);
-  const push = (next: AdminRoute) => {
+  const push = (destination: AdminRoute) => {
+    const previousView = route.record ? route.view || 'Overview' : route.returnView;
+    const next = {...destination,
+      returnRecord: destination.record || destination.returnRecord || route.record || route.returnRecord,
+      returnView: destination.record ? destination.view || 'Overview' : destination.returnView || previousView};
     if (routeUrl(next) === location.pathname + location.search + location.hash) return;
     position.current += 1;
     history.pushState({adminPosition: position.current}, '', routeUrl(next));

@@ -1,4 +1,4 @@
-import React,{useCallback,useEffect,useRef,useState} from 'react';
+import React,{useCallback,useEffect,useState} from 'react';
 import type {Portfolio} from './portfolio';
 import {LearningStudio} from './learning';
 import './admin.css';
@@ -60,8 +60,9 @@ export default function AdminPortal(){
    return true;
  });
  const [menuOpen, setMenuOpen] = useState(false);
- const lastRecord = useRef<AdminRoute | undefined>(undefined);
- useEffect(() => {if (route.section === 'Job search' && route.record) lastRecord.current = route}, [route]);
+ const returnTarget: AdminRoute | undefined = route.returnRecord
+   ? {section: 'Job search', view: route.returnView || 'Overview', record: route.returnRecord}
+   : undefined;
  const section: Section = sections.includes(route.section as Section) ? route.section as Section : 'command-center';
  const navigate = (next: AdminRoute) => {
    if (next.section === section && (next.view || 'Overview') === (route.view || 'Overview') && next.record === route.record) {
@@ -79,7 +80,7 @@ export default function AdminPortal(){
    setBusy(true);
    try {
      await api('/admin/session', 'DELETE');
-     setConfig(null); setDirty(false); setNotice(''); lastRecord.current = undefined;
+     setConfig(null); setDirty(false); setNotice('');
    } catch (error) {setNotice((error as Error).message)}
    finally {setBusy(false)}
  };
@@ -113,7 +114,7 @@ export default function AdminPortal(){
      <main className="admin-main" id="private-content">
        {section!=='command-center'&&section!=='Job search'&&<div className="admin-heading"><h1>{locationLabel}</h1></div>}
        {dirty&&<span className="admin-dirty" role="status">Unsaved changes</span>}
-       {!route.record&&lastRecord.current&&<button className="private-return" onClick={()=>navigate(lastRecord.current!)}>Return to record</button>}
+       {!route.record&&returnTarget&&<button className="private-return" onClick={()=>navigate(returnTarget)}>Return to record</button>}
        {notice&&<div className="admin-notice" role="status">{notice}<button aria-label="Dismiss message" onClick={()=>setNotice('')}>×</button></div>}
  {section==='command-center'&&<CommandCenter api={api} onOpenMyCareer={()=>openMyCareer()}
    onOpenRecord={openMyCareer} returnCardId={route.card} selectedCardId={route.selectedCard}
