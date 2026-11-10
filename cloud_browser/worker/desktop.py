@@ -8,6 +8,7 @@ import asyncio
 import contextlib
 import json
 import os
+import pwd
 import secrets
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -22,7 +23,7 @@ KEYS={'Enter':'Return','Tab':'Tab','Backspace':'BackSpace','Escape':'Escape','Co
 
 def browser_environment(root):
     # Never give browser/desktop children the worker or CRM bearer credentials.
-    return {'PATH':os.environ.get('PATH','/usr/local/bin:/usr/bin:/bin'),'HOME':str(Path.home()),'LANG':'en_US.UTF-8','DISPLAY':':99','XAUTHORITY':str(root/'xauthority'),'XDG_RUNTIME_DIR':str(root/'run')}
+    return {'PATH':os.environ.get('PATH','/usr/local/bin:/usr/bin:/bin'),'HOME':pwd.getpwuid(os.getuid()).pw_dir,'LANG':'en_US.UTF-8','DISPLAY':':99','XAUTHORITY':str(root/'xauthority'),'XDG_RUNTIME_DIR':str(root/'run')}
 
 
 def chrome_command(root):
@@ -85,10 +86,11 @@ class Desktop:
     def healthy(self):return bool(self.processes) and all(p.returncode is None for p in self.processes)
 
     async def close(self):
+        # Preserve the display while Chrome exits and commits its profile. Killing
+        # Xvfb first can turn a normal shutdown into a browser crash.
         for process in reversed(self.processes):
             if process.returncode is None:
                 with contextlib.suppress(ProcessLookupError):process.terminate()
-        for process in reversed(self.processes):
             try:await asyncio.wait_for(process.wait(),8)
             except asyncio.TimeoutError:
                 with contextlib.suppress(ProcessLookupError):process.kill()

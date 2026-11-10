@@ -32,8 +32,15 @@ def thread_urn(urn):return 'urn:li:messagingThread:'+bare_thread(urn)
 
 
 def me(value):
-    mini=value.get('miniProfile') or value.get('data',{}).get('miniProfile') or {}
-    urn=profile(mini.get('entityUrn'))
+    scope=value.get('data') if isinstance(value.get('data'),dict) else value
+    mini=scope.get('miniProfile')
+    reference=scope.get('*miniProfile')
+    if reference:
+        candidates=[row for row in value.get('included',[]) if isinstance(row,dict) and row.get('entityUrn')==reference]
+        if len(candidates)!=1:raise SchemaError('Signed-in profile reference could not be resolved.')
+        if mini and mini.get('entityUrn')!=reference:raise SchemaError('Signed-in profile identities disagree.')
+        mini=candidates[0]
+    urn=profile(mini.get('entityUrn')) if isinstance(mini,dict) else ''
     if not re.fullmatch(r'urn:li:fsd_profile:[A-Za-z0-9_-]+',urn):raise SchemaError('Cannot identify the signed-in LinkedIn account.')
     return urn
 
