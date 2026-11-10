@@ -1,6 +1,6 @@
 """Owner home cards derived from current career records and their evidence."""
 import json
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
@@ -14,11 +14,22 @@ class Review(crm.Model):
     revision: int = Field(ge=1)
 
 
+class Disposition(crm.Model):
+    revision: int = Field(ge=0)
+    disposition_version: int = Field(ge=0)
+    state: Literal['done', 'later', 'dismissed', 'active']
+    request_id: str = Field(min_length=8, max_length=100)
+
+
 def initialize(store):
     correspondence.initialize(store)
     with store.connect() as db:
         db.execute("""CREATE TABLE IF NOT EXISTS command_center_reviews (
             record_id TEXT PRIMARY KEY, stage TEXT NOT NULL, next_action TEXT NOT NULL, follow_up TEXT)""")
+        db.execute('''CREATE TABLE IF NOT EXISTS command_center_dispositions (
+            card_id TEXT PRIMARY KEY, version INTEGER NOT NULL, state TEXT NOT NULL, resume_at TEXT)''')
+        db.execute('''CREATE TABLE IF NOT EXISTS command_center_disposition_requests (
+            request_id TEXT PRIMARY KEY, payload TEXT NOT NULL, result TEXT NOT NULL)''')
 
 
 ROWS = """
@@ -75,9 +86,10 @@ def card(row, today):
     source = f'{provider} message' if provider else row['certainty'].replace('_', ' ')
     return {
         'id': row['id'], 'revision': row['revision'], 'kind': row['kind'],
-        'title': record.get('title') or record['name'], 'company': row['company'] or '',
-        'companyId': record.get('company_id', ''), 'person': row['person'] or '',
-        'personId': record.get('person_id', ''), 'stage': stage, 'action': action,
+        'title': record.get('title') or record['name'], 'company': record['name'] if row['kind'] == 'company' else row['company'] or '',
+        'companyId': row['id'] if row['kind'] == 'company' else record.get('company_id', ''),
+        'person': record['name'] if row['kind'] == 'person' else row['person'] or '',
+        'personId': row['id'] if row['kind'] == 'person' else record.get('person_id', ''), 'stage': stage, 'action': action,
         'why': why, 'source': source, 'evidence': evidence[:400],
         'date': (row['occurred_at'] or record.get('happened_on') or '')[:10],
         'sourceUrl': row['source_url'] or '', 'receiptId': row['receipt_id'],
@@ -126,7 +138,19 @@ def ranked_cards(db, hidden):
             ranked.append(((entry['rank'], entry['due'] or '9999', -row['updated'], entry['id']), entry))
     ranked.extend(import_cards(db))
     ranked.sort(key=lambda item: item[0])
-    return [entry for _, entry in ranked]
+    dispositions = {row['card_id']: row for row in db.execute('SELECT * FROM command_center_dispositions')}
+    now = datetime.now(timezone.utc).isoformat()
+    entries = []
+    for _, entry in ranked:
+        saved = dispositions.get(entry['id'])
+        state = saved['state'] if saved else 'active'
+        if state == 'later' and saved['resume_at'] <= now:
+            state = 'active'
+        entry.update(disposition='done' if entry['reviewed'] else state,
+                     dispositionVersion=saved['version'] if saved else 0,
+                     resumeAt=saved['resume_at'] if state == 'later' else None)
+        entries.append(entry)
+    return entries
 
 
 def feed(store, scope='all', offset=0):
@@ -134,14 +158,18 @@ def feed(store, scope='all', offset=0):
     with store.connect() as db:
         db.execute('BEGIN')
         entries = ranked_cards(db, career_email.hidden_activity_ids(db))
-    entries = [entry for entry in entries if scope != 'completed' or entry['reviewed']]
+    entries = [entry for entry in entries if (
+        (scope == 'completed' and entry['reviewed'])
+        or (scope == 'review' and entry['disposition'] == 'active' and entry['action'])
+        or (scope in ('later', 'dismissed') and entry['disposition'] == scope)
+        or (scope == 'all' and entry['disposition'] in ('active', 'done')))]
     return {'cards': entries[offset:offset+40],
             'nextOffset': offset+40 if offset+40 < len(entries) else None}
 
 
 def chat_summary(entry):
     return {key: entry[key] for key in (
-        'id', 'title', 'company', 'person', 'stage', 'why', 'action', 'source', 'date', 'reviewed')}
+        'id', 'title', 'company', 'person', 'stage', 'why', 'action', 'source', 'date', 'reviewed', 'disposition', 'resumeAt')}
 
 
 def chat_evidence(db, selected_id='', previous_ids=()):
@@ -160,64 +188,112 @@ def chat_evidence(db, selected_id='', previous_ids=()):
         if current_id in hidden:
             references.append({'id': ident, 'eligibility': 'hidden', 'action': ''})
         elif current_id in by_id:
-            references.append({'requestedId': ident, 'eligibility': 'visible',
+            references.append({'requestedId': ident, 'eligibility': 'visible' if by_id[current_id]['disposition'] in ('active', 'done') else by_id[current_id]['disposition'],
                                **chat_summary(by_id[current_id]),
                                'evidence': by_id[current_id]['evidence'] if ident == selected_id else ''})
         else:
             references.append({'id': ident, 'eligibility': 'unavailable', 'action': ''})
+    eligible = [entry for entry in entries if entry['disposition'] in ('active', 'done')]
     return {
         'surface': 'command-center',
         'asOf': datetime.now(timezone.utc).isoformat(),
-        'coverage': {'visibleCards': len(entries), 'includedCards': min(8, len(entries)),
-                     'complete': len(entries) <= 8},
-        'cards': [chat_summary(entry) for entry in entries[:8]],
+        'coverage': {'visibleCards': len(eligible), 'includedCards': min(8, len(eligible)),
+                     'complete': len(eligible) <= 8},
+        'cards': [chat_summary(entry) for entry in eligible[:8]],
         'references': references,
     }
+
+
+def complete_step(db, ident, revision):
+    row = db.execute(ROWS + ' AND r.id=?', (ident,)).fetchone()
+    if not row or ident in career_email.hidden_activity_ids(db):
+        raise HTTPException(404, 'This card is no longer available.')
+    if row['revision'] != revision:
+        raise HTTPException(409, 'The record changed. Refresh before completing this step.')
+    entry = card(row, date.today().isoformat())
+    if not entry or not (entry['action'] or entry['reviewed']):
+        raise HTTPException(409, 'This step is no longer pending.')
+    record = json.loads(row['body'])
+    if entry['reviewed']:
+        return {'id': ident, 'revision': revision}
+    previous_action, previous_due = record.get('next_action', ''), record.get('follow_up')
+    if previous_action or previous_due:
+        record.update(next_action='', follow_up=None)
+        crm.write_record(db, record, ident, revision)
+        revision += 1
+    db.execute('INSERT OR REPLACE INTO command_center_reviews VALUES (?,?,?,?)',
+               (ident, record['stage'], previous_action, previous_due))
+    return {'id': ident, 'revision': revision}
+
+
+def reopen_step(db, ident, revision):
+    row = db.execute(ROWS + ' AND r.id=?', (ident,)).fetchone()
+    if not row or ident in career_email.hidden_activity_ids(db):
+        raise HTTPException(404, 'This card is no longer available.')
+    entry = card(row, date.today().isoformat())
+    if not entry or not entry['reviewed'] or row['revision'] != revision:
+        raise HTTPException(409, 'The record changed. Refresh before reopening this step.')
+    previous = db.execute('SELECT next_action, follow_up FROM command_center_reviews WHERE record_id=?',
+                          (ident,)).fetchone()
+    if previous['next_action'] or previous['follow_up']:
+        record = json.loads(row['body'])
+        record.update(next_action=previous['next_action'], follow_up=previous['follow_up'])
+        crm.write_record(db, record, ident, revision)
+    db.execute('DELETE FROM command_center_reviews WHERE record_id=?', (ident,))
+    return {'id': ident}
 
 
 def mark_done(store, ident, revision):
     initialize(store)
     with store.connect() as db:
         db.execute('BEGIN IMMEDIATE')
-        row = db.execute(ROWS + ' AND r.id=?', (ident,)).fetchone()
-        if not row or ident in career_email.hidden_activity_ids(db):
-            raise HTTPException(404, 'This card is no longer available.')
-        if row['revision'] != revision:
-            raise HTTPException(409, 'The record changed. Refresh before completing this step.')
-        entry = card(row, date.today().isoformat())
-        if not entry or not (entry['action'] or entry['reviewed']):
-            raise HTTPException(409, 'This step is no longer pending.')
-        record = json.loads(row['body'])
-        if entry['reviewed']:
-            return {'id': ident, 'revision': revision}
-        previous_action, previous_due = record.get('next_action', ''), record.get('follow_up')
-        if previous_action or previous_due:
-            record.update(next_action='', follow_up=None)
-            crm.write_record(db, record, ident, revision)
-            revision += 1
-        db.execute('INSERT OR REPLACE INTO command_center_reviews VALUES (?,?,?,?)',
-                   (ident, record['stage'], previous_action, previous_due))
-    return {'id': ident, 'revision': revision}
+        return complete_step(db, ident, revision)
 
 
 def reopen(store, ident, revision):
     initialize(store)
     with store.connect() as db:
         db.execute('BEGIN IMMEDIATE')
-        row = db.execute(ROWS + ' AND r.id=?', (ident,)).fetchone()
-        if not row or ident in career_email.hidden_activity_ids(db):
+        return reopen_step(db, ident, revision)
+
+
+def resolve_card(db, ident):
+    from .crm_imports import canonical_id
+    current_id = canonical_id(db, ident)
+    return next((entry for entry in ranked_cards(db, career_email.hidden_activity_ids(db))
+                 if entry['id'] == current_id), None)
+
+
+def disposition(store, ident, body):
+    initialize(store)
+    payload = json.dumps({'id': ident, **body.model_dump()}, sort_keys=True)
+    with store.connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        previous = db.execute('SELECT * FROM command_center_disposition_requests WHERE request_id=?',
+                              (body.request_id,)).fetchone()
+        if previous:
+            if previous['payload'] != payload:
+                raise HTTPException(409, 'This request belongs to a different card decision.')
+            return json.loads(previous['result'])
+        entry = resolve_card(db, ident)
+        if not entry:
             raise HTTPException(404, 'This card is no longer available.')
-        entry = card(row, date.today().isoformat())
-        if not entry or not entry['reviewed'] or row['revision'] != revision:
-            raise HTTPException(409, 'The record changed. Refresh before reopening this step.')
-        previous = db.execute('SELECT next_action, follow_up FROM command_center_reviews WHERE record_id=?',
-                              (ident,)).fetchone()
-        if previous['next_action'] or previous['follow_up']:
-            record = json.loads(row['body'])
-            record.update(next_action=previous['next_action'], follow_up=previous['follow_up'])
-            crm.write_record(db, record, ident, revision)
-        db.execute('DELETE FROM command_center_reviews WHERE record_id=?', (ident,))
-    return {'id': ident}
+        if (entry['revision'], entry['dispositionVersion']) != (body.revision, body.disposition_version):
+            raise HTTPException(409, 'This card changed. Refresh before deciding.')
+        if body.state != 'active' and (entry['disposition'] != 'active' or not entry['action']):
+            raise HTTPException(409, 'This suggestion is no longer pending.')
+        if body.state == 'done':
+            complete_step(db, entry['id'], body.revision)
+        elif body.state == 'active' and entry['reviewed']:
+            reopen_step(db, entry['id'], body.revision)
+        resume_at = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat() if body.state == 'later' else None
+        version = entry['dispositionVersion'] + 1
+        db.execute('INSERT OR REPLACE INTO command_center_dispositions VALUES (?,?,?,?)',
+                   (entry['id'], version, 'active' if body.state == 'done' else body.state, resume_at))
+        result = {'id': entry['id'], 'dispositionVersion': version, 'state': body.state, 'resumeAt': resume_at}
+        db.execute('INSERT INTO command_center_disposition_requests VALUES (?,?,?)',
+                   (body.request_id, payload, json.dumps(result)))
+        return result
 
 
 def mount(app, get_store, owner):
@@ -228,8 +304,18 @@ def mount(app, get_store, owner):
         return JSONResponse(data, headers={'Cache-Control': 'private, no-store'})
 
     @router.get('')
-    def home(scope: Literal['all', 'completed'] = 'all', offset: int = Query(default=0, ge=0)):
+    def home(scope: Literal['all', 'review', 'completed', 'later', 'dismissed'] = 'all', offset: int = Query(default=0, ge=0)):
         return private(feed(get_store(), scope, offset))
+
+    @router.get('/cards/{ident}')
+    def detail(ident: str):
+        store = get_store()
+        initialize(store)
+        with store.connect() as db:
+            entry = resolve_card(db, ident)
+        if not entry:
+            raise HTTPException(404, 'This card is no longer available.')
+        return private(entry)
 
     @router.get('/contacts')
     def contacts():
@@ -246,5 +332,9 @@ def mount(app, get_store, owner):
     @router.post('/cards/{ident}/reopen')
     def undo(ident: str, body: Review):
         return private(reopen(get_store(), ident, body.revision))
+
+    @router.post('/cards/{ident}/disposition')
+    def decide(ident: str, body: Disposition):
+        return private(disposition(get_store(), ident, body))
 
     app.include_router(router)
