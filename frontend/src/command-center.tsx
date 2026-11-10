@@ -89,13 +89,17 @@ function CardExecution({api, card, busy, onBusy, open}: {
     } catch (e) {if (mounted.current) setError((e as Error).message)}
     finally {inFlight.current=false; onBusy(false)}
   }
+  const stale = execution && (execution.revision!==card.revision || execution.dispositionVersion!==card.dispositionVersion);
+  const alreadyExecuted = execution?.result && execution.result.revision===execution.revision
+    && execution.result.dispositionVersion===execution.dispositionVersion;
   return <section aria-label="Agent action">
     {error && <p role="alert">{error} <button disabled={busy} onClick={() => {pending.current=undefined; setReload(n => n+1)}}>Refresh action</button></p>}
     {!execution && !error && <p role="status">Checking available action…</p>}
     {execution && <>
       <p>{execution.label}</p>
+      {stale && <p role="alert">This card changed. Refresh the feed before asking the agent to act.</p>}
       {execution.reason && <p>{execution.reason}</p>}
-      <button className="admin-primary" disabled={busy || !execution.supported || !!execution.result}
+      <button className="admin-primary" disabled={busy || !execution.supported || !!alreadyExecuted || !!stale}
         onClick={() => void execute()}>Do it</button>
       {execution.result && <details open><summary>Agent result</summary>
         <p>{execution.result.summary}</p><p>{execution.result.scope}</p>
