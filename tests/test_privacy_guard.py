@@ -7,6 +7,14 @@ import pytest
 from scripts import privacy_guard as guard
 
 
+def test_swift_publication_is_limited_to_native_source_directory():
+    guard.check_path('desktop/macos/Sources/AccessProbe.swift', '100644')
+    for path in ('uploads/example.swift', 'desktop/macos/Info.plist',
+                 'desktop/macos/PersonalBrain.app/Contents/MacOS/PersonalBrain'):
+        with pytest.raises(guard.Blocked):
+            guard.check_path(path, '100644')
+
+
 @pytest.fixture
 def repo(tmp_path,monkeypatch):
     subprocess.run(['git','init','-q','-b','main',str(tmp_path)],check=True)
