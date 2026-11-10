@@ -1,4 +1,5 @@
 import os
+from contextlib import nullcontext
 import sqlite3
 import time
 import uuid
@@ -73,11 +74,11 @@ class Store:
             db.execute("INSERT INTO threads VALUES (?,?)", (ident, mode))
         return {"id": ident, "mode": mode}
 
-    def enqueue(self, thread_id, prompt, ident=None, profile_key="default", model_choice="default"):
+    def enqueue(self, thread_id, prompt, ident=None, profile_key="default", model_choice="default", connection=None):
         if model_choice not in ("default","openai","qwen"):
             raise ValueError("Unknown model choice")
         ident = ident or str(uuid.uuid4())
-        with self.connect() as db:
+        with (nullcontext(connection) if connection is not None else self.connect()) as db:
             db.execute("INSERT OR IGNORE INTO turns VALUES (?,?,?,'queued',NULL,NULL,?)", (ident, thread_id, prompt, time.time()))
             from .personalization import active_profiles
             db.execute("INSERT OR IGNORE INTO turn_personalization VALUES (?,?)", (ident, profile_key if profile_key in active_profiles() else 'default'))
