@@ -61,7 +61,7 @@ def test_home_evidence_resolved_at_send_and_frozen_on_retry(tmp_path, monkeypatc
     monkeypatch.setattr(conversations, 'availability', lambda *_: '')
     sent, resolved = [], []
     monkeypatch.setattr(grok, 'push_webhook', lambda payload: sent.append(payload) or 200)
-    state = {'cards': [{'id': 'synthetic-card', 'company': 'Original Company'}]}
+    state = {'surface': 'command-center', 'cards': [{'id': 'synthetic-card', 'company': 'Original Company'}]}
     def hydrate(db, selected_id='', previous_ids=None):
         assert db.in_transaction
         resolved.append((selected_id, previous_ids))
@@ -83,7 +83,7 @@ def test_home_evidence_resolved_at_send_and_frozen_on_retry(tmp_path, monkeypatc
         grok.acknowledge(store, task, 'synthetic-home-claim')
         grok.submit(store, task, 'synthetic-home-claim', grok.Result(
             submission_id='synthetic-home-result', outcome='completed', report='Historical Original Company'))
-        state = {'cards': [], 'statuses': [{'id':'synthetic-card', 'status':'hidden'}]}
+        state = {'surface': 'command-center', 'cards': [], 'statuses': [{'id':'synthetic-card', 'status':'hidden'}]}
         assert post(path, body)['turns'][0]['id'] == task
         assert len(resolved) == 1 and len(sent) == 1
         follow = post(path, {**body, 'request_id':'synthetic-home-next'})
@@ -95,3 +95,45 @@ def test_home_evidence_resolved_at_send_and_frozen_on_retry(tmp_path, monkeypatc
         post(ROOT+'/'+other+'/messages', body)
         assert resolved[-1] == ('', [])
         assert store.query('SELECT context FROM agent_turns WHERE id=?', (follow['turns'][-1]['id'],))[0]['context'] == marker
+
+
+def test_dispatch_uses_real_home_corrections_and_hidden_status(tmp_path, monkeypatch):
+    import json
+    from harness import command_center, conversations, correspondence
+    from test_command_center import add, company, message
+
+    module, store = setup(tmp_path, monkeypatch)
+    conversations.initialize(store)
+    monkeypatch.setattr(conversations, 'availability', lambda *_: '')
+    sent = []
+    monkeypatch.setattr(grok, 'push_webhook', lambda payload: sent.append(payload) or 200)
+    add(store, company('Fixture Instruments', domain='example.org'))
+    target = add(store, company('Corrected Fixture Studio'))
+    receipt = correspondence.ingest(store, message('home-reply', 'inbound'))
+    command_center.initialize(store)
+    with TestClient(module.app) as client:
+        ident = client.post(ROOT, headers=OWNER, json={'agent':'grokbot'}).json()['id']
+        for index in range(3):
+            context = {'surface':'command-center', 'card':receipt['activity_id'] if index == 0 else ''}
+            result = client.post(ROOT+'/'+ident+'/messages', headers=OWNER, json={
+                'request_id':f'synthetic-live-state-{index}', 'text':'What needs attention?',
+                'context':json.dumps(context)})
+            assert result.status_code == 200, result.text
+            evidence = json.loads(sent[-1]['instruction'].split('\n',1)[1])['current_evidence']
+            if index == 0:
+                assert evidence['references'][0]['company'] == 'Fixture Instruments'
+                correspondence.link(store, receipt['id'], target)
+            elif index == 1:
+                ref = next(r for r in evidence['references'] if r['id'] == receipt['activity_id'])
+                assert ref['company'] == 'Corrected Fixture Studio'
+                with store.connect() as db:
+                    db.execute('INSERT INTO crm_email_visibility(item_id,hidden) VALUES (?,1)', (receipt['id'],))
+            else:
+                ref = next(r for r in evidence['references'] if r['id'] == receipt['activity_id'])
+                assert ref == {'id':receipt['activity_id'], 'eligibility':'hidden', 'action':''}
+                assert receipt['activity_id'] not in [c['id'] for c in evidence['cards']]
+                assert 'Synthetic correspondence' not in json.dumps(evidence)
+            task = result.json()['turns'][-1]['id']
+            grok.acknowledge(store, task, 'synthetic-state-claim')
+            grok.submit(store, task, 'synthetic-state-claim', grok.Result(
+                submission_id=f'synthetic-state-result-{index}', outcome='completed', report='Synthetic answer'))

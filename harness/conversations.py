@@ -88,8 +88,10 @@ def current_evidence(db, ident, raw):
     for row in rows:
         old = context_object(row['context'])
         evidence = context_object(row['prompt'].split('\n', 1)[-1]).get('current_evidence')
-        cards = evidence.get('cards', []) if isinstance(evidence, dict) else []
-        ids = [old.get('card')] + [c.get('id') for c in cards if isinstance(c, dict)]
+        entries = []
+        if isinstance(evidence, dict) and evidence.get('surface') == 'command-center':
+            entries = evidence.get('references', []) + evidence.get('cards', [])
+        ids = [old.get('card')] + [c.get('requestedId') or c.get('id') for c in entries if isinstance(c, dict)]
         for card in ids:
             if isinstance(card, str) and card and len(card) <= 200 and card not in previous_ids:
                 previous_ids.append(card)
