@@ -137,3 +137,54 @@ def test_dispatch_uses_real_home_corrections_and_hidden_status(tmp_path, monkeyp
             grok.acknowledge(store, task, 'synthetic-state-claim')
             grok.submit(store, task, 'synthetic-state-claim', grok.Result(
                 submission_id=f'synthetic-state-result-{index}', outcome='completed', report='Synthetic answer'))
+
+
+def test_selected_card_snapshot_guard_and_accepted_retry(tmp_path, monkeypatch):
+    import json
+    from harness import command_center, conversations, crm
+    from test_command_center import add, company
+
+    module, store = setup(tmp_path, monkeypatch)
+    conversations.initialize(store)
+    monkeypatch.setattr(conversations, 'availability', lambda *_: '')
+    sent = []
+    monkeypatch.setattr(grok, 'push_webhook', lambda payload: sent.append(payload) or 200)
+    card_id = add(store, company('Synthetic target', next_action='Follow up'))
+    command_center.initialize(store)
+    with store.connect() as db:
+        card = command_center.resolve_card(db, card_id)
+    marker = {'surface':'command-center', 'card':card_id, 'revision':card['revision'],
+              'dispositionVersion':card['dispositionVersion']}
+    with TestClient(module.app) as client:
+        def send(scope, request='synthetic-snapshot', thread=None):
+            ident = thread or client.post(ROOT, headers=OWNER, json={'agent':'grokbot'}).json()['id']
+            return client.post(ROOT+'/'+ident+'/messages', headers=OWNER, json={
+                'request_id':request, 'text':'Explain this suggestion', 'context':json.dumps(scope)}), ident
+        response, ident = send(marker)
+        assert response.status_code == 200
+        task = response.json()['turns'][0]['id']
+        grok.acknowledge(store, task, 'synthetic-snapshot-claim')
+        grok.submit(store, task, 'synthetic-snapshot-claim', grok.Result(
+            submission_id='synthetic-snapshot-result', outcome='completed', report='Synthetic explanation'))
+        command_center.disposition(store, card_id, command_center.Disposition(
+            revision=card['revision'], disposition_version=card['dispositionVersion'],
+            state='later', request_id='synthetic-snapshot-later'))
+        count = len(sent)
+        retried, _ = send(marker, thread=ident)
+        assert retried.status_code == 200 and len(sent) == count
+        assert retried.json()['turns'][0]['id'] == task
+        assert send(marker, request='synthetic-stale-state')[0].status_code == 409
+        with store.connect() as db:
+            latest = command_center.resolve_card(db, card_id)
+        current = {**marker, 'dispositionVersion':latest['dispositionVersion']}
+        assert send({**current, 'revision':999})[0].status_code == 409
+        assert send({**current, 'revision':True})[0].status_code == 409
+        assert send(current)[0].status_code == 200
+        assert send({'surface':'command-center', 'card':card_id})[0].status_code == 200
+        assert send({'surface':'command-center', 'card':''})[0].status_code == 200
+        with store.connect() as db:
+            row = db.execute('SELECT body,revision FROM crm_records WHERE id=?', (card_id,)).fetchone()
+            record = json.loads(row['body'])
+            record['stage'] = 'closed'
+            crm.write_record(db, record, card_id, row['revision'])
+        assert send(current)[0].status_code == 409
