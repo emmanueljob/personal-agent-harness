@@ -260,9 +260,10 @@ export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, 
               {visibleCard.disposition==='later' && <p>Returns {new Date(visibleCard.resumeAt!).toLocaleString()}</p>}
               {visibleCard.disposition==='dismissed' && <p>You chose not to do this.</p>}
               {visibleCard.evidence && <figure className="cc-evidence">
-          <blockquote>{visibleCard.evidence}</blockquote><figcaption>{visibleCard.source}</figcaption>
-        </figure>}
-        <details><summary>Inspect evidence</summary>
+                <blockquote>{visibleCard.evidence}</blockquote>
+                <figcaption>{visibleCard.source}</figcaption>
+              </figure>}
+              <details><summary>Inspect evidence</summary>
                 {visibleCard.evidence && <blockquote>{visibleCard.evidence}</blockquote>}
                 {visibleCard.sourceUrl && <a href={visibleCard.sourceUrl} target="_blank" rel="noreferrer">Open original message</a>}
                 <div className="cc-actions">{visibleCard.kind==='import' ? <button onClick={onOpenMyCareer}>Open My Career</button> :
@@ -273,18 +274,18 @@ export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, 
                 {editing===visibleCard.id && <Correction api={api} card={visibleCard} cancel={() => setEditing('')}
                   saved={() => {setEditing(''); refresh()}} onBusy={setSaving}/>}
               </details>
-        </div>
-        <CardExecution key={visibleCard.id+':'+visibleCard.revision+':'+visibleCard.dispositionVersion}
-          api={api} card={visibleCard} busy={saving || transitioning} onBusy={setSaving} open={onOpenRecord}
-          actions={<>
-          {visibleCard.disposition==='active' && visibleCard.action && <>
-            <button disabled={saving} onClick={() => void decide('done')}>Done myself</button>
-            <button disabled={saving} onClick={() => void decide('later')}>Later · tomorrow</button>
-            <button disabled={saving} onClick={() => void decide('dismissed')}>Won’t do</button>
-          </>}
-          {visibleCard.disposition!=='active' && <button disabled={saving} onClick={() => void decide('active')}>
-            {visibleCard.reviewed ? 'Reopen next step' : 'Restore suggestion'}</button>}
-          </>}/>
+            </div>
+            <CardExecution key={visibleCard.id+':'+visibleCard.revision+':'+visibleCard.dispositionVersion}
+              api={api} card={visibleCard} busy={saving || transitioning} onBusy={setSaving} open={onOpenRecord}
+              actions={<>
+                {visibleCard.disposition==='active' && visibleCard.action && <>
+                  <button disabled={saving} onClick={() => void decide('done')}>Done myself</button>
+                  <button disabled={saving} onClick={() => void decide('later')}>Later · tomorrow</button>
+                  <button disabled={saving} onClick={() => void decide('dismissed')}>Won’t do</button>
+                </>}
+                {visibleCard.disposition!=='active' && <button disabled={saving} onClick={() => void decide('active')}>
+                  {visibleCard.reviewed ? 'Reopen next step' : 'Restore suggestion'}</button>}
+              </>}/>
           </CommandCard>}
           </AnimatePresence>
         </div>
