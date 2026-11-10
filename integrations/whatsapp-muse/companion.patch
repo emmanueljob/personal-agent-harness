@@ -1,0 +1,123 @@
+diff --git a/internal/wa/events.go b/internal/wa/events.go
+index f6dc066..ee7971a 100644
+--- a/internal/wa/events.go
++++ b/internal/wa/events.go
+@@ -218,6 +218,8 @@ func toMessage(e *events.Message, canon func(types.JID) types.JID) (store.Messag
+ // messageContent extracts the searchable text and the media kind.
+ func messageContent(m *waE2E.Message) (text string, mediaType store.MediaKind) {
+ 	switch {
++	case m.GetRichResponseMessage() != nil:
++		return museRichText(m.GetRichResponseMessage()), ""
+ 	case m.GetConversation() != "":
+ 		return m.GetConversation(), ""
+ 	case m.GetExtendedTextMessage() != nil:
+diff --git a/internal/wa/muse.go b/internal/wa/muse.go
+new file mode 100644
+index 0000000..de2007a
+--- /dev/null
++++ b/internal/wa/muse.go
+@@ -0,0 +1,47 @@
++// SPDX-License-Identifier: MPL-2.0
++package wa
++
++import (
++	"encoding/json"
++	"strings"
++
++	"go.mau.fi/whatsmeow/proto/waAICommonDeprecated"
++	"go.mau.fi/whatsmeow/proto/waE2E"
++	"go.mau.fi/whatsmeow/types/richresponse"
++)
++
++// museRichText extracts visible text only. Never search arbitrary JSON fields:
++// metadata, quoted text and unknown primitives must not satisfy a test nonce.
++func museRichText(msg *waE2E.AIRichResponseMessage) string {
++	var parts []string
++	data := msg.GetUnifiedResponse().GetData()
++	if len(data) > 0 {
++		if len(data) > 1024*1024 {
++			return ""
++		}
++		var response richresponse.RichResponse
++		if json.Unmarshal(data, &response) != nil {
++			return ""
++		}
++		for _, section := range response.Sections {
++			if section.Model == nil {
++				continue
++			}
++			for _, primitive := range section.Model.GetPrimitives() {
++				switch text := primitive.(type) {
++				case *richresponse.GenAIMarkdownTextUXPrimitive:
++					parts = append(parts, text.Text)
++				case *richresponse.FOATextPrimitive:
++					parts = append(parts, text.Text)
++				}
++			}
++		}
++	} else {
++		for _, part := range msg.GetSubmessages() {
++			if part.GetMessageType() == waAICommonDeprecated.AIRichResponseSubMessageType_AI_RICH_RESPONSE_TEXT {
++				parts = append(parts, part.GetMessageText())
++			}
++		}
++	}
++	return strings.Join(parts, "\n")
++}
+diff --git a/internal/wa/muse_test.go b/internal/wa/muse_test.go
+new file mode 100644
+index 0000000..13c49f0
+--- /dev/null
++++ b/internal/wa/muse_test.go
+@@ -0,0 +1,51 @@
++// SPDX-License-Identifier: MPL-2.0
++package wa
++
++import (
++	"go.mau.fi/whatsmeow/proto/waAICommon"
++	"go.mau.fi/whatsmeow/proto/waAICommonDeprecated"
++	"go.mau.fi/whatsmeow/proto/waE2E"
++	"go.mau.fi/whatsmeow/types"
++	"go.mau.fi/whatsmeow/types/events"
++	"google.golang.org/protobuf/proto"
++	"strings"
++	"testing"
++)
++
++func unifiedMuse(data string) *waE2E.AIRichResponseMessage {
++	return &waE2E.AIRichResponseMessage{UnifiedResponse: &waAICommon.AIRichResponseUnifiedResponse{Data: []byte(data)}}
++}
++
++func TestMuseRichText(t *testing.T) {
++	tests := []struct {
++		name string
++		msg  *waE2E.AIRichResponseMessage
++		want string
++	}{
++		{"nil", nil, ""},
++		{"unified", unifiedMuse(`{"sections":[{"view_model":{"__typename":"GenAISingleLayoutViewModel","primitive":{"__typename":"GenAIMarkdownTextUXPrimitive","text":"HARNESS_WHATSAPP_OK_synthetic-0001"}}}],"response_id":"not-visible"}`), "HARNESS_WHATSAPP_OK_synthetic-0001"},
++		{"multilayout", unifiedMuse(`{"sections":[{"view_model":{"__typename":"GenAIVStackLayoutViewModel","primitives":[{"__typename":"GenAIMarkdownTextUXPrimitive","text":"one"},{"__typename":"GenAIMarkdownTextUXPrimitive","text":"two"}]}}]}`), "one\ntwo"},
++		{"metadata", unifiedMuse(`{"response_id":"HARNESS_WHATSAPP_OK_synthetic-0001","sections":[{"view_model":{"__typename":"GenAISingleLayoutViewModel","primitive":{"__typename":"GenAIMetadataTextPrimitive","text":"HARNESS_WHATSAPP_OK_synthetic-0001"}}}]}`), ""},
++		{"unknown", unifiedMuse(`{"sections":[{"view_model":{"__typename":"FutureLayout","text":"HARNESS_WHATSAPP_OK_synthetic-0001"}}]}`), ""},
++		{"malformed", unifiedMuse(`{"sections":`), ""},
++		{"oversized", unifiedMuse(strings.Repeat("x", 1024*1024+1)), ""},
++		{"legacy", &waE2E.AIRichResponseMessage{Submessages: []*waAICommonDeprecated.AIRichResponseSubMessage{{MessageType: waAICommonDeprecated.AIRichResponseSubMessageType_AI_RICH_RESPONSE_TEXT.Enum(), MessageText: proto.String("legacy")}, {MessageText: proto.String("hidden")}}}, "legacy"},
++	}
++	for _, tt := range tests {
++		t.Run(tt.name, func(t *testing.T) {
++			if got := museRichText(tt.msg); got != tt.want {
++				t.Fatalf("got %q, want %q", got, tt.want)
++			}
++		})
++	}
++	// Exercise the actual archive conversion; outgoing copies are never made incoming.
++	e := &events.Message{Info: types.MessageInfo{MessageSource: types.MessageSource{Chat: types.MuseJID, Sender: types.MuseJID}}, Message: &waE2E.Message{RichResponseMessage: tests[1].msg}}
++	m, ok := toMessage(e, func(j types.JID) types.JID { return j })
++	if !ok || m.Text != tests[1].want || m.FromMe || m.SenderJID != types.MuseJID.String() {
++		t.Fatal("rich reply was not archived with its sender")
++	}
++	e.Message.RichResponseMessage = tests[3].msg
++	if _, ok := toMessage(e, func(j types.JID) types.JID { return j }); ok {
++		t.Fatal("metadata became an archive message")
++	}
++}

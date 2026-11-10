@@ -357,3 +357,11 @@ Owner admin → Job search · Grok Bot can push a synthetic assignment to a webh
 The private admin Job search workspace combines a company board, people, application
 stages, activity, automatic evidence-backed imports and a coordinating harness agent.
 See [workflow, data model and rollout limits](docs/job-search-crm.md).
+
+## Local Muse WhatsApp proof
+
+An opt-in, private-only [Muse WhatsApp MCP facade](docs/whatsapp-muse-proof.md)
+can send one fixed synthetic test and inspect its exact nonce reply through a
+separately reviewed local companion. WhatsApp sessions and any synchronized
+history remain outside the repository and web deployment. Both companion-device
+pairing and linking WhatsApp to the existing Muse account require the primary phone.
