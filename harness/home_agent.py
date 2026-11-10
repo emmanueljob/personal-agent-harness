@@ -77,4 +77,5 @@ def enrich(db, evidence):
                 break
     return {**evidence, 'actionEvidence': action_evidence, 'helperEvidence': helper_evidence,
             'actionEvidenceCoverage': 'Up to three latest recorded action results per included visible card.',
+            'helperEvidenceCoverage': 'Up to two exact selected-card matches among the latest 30 completed helper turns. Absence is not an exhaustive history search.',
             'helperConsultation': 'No live helper consultation requested for this turn.'}
