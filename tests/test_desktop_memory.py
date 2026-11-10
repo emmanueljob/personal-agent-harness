@@ -166,3 +166,73 @@ def test_cloud_routed_ollama_model_is_rejected(monkeypatch):
             return Response()
     monkeypatch.setattr(memory.urllib.request,'build_opener',lambda *_:Opener())
     with pytest.raises(RuntimeError): memory.ensure_local_model('fake')
+
+
+@pytest.fixture
+def swift_import(tmp_path):
+    import shutil
+    import subprocess
+    if sys.platform != 'darwin' or not shutil.which('xcrun'):
+        pytest.skip('Requires the macOS Swift toolchain')
+    source = tmp_path / 'main.swift'
+    source.write_text("""
+import Foundation
+let root = URL(fileURLWithPath: CommandLine.arguments[1])
+let data = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[2]))
+let record = try JSONDecoder().decode(Evidence.self, from: data)
+let plan = ImportPlan(id: "synthetic-reimport", calendars: [], threads: [], start: 0, end: 1900000000, calendarWindow: 0)
+try BrainStore(root: root).commit([record], plan: plan)
+""")
+    executable = tmp_path / 'import-fixture'
+    subprocess.run(['xcrun', 'swiftc', str(Path(__file__).parents[1] / 'desktop/macos/Sources/BrainStore.swift'),
+                    str(source), '-lsqlite3', '-o', str(executable)], check=True)
+    def commit(record):
+        payload = tmp_path / 'source.json'
+        payload.write_text(json.dumps(record))
+        subprocess.run([str(executable), str(tmp_path / 'brain'), str(payload)], check=True)
+    return commit
+
+
+def test_rich_repair_checkpoint_survives_swift_reimport(tmp_path, swift_import, monkeypatch):
+    record = dict(id='messages:synthetic-thread:rich', source='messages:synthetic-thread',
+                  kind='message', title='Synthetic conversation', body='[Rich message or attachment; unsupported format]',
+                  occurred=1700000000, metadata=dict(body_status='rich_body_or_attachment_not_decoded',
+                                                    attributed_hex='010203', speaker='owner'))
+    swift_import(record)
+    db = memory.connect(tmp_path / 'brain')
+    calls = []
+    def unsupported(raw, resources):
+        calls.append(raw)
+        return None
+    monkeypatch.setattr(memory, 'decode_rich', unsupported)
+    try:
+        assert memory.repair(db, tmp_path) == dict(decoded=0, unsupported=1)
+        before = dict(db.execute('SELECT * FROM evidence').fetchone())
+        swift_import(record)
+        assert dict(db.execute('SELECT * FROM evidence').fetchone()) == before
+        assert memory.repair(db, tmp_path) == dict(decoded=0, unsupported=0)
+        assert calls == ['010203']
+        # A decoder upgrade gets a fresh attempt against the same raw source.
+        monkeypatch.setattr(memory, 'DECODER_VERSION', 'synthetic-new-decoder')
+        assert memory.repair(db, tmp_path)['unsupported'] == 1
+        # Changed bytes discard the prior checkpoint and can decode successfully.
+        record['metadata']['attributed_hex'] = '040506'
+        swift_import(record)
+        assert 'decode_attempt' not in json.loads(db.execute('SELECT payload FROM evidence').fetchone()[0])['metadata']
+        monkeypatch.setattr(memory, 'decode_rich', lambda *_: 'Decoded fictional text')
+        assert memory.repair(db, tmp_path) == dict(decoded=1, unsupported=0)
+        decoded = dict(db.execute('SELECT * FROM evidence').fetchone())
+        swift_import(record)
+        assert dict(db.execute('SELECT * FROM evidence').fetchone()) == decoded
+        # Plain text must supersede the previous rich result.
+        record['body'] = 'Changed plain text'
+        record['metadata']['body_status'] = 'plain_text'
+        swift_import(record)
+        assert db.execute('SELECT body FROM evidence').fetchone()[0] == 'Changed plain text'
+        record['body'] = '[Retracted message]'
+        record['metadata']['date_retracted'] = '1700000001'
+        record['metadata'].pop('attributed_hex')
+        swift_import(record)
+        assert db.execute('SELECT body FROM evidence').fetchone()[0] == '[Retracted message]'
+    finally:
+        db.close()
