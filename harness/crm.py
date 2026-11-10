@@ -469,7 +469,25 @@ def mount(app,get_store,owner):
 
     from .crm_enrichment import Start as EnrichmentStart, start as start_enrichment, status as enrichment_status
 
-    from . import my_career
+    from . import my_career, career_briefing
+
+    @router.post('/career/narrative')
+    def career_narrative():
+        return call(career_briefing.narrative)
+
+    @router.get('/career/questions')
+    def career_questions():
+        return call(career_briefing.progress)
+
+    @router.post('/career/questions/muse')
+    def career_muse_reply(body: career_briefing.MuseReply):
+        return call(career_briefing.save_muse, body)
+
+    @router.post('/career/questions/{ident}/process')
+    def career_process(ident: str, background: BackgroundTasks):
+        result = call(career_briefing.incorporate, ident)
+        my_career.schedule(get_store(), background)
+        return result
 
     @router.get('/career')
     def career_state():
