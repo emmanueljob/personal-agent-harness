@@ -17,6 +17,7 @@ dependencies = [
     "deepagents==0.7.32",
     "temporalio-deepagents==0.0.3",
     "mcp==2.3.0",
+    "websockets>=15,<18",
     "PyJWT[crypto]>=2.15,<3",
 ]
 
