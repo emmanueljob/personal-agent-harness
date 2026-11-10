@@ -479,6 +479,14 @@ def mount(app,get_store,owner):
     def career_questions():
         return call(career_briefing.progress)
 
+    @router.get('/career/conversations/{provider}')
+    def career_conversation(provider: Literal['grokbot', 'muse'], limit: int = 10):
+        return call(career_briefing.conversation, provider, max(1, limit))
+
+    @router.post('/career/questions/muse/prepare')
+    def career_prepare_muse(body: career_briefing.MuseQuestion):
+        return call(career_briefing.prepare_muse, body)
+
     @router.post('/career/questions/muse')
     def career_muse_reply(body: career_briefing.MuseReply):
         return call(career_briefing.save_muse, body)

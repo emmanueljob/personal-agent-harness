@@ -9,13 +9,61 @@ class Narrative(crm.Model):
     questions: list[str] = Field(max_length=3)
 
 
-class MuseReply(crm.Model):
+class MuseQuestion(crm.Model):
     request_id: str = Field(pattern=r'^[a-zA-Z0-9_-]{8,80}$')
     question: str = Field(min_length=1, max_length=300)
+
+
+class MuseReply(MuseQuestion):
     answer: str = Field(min_length=1, max_length=20000)
 
 
+def initialize_muse(store):
+    with store.connect() as db:
+        db.execute("""CREATE TABLE IF NOT EXISTS career_muse_questions (
+            request_id TEXT PRIMARY KEY, question TEXT NOT NULL, created REAL NOT NULL)""")
+
+
+def prepare_muse(store, body):
+    import time
+    initialize_muse(store)
+    with store.connect() as db:
+        db.execute('INSERT OR IGNORE INTO career_muse_questions VALUES (?,?,?)',
+                   (body.request_id, body.question, time.time()))
+        if db.execute('SELECT question FROM career_muse_questions WHERE request_id=?',
+                      (body.request_id,)).fetchone()[0] != body.question:
+            raise ValueError('This question has changed. Start a new handoff.')
+
+
+def conversation(store, provider, limit):
+    crm.initialize(store)
+    grok_connection.initialize(store)
+    initialize_muse(store)
+    if provider == 'grokbot':
+        rows = store.query("""SELECT a.id, q.question, a.status, a.created, a.updated,
+            json_extract(a.result,'$.report') AS answer, s.id AS source_id
+            FROM grok_questions q JOIN grok_assignments a ON a.id=q.task_id
+            LEFT JOIN crm_sources s ON s.provider='grokbot' AND s.reference='career-question:'||a.id
+            ORDER BY a.created DESC,a.id LIMIT ?""", (limit+1,))
+    else:
+        rows = store.query("""WITH saved AS (
+            SELECT substr(reference,17) AS id,id AS source_id,created,
+                   json_extract(body,'$.title') AS question,json_extract(body,'$.report') AS answer
+            FROM crm_sources WHERE provider='muse' AND reference LIKE 'career-question:%')
+            SELECT s.id,s.question,'completed' AS status,coalesce(q.created,s.created) AS created,
+                   s.created AS updated,s.answer,s.source_id
+            FROM saved s LEFT JOIN career_muse_questions q ON q.request_id=s.id
+            UNION ALL SELECT q.request_id,q.question,'handoff',q.created,q.created,NULL,NULL
+            FROM career_muse_questions q WHERE NOT EXISTS (SELECT 1 FROM saved WHERE id=q.request_id)
+            ORDER BY created DESC,id LIMIT ?""", (limit+1,))
+    processed = set(career.brief(store).get('processed', []))
+    for row in rows:
+        row['reviewed'] = row['source_id'] in processed
+    return {'messages': rows[:limit], 'more': len(rows)>limit}
+
+
 def save_muse(store, body):
+    prepare_muse(store, body)
     return crm.save_source(store, crm.Source(provider='muse', reference='career-question:'+body.request_id,
                                              title=body.question, report=body.answer))
 
