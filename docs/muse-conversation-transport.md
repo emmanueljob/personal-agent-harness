@@ -1,0 +1,13 @@
+The paired Mac sends a conversation turn to the fixed Muse recipient through the authenticated loopback MCP companion used by [the local connection proof](https://github.com/emmanueljob/personal-agent-harness/pull/42). The adapter accepts the companion's asynchronous tool caller. Check pairing with `ready()`, send once with `send(turn_id, prompt)`, and use `replies(turn_ids)` to inspect the latest 100 archived events. The application must reserve a unique turn UUID before sending and preserve uncertain delivery across restarts.
+
+Each outgoing message asks Muse to put its turn marker on the first line of the answer. Matching requires the marker, an incoming message ID, the Muse sender and the Muse chat. Echoes and unrelated events stay on the Mac. Repeated copies of an event yield one reply. An absent marker, an answer outside the archive window, or multiple distinct matches leave a turn pending for inspection. A send receipt alone establishes delivery only.
+
+The two-turn scenario in `tests/test_muse_transport.py` uses a fake companion. The earlier proof records a live single-nonce echo. Free-form two-turn marker compliance still requires live verification.
+
+## Connect the private app
+
+The signed-in My Career and Command Center callers use the same conversation API. The app stores Muse turns in its private database. The paired Mac claims a queued turn over outbound HTTPS, then sends it through the local authenticated MCP companion. The worker reads matching replies and submits only those answers. The hosted server never opens a connection into the Mac.
+
+On the private app and the paired Mac configure the same independently generated random `MUSE_BRIDGE_TOKEN` (at least 32 random bytes). This credential grants access to pending Muse prompts and replies only. On the Mac set `MUSE_APP_ORIGIN` to the private app HTTPS origin and run `python -m harness.muse_companion_worker` from this application version. Use the paired local companion and external mode-600 `connection.json` described by PR #42. Set `WHATSAPP_MUSE_HOME` if its private directory differs from the proof default. Install the patched companion separately. Only the worker needs the local connection file.
+
+The worker checks in every ten seconds. A disconnected check-in or 90 seconds without a check-in disables new Muse sends. Existing threads remain readable. A claimed turn is never automatically sent again. A lost claim response or worker crash can leave a turn marked sending. Refresh the transcript after reconnecting. If no correlated reply appears, inspect the paired chat before starting a replacement conversation.
