@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import {CareerSummary} from './career-summary';
+import { useCallback, useEffect, useState } from 'react';
 
 type Api = (path: string, method?: string, body?: unknown) => Promise<any>;
 type Evidence = {statement: string; source: string; quote: string; date?: string};
@@ -53,7 +54,7 @@ export function MyCareer({api, open, mark}: {api: Api; open: (id: string) => voi
     return () => {active = false};
   }, [api, reload]);
 
-  const retry = () => {setError(''); setReload(n => n+1)};
+  const retry = useCallback(() => {setError(''); setReload(n => n+1)}, []);
   const start = (index: number | null) => {
     if (view) setEditing({index, revision:view.revision, text:index === null ? '' : view.claims[index].statement});
   };
@@ -79,7 +80,7 @@ export function MyCareer({api, open, mark}: {api: Api; open: (id: string) => voi
   return <>
     {error && <p role="alert">{error} <button onClick={retry}>Retry</button></p>}
     {busy && <p role="status">{busy}…</p>}
-    {view && <><section className="crm-surface crm-career-section"><h2>What I’m looking for</h2>
+    {view && <><CareerSummary api={api} revision={view.revision} updated={retry}/><section className="crm-surface crm-career-section"><h2>What I’m looking for</h2>
       {!view.claims.length && <p>Add a preference in your own words or check your saved sources. <button disabled={!!busy} onClick={async () => {try {setBusy('Reading career sources'); await api(endpoint+'/discover','POST'); retry()} catch(e) {setError((e as Error).message); setBusy('')}}}>Check sources</button></p>}
       {view.claims.map((claim,i) => <article key={i}>
         <p><strong>{claim.statement}</strong></p>

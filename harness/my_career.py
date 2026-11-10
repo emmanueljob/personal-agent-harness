@@ -62,17 +62,24 @@ def brief(store):
     return json.loads(raw) if raw else {'revision': 0, 'claims': []}
 
 
-def save(store, revision, claims):
+def save(store, revision, claims, *, reply_id=None):
     # Serialize competing editors; a single atomic private file owns the brief.
     with store.connect() as db:
         db.execute('BEGIN IMMEDIATE')
-        if brief(store)['revision'] != revision:
+        current = brief(store)
+        if current['revision'] != revision:
             raise ValueError('The brief changed. Reload before saving.')
+        processed = current.get('processed', [])
+        if reply_id and reply_id in processed:
+            return
+        next_revision = revision + int(reply_id is None or claims != current['claims'])
+        if reply_id:
+            processed = [*processed, reply_id]
         directory = store.brain.scope('private')
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         with tempfile.NamedTemporaryFile('w', dir=directory, delete=False) as tmp:
             try:
-                json.dump({'revision': revision + 1, 'claims': claims}, tmp)
+                json.dump({'revision': next_revision, 'claims': claims, 'processed': processed}, tmp)
                 tmp.flush()
                 os.replace(tmp.name, directory / FILE)
             finally:
