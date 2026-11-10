@@ -242,7 +242,8 @@ export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, 
         <option value="grokbot">Grokbot</option><option value="muse">Muse</option></select></label>
       {freeChat ? <p>Using current app evidence.</p> : current && <p>Sending about {current.title} · {current.company || 'My Career'}</p>}
       {(freeChat || (!loading && current)) && <div key={agent+':'+target}>
-        {renderChat(agent, JSON.stringify({surface:'command-center',card:target}))}
+        {renderChat(agent, JSON.stringify({surface:'command-center',card:target,
+          ...(!freeChat && current ? {revision:current.revision,dispositionVersion:current.dispositionVersion} : {})}))}
       </div>}
     </section>
   </div>;
