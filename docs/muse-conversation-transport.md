@@ -1,0 +1,5 @@
+The paired Mac sends a conversation turn to the fixed Muse recipient through the authenticated loopback MCP companion used by [the local connection proof](https://github.com/emmanueljob/personal-agent-harness/pull/42). The adapter accepts the companion's asynchronous tool caller. Check pairing with `ready()`, send once with `send(turn_id, prompt)`, and use `replies(turn_ids)` to inspect the latest 100 archived events. The application must reserve a unique turn UUID before sending and preserve uncertain delivery across restarts.
+
+Each outgoing message asks Muse to put its turn marker on the first line of the answer. Matching requires the marker, an incoming message ID, the Muse sender and the Muse chat. Echoes and unrelated events stay on the Mac. Repeated copies of an event yield one reply. An absent marker, an answer outside the archive window, or multiple distinct matches leave a turn pending for inspection. A send receipt alone establishes delivery only.
+
+The two-turn scenario in `tests/test_muse_transport.py` uses a fake companion. The earlier proof records a live single-nonce echo. Free-form two-turn marker compliance still requires live verification.
