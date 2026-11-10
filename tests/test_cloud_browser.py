@@ -144,3 +144,5 @@ def test_browser_guard_blocks_internal_network_and_messaging_writes(tmp_path):
     asyncio.run(check('http://127.0.0.1:8080/','GET',True))
     asyncio.run(check('https://www.linkedin.com/voyager/api/me','GET',False))
     asyncio.run(check('https://evil.example.org/','GET',True))
+    asyncio.run(check('https://challenges.cloudflare.com/turnstile/v0/api.js','GET',False))
+    asyncio.run(check('https://challenges.cloudflare.com.evil.example.org/','GET',True))

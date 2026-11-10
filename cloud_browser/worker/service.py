@@ -34,7 +34,7 @@ class Worker:
 
     async def open(self):
         from linkedin_mcp_server.core.browser import BrowserManager
-        self.browser=BrowserManager(user_data_dir=self.state.root/'profile',headless=True,viewport={'width':1280,'height':900},args=['--disable-dev-shm-usage'])
+        self.browser=BrowserManager(user_data_dir=self.state.root/'profile',headless=True,channel='chromium',viewport={'width':1280,'height':900},args=['--disable-dev-shm-usage'])
         await self.browser.start()
         await self.browser.context.route('**/*',self.guard)
         self.browser.page.on('request',self.observe)
@@ -46,7 +46,7 @@ class Worker:
     async def guard(self,route):
         """Network boundary: no internal navigation, downloads, message writes or read receipts."""
         request=route.request;parsed=urlsplit(request.url);host=parsed.hostname or ''
-        allowed=parsed.scheme=='https' and (host in ('linkedin.com','www.linkedin.com','www.google.com','www.gstatic.com','www.recaptcha.net','client-api.arkoselabs.com') or any(host.endswith('.'+suffix) for suffix in ('licdn.com','linkedin.com','arkoselabs.com')))
+        allowed=parsed.scheme=='https' and (host in ('linkedin.com','www.linkedin.com','www.google.com','www.gstatic.com','www.recaptcha.net','client-api.arkoselabs.com','challenges.cloudflare.com') or any(host.endswith('.'+suffix) for suffix in ('licdn.com','linkedin.com','arkoselabs.com')))
         messaging_write=request.method not in ('GET','HEAD','OPTIONS') and parsed.path.startswith('/voyager/api/')
         if not allowed or messaging_write:await route.abort()
         else:await route.continue_()
