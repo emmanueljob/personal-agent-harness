@@ -42,6 +42,8 @@ class PluginRegistry:
         self.factories[name] = factory
 
     def tools(self, context):
+        if context.get('home_agent'):
+            return []
         return [tool for factory in self.factories.values() for tool in factory(context)]
 
 
@@ -263,6 +265,8 @@ def prepare_turn(store, turn):
 
 def build_system_prompt(snapshot, mode):
     config, profile = snapshot["config"], snapshot["profile"]
+    if config.get("home_agent"):
+        return profile
     if mode == 'private' and config.get('job_search_workspace'):
         from .crm import GUIDANCE
         return (config.get('job_search_instructions', GUIDANCE) + "\nYou are the owner's job-search coordinator, running in the harness. "
@@ -375,7 +379,7 @@ def execute(store, turn):
     if config["provider"] == "openai" and not os.getenv("OPENAI_API_KEY"):
         raise RuntimeError("Set OPENAI_API_KEY to enable model calls. No model call was made.")
     # Public executions never load private profile data or private tools.
-    context = dict(store=store, mode=mode, thread_id=turn["thread_id"], turn_id=turn["id"], web_enabled=config.get("web_enabled", web_provider() != "disabled"))
+    context = dict(store=store, mode=mode, thread_id=turn["thread_id"], turn_id=turn["id"], web_enabled=config.get("web_enabled", web_provider() != "disabled"), home_agent=config.get("home_agent", False))
     prompt = build_system_prompt(snapshot, mode)
     # Each turn has a graph checkpoint namespace; completed prior turns supply
     # conversation history. A retry resumes this turn rather than appending it twice.

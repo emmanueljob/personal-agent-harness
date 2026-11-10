@@ -3,7 +3,7 @@ import {useEffect, useRef, useState} from 'react';
 type Api = (path: string, method?: string, body?: unknown) => Promise<any>;
 type Agent = 'grokbot' | 'muse' | 'owner';
 type Props = {api: Api; agent: Agent; context?: string; disabled?: boolean; threadId?: string | null; onThreadChange?: (id: string) => void};
-type Turn = {id: string; text: string; reply: string | null; status: string};
+type Turn = {id: string; text: string; reply: string | null; status: string; target?: string};
 type Thread = {id: string; agent: Agent; turns: Turn[]};
 type Summary = {id: string; title: string | null};
 const root = '/admin/conversations';
@@ -18,8 +18,12 @@ function Conversation({api, agent, context = '', disabled = false, threadId, onT
   const [thread, setThread] = useState<Thread | null>(null);
   const [reason, setReason] = useState('Checking connection…');
   const [drafts, setDrafts] = useState<Record<string, string>>({});
-  let target = '';
-  try {target = JSON.parse(context).card || '';} catch {target = context;}
+  let target = '', targetLabel = 'Free-form question';
+  try {
+    const scope = JSON.parse(context);
+    target = scope.card || '';
+    targetLabel = scope.title || target || 'Free-form question';
+  } catch {target = context; targetLabel = context || targetLabel;}
   const draft = drafts[target] || '';
   const setDraft = (text: string) => setDrafts(old => ({...old, [target]: text}));
   const [sendingTarget, setSendingTarget] = useState<string | null>(null);
@@ -30,6 +34,7 @@ function Conversation({api, agent, context = '', disabled = false, threadId, onT
   const [chooseNew, setChooseNew] = useState(false);
   const pending = useRef<{thread: string; text: string; context: string; request_id: string} | null>(null);
   const mounted = useRef(true);
+  const sendLock = useRef(false);
   useEffect(() => { mounted.current = true; return () => {mounted.current = false;}; }, []);
   useEffect(() => {select(threadId || ''); setChooseNew(false);}, [threadId]);
 
@@ -65,7 +70,7 @@ function Conversation({api, agent, context = '', disabled = false, threadId, onT
     const originTarget = target;
     const originContext = context;
     const originDraft = draft;
-    setSendingTarget(originTarget || 'Free-form question');
+    setSendingTarget(targetLabel);
     const active: Thread = thread || await api(root, 'POST', {agent});
     if (!mounted.current) return;
     setThread(active);
@@ -104,16 +109,22 @@ function Conversation({api, agent, context = '', disabled = false, threadId, onT
     {sendingTarget && <p role="status">Sending about {sendingTarget}</p>}
     {error && <p role="alert">{error}</p>}
     {thread?.turns.map(t => <article key={t.id}>
+      {t.target && <small>About {t.target}</small>}
       <p><strong>You</strong> {t.text}</p>
       <p><strong>{agent === 'owner' ? 'Your agent' : agent === 'muse' ? 'Muse' : 'Grokbot'}</strong> {t.reply || t.status.replaceAll('_', ' ')}</p>
       {t.reply && t.status !== 'completed' && <small>{t.status}</small>}
-      {agent === 'grokbot' && ['sending', 'queued', 'delivery_unknown', 'delivery_rejected'].includes(t.status) &&
+      {((agent === 'grokbot' && ['sending', 'queued', 'delivery_unknown', 'delivery_rejected'].includes(t.status)) || (agent === 'owner' && t.status === 'failed')) &&
         <button type="button" disabled={busy || disabled} onClick={() => void run(async () => {
           setThread(await api(root + '/' + thread.id + '/turns/' + t.id + '/retry', 'POST'));
-        })}>Retry delivery</button>}
+        })}>{agent === 'owner' ? 'Retry response' : 'Retry delivery'}</button>}
     </article>)}
-    <form onSubmit={e => {e.preventDefault(); if (!busy && !disabled) void run(send);}}>
-      <label>Message<textarea maxLength={4000} value={draft} disabled={busy || disabled} onChange={e => setDraft(e.target.value)}/></label>
+    <form onSubmit={e => {
+      e.preventDefault();
+      if (busy || disabled || sendLock.current) return;
+      sendLock.current = true;
+      void run(send).finally(() => {sendLock.current = false;});
+    }}>
+      <label>Message<textarea aria-label="Message" maxLength={4000} value={draft} disabled={busy || disabled} onChange={e => setDraft(e.target.value)}/></label>
       <button disabled={busy || disabled || !!reason || !draft.trim() || (!!last && !done.includes(last.status))}>Send</button>
     </form>
   </section>;

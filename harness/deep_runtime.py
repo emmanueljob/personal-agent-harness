@@ -37,7 +37,7 @@ def binding():
 
 
 def context(store, turn, mode, config):
-    return dict(store=store, mode=mode, thread_id=turn['thread_id'], turn_id=turn['id'], web_enabled=config['web_enabled'])
+    return dict(store=store, mode=mode, thread_id=turn['thread_id'], turn_id=turn['id'], web_enabled=config['web_enabled'], home_agent=config.get('home_agent', False))
 
 
 def saved_config(store, turn):
