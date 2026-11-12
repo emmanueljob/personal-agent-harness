@@ -295,3 +295,28 @@ def test_direct_legacy_completion_after_restoring_same_record_stays_done(tmp_pat
                    (target,'interested','Research company'))
     assert not review(store)
     assert home.feed(store, scope='completed')['cards'][0]['id']==target
+
+
+def test_real_group_evidence_digest_invalidates_selected_chat_snapshot(tmp_path):
+    from harness import conversations
+
+    store = Store(tmp_path)
+    co = add(store, company())
+    first = add(store, {'kind':'activity','company_id':co,'title':'First','next_action':'Review role'})
+    other = add(store, {'kind':'activity','company_id':co,'title':'Second','next_action':'Assess opportunity'})
+    conversations.initialize(store)
+    original = review(store)[0]
+    scope = {'surface':'command-center','card':first,'revision':original['revision'],
+             'dispositionVersion':original['dispositionVersion'],'intentRevision':original['intentRevision']}
+    edit(store, other, notes='The recruiter confirmed a new interview date.')
+    latest = review(store)[0]
+    assert latest['revision']==original['revision']
+    assert latest['dispositionVersion']==original['dispositionVersion']
+    with store.connect() as db:
+        with pytest.raises(HTTPException) as stale:
+            conversations.current_evidence(db, 'fixture-thread', json.dumps(scope))
+        assert stale.value.status_code==409
+        scope['intentRevision']=latest['intentRevision']
+        current = conversations.current_evidence(db, 'fixture-thread', json.dumps(scope))
+        assert current['references'][0]['id']==first
+        assert current['references'][0]['memberIds']==sorted([first, other])
