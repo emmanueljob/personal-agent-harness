@@ -52,7 +52,7 @@ def test_unsupported_stale_hidden_and_rollback(tmp_path, monkeypatch):
     module, store = admin_app(tmp_path, monkeypatch)
     company_id = add(store, company('Example Instruments', domain='example.org'))
     unsupported = add(store, dict(kind='activity', company_id=company_id, title='Research',
-                                 next_action='Send an introduction to someone'))
+                                 next_action='Attend the in-person interview'))
     ident = add(store, dict(kind='activity', company_id=company_id, title='Draft', next_action='Follow up'))
     with TestClient(module.app, base_url='https://testserver') as client:
         assert not client.get(ROOT+unsupported+'/execution', headers=AUTH).json()['supported']
@@ -155,3 +155,77 @@ def test_captured_reply_alias_uses_canonical_visibility_and_identity(tmp_path):
     with store.connect() as db:
         visible = actions.captured_replies(db, {'receiptId': sent['id']})
     assert visible['replies'][0]['activity_id']==canonical
+
+
+def test_consecutive_action_wording_and_saved_outreach(tmp_path, monkeypatch):
+    module, store = admin_app(tmp_path, monkeypatch)
+    co = add(store, company('Synthetic consecutive company'))
+    examples = [('Prepare review brief', 'prepare_review'),
+                ('Send an introduction to someone', 'draft_outreach'),
+                ('Follow-up with the team tomorrow', 'draft_follow_up')]
+    ids = [add(store, dict(kind='activity', company_id=co, title='Suggestion '+str(i), next_action=text))
+           for i, (text, _) in enumerate(examples)]
+    with TestClient(module.app, base_url='https://testserver') as client:
+        for ident, (_, kind) in zip(ids, examples):
+            info = client.get(ROOT+ident+'/execution', headers=AUTH).json()
+            assert info['supported'] and info['kind']==kind
+            body = {k:info[k] for k in ('kind','revision','dispositionVersion','intentRevision')}
+            response = client.post(ROOT+ident+'/execute', headers=AUTH,
+                                   json={**body,'request_id':'consecutive-'+ident})
+            assert response.status_code==200, response.text
+            result = response.json()
+            assert result['resultCurrent']
+            assert client.get(ROOT+ident+'/execution', headers=AUTH).json()['result']['id']==result['result']['id']
+            if kind=='draft_outreach':
+                draft = json.loads(store.query('SELECT body FROM crm_records WHERE id=?',
+                                               (result['result']['draftId'],))[0]['body'])
+                assert draft['company_id']==co and draft['stage']=='drafted'
+                assert result['result']['status']=='drafted'
+                assert 'review' in result['result']['scope']
+        assert len(store.query('SELECT * FROM command_action_results'))==3
+
+
+def test_legacy_migration_preserves_results_requests_and_rolls_back(tmp_path, monkeypatch):
+    import pytest
+    from harness.store import Store
+    store = Store(tmp_path)
+    command_center.initialize(store)
+    original = json.dumps({'id':'legacy-result','summary':'Synthetic preserved brief'})
+    with store.connect() as db:
+        db.execute('''CREATE TABLE command_action_results (
+            id TEXT PRIMARY KEY, card_id TEXT NOT NULL, kind TEXT NOT NULL,
+            revision INTEGER NOT NULL, disposition_version INTEGER NOT NULL,
+            request_id TEXT NOT NULL UNIQUE, result TEXT NOT NULL,
+            UNIQUE(card_id,kind,revision,disposition_version))''')
+        db.execute('''CREATE TABLE command_action_requests (
+            request_id TEXT PRIMARY KEY, result_id TEXT NOT NULL REFERENCES command_action_results(id))''')
+        db.execute('INSERT INTO command_action_results VALUES (?,?,?,?,?,?,?)',
+                   ('legacy-result','missing-card','prepare_review',1,0,'legacy-request',original))
+        db.execute('INSERT INTO command_action_requests VALUES (?,?)',('legacy-retry','legacy-result'))
+    bind = actions._bind_legacy_intents
+    def fail(db):
+        raise RuntimeError('Synthetic migration interruption')
+    monkeypatch.setattr(actions,'_bind_legacy_intents',fail)
+    with pytest.raises(RuntimeError):
+        actions.initialize(store)
+    with store.connect() as db:
+        assert 'intent_revision' not in {r['name'] for r in db.execute('PRAGMA table_info(command_action_results)')}
+        assert db.execute('SELECT result FROM command_action_results').fetchone()['result']==original
+    monkeypatch.setattr(actions,'_bind_legacy_intents',bind)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        list(pool.map(lambda _: actions.initialize(store),range(4)))
+    with store.connect() as db:
+        row = db.execute('SELECT * FROM command_action_results').fetchone()
+        assert (row['id'],row['result'],row['request_id'],row['intent_revision'])==('legacy-result',original,'legacy-request','')
+        assert db.execute('SELECT result_id FROM command_action_requests').fetchone()['result_id']=='legacy-result'
+        assert not list(db.execute('PRAGMA foreign_key_check'))
+        assert db.execute('PRAGMA integrity_check').fetchone()[0]=='ok'
+
+
+def test_action_result_requires_same_kind_and_meaningful_snapshot():
+    row = {'kind':'prepare_review','card_id':'old-member','revision':2,
+           'disposition_version':0,'intent_revision':'snapshot-one'}
+    card = {'id':'representative','revision':3,'dispositionVersion':0,'intentRevision':'snapshot-one'}
+    assert actions._current_result(row,card,'prepare_review')
+    assert not actions._current_result(row,card,'draft_follow_up')
+    assert not actions._current_result(row,{**card,'intentRevision':'snapshot-two'},'prepare_review')

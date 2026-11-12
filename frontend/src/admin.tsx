@@ -38,7 +38,7 @@ export default function AdminPortal(){
    const data = await response.json();
    if (!response.ok) {
      if (response.status === 401) setConfig(null);
-     throw new Error(typeof data.detail === 'string' ? data.detail : 'Request failed');
+     throw Object.assign(new Error(typeof data.detail === 'string' ? data.detail : 'Request failed'), {status:response.status});
    }
    return data;
  };
