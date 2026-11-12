@@ -87,8 +87,8 @@ function CardExecution({api, card, busy, onBusy, open, actions, refreshCard}: {
     return () => {active=false};
   }, [api, card.id, card.revision, card.dispositionVersion, card.intentRevision, reload]);
   useEffect(() => {
-    const status = execution?.result?.delegation?.status;
-    if (!status || !['pending','partial','unknown'].includes(status)) return;
+    const job = execution?.result?.delegation;
+    if (!job?.tasks.some(task => !['completed','failed','blocked','unavailable','delivery_rejected'].includes(task.status))) return;
     const timer = window.setTimeout(() => setReload(n => n+1), 3000);
     return () => window.clearTimeout(timer);
   }, [execution]);
