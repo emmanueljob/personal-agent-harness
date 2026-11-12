@@ -18,7 +18,7 @@ type Props = {
   renderChat: (agent: 'owner', context: string, disabled: boolean) => ReactNode;
 };
 type Card = {
-  id: string; revision: number; disposition: 'active'|'done'|'later'|'dismissed'; dispositionVersion: number; resumeAt: string|null; kind: string; reviewed: boolean; title: string; company: string; companyId: string;
+  id: string; revision: number; intentRevision?: string; disposition: 'active'|'done'|'later'|'dismissed'; dispositionVersion: number; resumeAt: string|null; kind: string; reviewed: boolean; title: string; company: string; companyId: string;
   person: string; personId: string; why: string; evidence: string; source: string;
   sourceUrl: string; action: string; date: string; stage: string; receiptId: string | null;
 };

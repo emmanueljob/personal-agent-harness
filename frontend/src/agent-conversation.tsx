@@ -125,11 +125,11 @@ function Conversation({api, agent, context = '', disabled = false, threadId, onT
   }, [api, agent, thread?.id, last?.status, last?.id]);
   const history = <>
     {reason && <p role="status">{reason}</p>}
-    {sendingTarget && <p role="status">Sending about {sendingTarget}</p>}
+    {sendingTarget && <p role="status">{agent === 'owner' ? 'Sending…' : 'Sending about '+sendingTarget}</p>}
     {error && <p role="alert">{error}</p>}
     {pollError && <p role="alert">{pollError}</p>}
     {thread?.turns.map(t => <article key={t.id}>
-      {t.target && <small>About {t.target}</small>}
+      {agent !== 'owner' && t.target && <small>About {t.target}</small>}
       <p><strong>You</strong> {t.text}</p>
       <p><strong>{agent === 'owner' ? 'Your agent' : agent === 'muse' ? 'Muse' : 'Grokbot'}</strong> {t.reply || t.status.replaceAll('_', ' ')}</p>
       {t.reply && t.status !== 'completed' && <small>{t.status}</small>}
