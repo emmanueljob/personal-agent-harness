@@ -43,7 +43,13 @@ class PluginRegistry:
 
     def tools(self, context):
         if context.get('home_agent'):
-            return []
+            if not context.get('home_delegation'):
+                return []
+            from .helper_delegation import tools as helper_tools
+            from .crm import tools as crm_tools
+            allowed = {'read_job_workspace', 'read_job_dossier', 'search_job_crm',
+                       'write_job_record', 'update_job_record', 'read_job_artifacts', 'save_job_artifact'}
+            return helper_tools(context) + [t for t in crm_tools(context) if t.name in allowed]
         return [tool for factory in self.factories.values() for tool in factory(context)]
 
 
@@ -379,7 +385,7 @@ def execute(store, turn):
     if config["provider"] == "openai" and not os.getenv("OPENAI_API_KEY"):
         raise RuntimeError("Set OPENAI_API_KEY to enable model calls. No model call was made.")
     # Public executions never load private profile data or private tools.
-    context = dict(store=store, mode=mode, thread_id=turn["thread_id"], turn_id=turn["id"], web_enabled=config.get("web_enabled", web_provider() != "disabled"), home_agent=config.get("home_agent", False))
+    context = dict(store=store, mode=mode, thread_id=turn["thread_id"], turn_id=turn["id"], web_enabled=config.get("web_enabled", web_provider() != "disabled"), home_agent=config.get("home_agent", False), home_delegation=config.get("home_delegation", False))
     prompt = build_system_prompt(snapshot, mode)
     # Each turn has a graph checkpoint namespace; completed prior turns supply
     # conversation history. A retry resumes this turn rather than appending it twice.

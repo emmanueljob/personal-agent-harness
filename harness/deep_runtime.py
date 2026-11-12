@@ -37,7 +37,7 @@ def binding():
 
 
 def context(store, turn, mode, config):
-    return dict(store=store, mode=mode, thread_id=turn['thread_id'], turn_id=turn['id'], web_enabled=config['web_enabled'], home_agent=config.get('home_agent', False))
+    return dict(store=store, mode=mode, thread_id=turn['thread_id'], turn_id=turn['id'], web_enabled=config['web_enabled'], home_agent=config.get('home_agent', False), home_delegation=config.get('home_delegation', False))
 
 
 def saved_config(store, turn):
@@ -110,7 +110,9 @@ async def invoke_tool(name, kwargs):
 def register_tools():
     # Factories only construct schemas here. They do not access knowledge or run
     # any tool. Actual calls rebuild the catalog from their Activity binding.
-    for original in plugins.tools(dict(mode='private', store=None, thread_id='', turn_id='', web_enabled=True)):
+    base = dict(mode='private', store=None, thread_id='', turn_id='', web_enabled=True)
+    catalog = plugins.tools(base) + plugins.tools({**base, 'home_agent': True, 'home_delegation': True})
+    for original in {t.name: t for t in catalog}.values():
         async def invoke(_name=original.name, **kwargs):
             return await invoke_tool(_name, kwargs)
         proxy = StructuredTool.from_function(coroutine=invoke, name=original.name,
