@@ -95,12 +95,12 @@ function Conversation({api, agent, context = '', disabled = false, threadId, onT
   }
 
   const last = thread?.turns.at(-1);
-  const canSend = !busy && !disabled && !reason && !!draft.trim()
-    && (!last || done.includes(last.status));
   const helperPending = !!thread?.turns.some(t => t.delegations?.some(job =>
     job.tasks.some(task => !['completed', 'failed', 'blocked', 'unavailable', 'delivery_rejected'].includes(task.status))
     || job.answerStatus === 'queued' || job.answerStatus === 'running'
     || (job.answerStatus === null && t.status === 'completed')));
+  const canSend = !busy && !disabled && !reason && !!draft.trim()
+    && (!last || done.includes(last.status));
   useEffect(() => {
     if (agent==='owner' && followHistory.current && historyElement.current) {
       historyElement.current.scrollTop=historyElement.current.scrollHeight;
