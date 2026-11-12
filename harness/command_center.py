@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from pydantic import Field
 from typing import Literal
 
-from . import career_email, correspondence, crm
+from . import career_email, correspondence, crm, card_intents
 
 
 class Review(crm.Model):
@@ -19,26 +19,33 @@ class Disposition(crm.Model):
     disposition_version: int = Field(ge=0)
     state: Literal['done', 'later', 'dismissed', 'active']
     request_id: str = Field(min_length=8, max_length=100)
+    intent_revision: str = Field(default='', max_length=64)
 
 
 def initialize(store):
     correspondence.initialize(store)
     with store.connect() as db:
+        db.execute('BEGIN IMMEDIATE')
         db.execute("""CREATE TABLE IF NOT EXISTS command_center_reviews (
             record_id TEXT PRIMARY KEY, stage TEXT NOT NULL, next_action TEXT NOT NULL, follow_up TEXT)""")
         db.execute('''CREATE TABLE IF NOT EXISTS command_center_dispositions (
             card_id TEXT PRIMARY KEY, version INTEGER NOT NULL, state TEXT NOT NULL, resume_at TEXT)''')
         db.execute('''CREATE TABLE IF NOT EXISTS command_center_disposition_requests (
             request_id TEXT PRIMARY KEY, payload TEXT NOT NULL, result TEXT NOT NULL)''')
+        db.execute('''CREATE TABLE IF NOT EXISTS command_center_intent_decisions (
+            seq INTEGER PRIMARY KEY AUTOINCREMENT, request_id TEXT UNIQUE, card_id TEXT NOT NULL,
+            intent_key TEXT NOT NULL, evidence TEXT NOT NULL, state TEXT NOT NULL,
+            resume_at TEXT, version INTEGER NOT NULL, snapshot TEXT NOT NULL)''')
+        card_intents.backfill(db)
 
 
 ROWS = """
-    SELECT r.id, r.kind, r.body, r.revision, r.evidence, r.certainty, r.updated,
+    SELECT r.id, r.kind, r.body, r.revision, r.evidence, r.certainty, r.updated, r.created,
            json_extract(c.body,'$.name') AS company, json_extract(p.body,'$.name') AS person,
-           m.id AS receipt_id, m.provider, m.direction, m.occurred_at,
+           m.id AS receipt_id, m.provider, m.direction, m.occurred_at, m.body AS message_body,
            json_extract(m.body,'$.subject') AS subject,
            substr(json_extract(m.body,'$.text'),1,400) AS excerpt,
-           json_extract(m.body,'$.source_url') AS source_url, seen.stage AS reviewed_stage,
+           json_extract(m.body,'$.source_url') AS source_url, seen.stage AS reviewed_stage, seen.next_action AS reviewed_action, seen.follow_up AS reviewed_due,
            EXISTS (SELECT 1 FROM crm_messages later WHERE later.provider=m.provider
               AND later.account=m.account AND later.thread_id=m.thread_id AND later.direction='inbound'
               AND later.occurred_at>m.occurred_at) AS has_reply
@@ -130,27 +137,29 @@ def import_cards(db):
 def ranked_cards(db, hidden):
     today = date.today().isoformat()
     ranked = []
+    context = card_intents.catalog(db)
+    snapshots = {row['card_id']: json.loads(row['snapshot']) for row in
+                 db.execute('SELECT card_id,snapshot FROM command_center_intent_decisions ORDER BY seq')}
     for row in db.execute(ROWS):
         if row['id'] in hidden:
             continue
         entry = card(row, today)
         if entry:
-            ranked.append(((entry['rank'], entry['due'] or '9999', -row['updated'], entry['id']), entry))
-    ranked.extend(import_cards(db))
-    ranked.sort(key=lambda item: item[0])
-    dispositions = {row['card_id']: row for row in db.execute('SELECT * FROM command_center_dispositions')}
-    now = datetime.now(timezone.utc).isoformat()
-    entries = []
-    for _, entry in ranked:
-        saved = dispositions.get(entry['id'])
-        state = saved['state'] if saved else 'active'
-        if state == 'later' and saved['resume_at'] <= now:
-            state = 'active'
-        entry.update(disposition='done' if entry['reviewed'] else state,
-                     dispositionVersion=saved['version'] if saved else 0,
-                     resumeAt=saved['resume_at'] if state == 'later' else None)
-        entries.append(entry)
-    return entries
+            record = json.loads(row['body'])
+            task = entry
+            if entry['reviewed']:
+                old_action = row['reviewed_action'] or snapshots.get(row['id'], {}).get('action', '')
+                record.update(next_action=old_action, follow_up=row['reviewed_due'])
+                task = card({**dict(row), 'body':json.dumps(record), 'reviewed_stage':None}, today)
+            receipt = json.loads(row['message_body']) if row['message_body'] else None
+            entry.update(card_intents.describe(task, record, receipt, context))
+            entry.update(created=row['created'], intentAction=task['action'], intentRank=task['rank'], intentWhy=task['why'], intentDue=task['due'])
+            ranked.append(((task['rank'], task['due'] or '9999', -row['updated'], entry['id']), entry))
+    for order, entry in import_cards(db):
+        entry.update(intentKey='import:'+entry['id'], intentOperation='information',
+                     evidenceFacts=[], created=-order[2], intentAction='')
+        ranked.append((order, entry))
+    return card_intents.group(db, ranked)
 
 
 def feed(store, scope='all', offset=0):
@@ -169,14 +178,15 @@ def feed(store, scope='all', offset=0):
 
 def chat_summary(entry):
     return {key: entry[key] for key in (
-        'id', 'title', 'company', 'person', 'stage', 'why', 'action', 'source', 'date', 'reviewed', 'disposition', 'resumeAt')}
+        'id', 'title', 'company', 'person', 'stage', 'why', 'action', 'source', 'date', 'reviewed', 'disposition', 'resumeAt',
+        'intentKey', 'memberIds', 'intentOperation', 'intentRevision', 'newEvidence')}
 
 
 def chat_evidence(db, selected_id='', previous_ids=()):
     """Read inside the send transaction, after initialize(store). Hidden content stays excluded."""
     hidden = career_email.hidden_activity_ids(db)
     entries = ranked_cards(db, hidden)
-    by_id = {entry['id']: entry for entry in entries}
+    by_id = {ident: entry for entry in entries for ident in entry['memberIds']}
     from .crm_imports import canonical_id
     references = []
     # Recheck prior card identities even if they have fallen beyond the home page.
@@ -210,7 +220,7 @@ def complete_step(db, ident, revision):
         raise HTTPException(404, 'This card is no longer available.')
     if row['revision'] != revision:
         raise HTTPException(409, 'The record changed. Refresh before completing this step.')
-    entry = card(row, date.today().isoformat())
+    entry = resolve_card(db, ident)
     if not entry or not (entry['action'] or entry['reviewed']):
         raise HTTPException(409, 'This step is no longer pending.')
     record = json.loads(row['body'])
@@ -223,6 +233,7 @@ def complete_step(db, ident, revision):
         revision += 1
     db.execute('INSERT OR REPLACE INTO command_center_reviews VALUES (?,?,?,?)',
                (ident, record['stage'], previous_action, previous_due))
+    card_intents.save(db, entry, 'done')
     return {'id': ident, 'revision': revision}
 
 
@@ -230,16 +241,17 @@ def reopen_step(db, ident, revision):
     row = db.execute(ROWS + ' AND r.id=?', (ident,)).fetchone()
     if not row or ident in career_email.hidden_activity_ids(db):
         raise HTTPException(404, 'This card is no longer available.')
-    entry = card(row, date.today().isoformat())
+    entry = resolve_card(db, ident)
     if not entry or not entry['reviewed'] or row['revision'] != revision:
         raise HTTPException(409, 'The record changed. Refresh before reopening this step.')
     previous = db.execute('SELECT next_action, follow_up FROM command_center_reviews WHERE record_id=?',
                           (ident,)).fetchone()
-    if previous['next_action'] or previous['follow_up']:
-        record = json.loads(row['body'])
+    record = json.loads(row['body'])
+    if previous and (previous['next_action'] or previous['follow_up']):
         record.update(next_action=previous['next_action'], follow_up=previous['follow_up'])
         crm.write_record(db, record, ident, revision)
     db.execute('DELETE FROM command_center_reviews WHERE record_id=?', (ident,))
+    card_intents.save(db, entry, 'active')
     return {'id': ident}
 
 
@@ -261,7 +273,7 @@ def resolve_card(db, ident):
     from .crm_imports import canonical_id
     current_id = canonical_id(db, ident)
     return next((entry for entry in ranked_cards(db, career_email.hidden_activity_ids(db))
-                 if entry['id'] == current_id), None)
+                 if current_id in entry['memberIds']), None)
 
 
 def disposition(store, ident, body):
@@ -272,13 +284,16 @@ def disposition(store, ident, body):
         previous = db.execute('SELECT * FROM command_center_disposition_requests WHERE request_id=?',
                               (body.request_id,)).fetchone()
         if previous:
-            if previous['payload'] != payload:
+            original = json.loads(previous['payload'])
+            original.setdefault('intent_revision', '')
+            if original != json.loads(payload):
                 raise HTTPException(409, 'This request belongs to a different card decision.')
             return json.loads(previous['result'])
         entry = resolve_card(db, ident)
         if not entry:
             raise HTTPException(404, 'This card is no longer available.')
-        if (entry['revision'], entry['dispositionVersion']) != (body.revision, body.disposition_version):
+        if ((entry['revision'], entry['dispositionVersion']) != (body.revision, body.disposition_version)
+                or (body.intent_revision and body.intent_revision != entry['intentRevision'])):
             raise HTTPException(409, 'This card changed. Refresh before deciding.')
         if body.state != 'active' and (entry['disposition'] != 'active' or not entry['action']):
             raise HTTPException(409, 'This suggestion is no longer pending.')
@@ -290,6 +305,7 @@ def disposition(store, ident, body):
         version = entry['dispositionVersion'] + 1
         db.execute('INSERT OR REPLACE INTO command_center_dispositions VALUES (?,?,?,?)',
                    (entry['id'], version, 'active' if body.state == 'done' else body.state, resume_at))
+        card_intents.save(db, entry, body.state, request_id=body.request_id, version=version, resume_at=resume_at)
         result = {'id': entry['id'], 'dispositionVersion': version, 'state': body.state, 'resumeAt': resume_at}
         db.execute('INSERT INTO command_center_disposition_requests VALUES (?,?,?)',
                    (body.request_id, payload, json.dumps(result)))

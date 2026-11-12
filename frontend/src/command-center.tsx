@@ -20,6 +20,7 @@ type Props = {
 type Card = {
   id: string; revision: number; intentRevision?: string; disposition: 'active'|'done'|'later'|'dismissed'; dispositionVersion: number; resumeAt: string|null; kind: string; reviewed: boolean; title: string; company: string; companyId: string;
   person: string; personId: string; why: string; evidence: string; source: string;
+  newEvidence?: {id:string; evidence:string; source:string; sourceUrl:string; date:string; stage:string}[];
   sourceUrl: string; action: string; date: string; stage: string; receiptId: string | null;
 };
 type Contact = {id: string; kind: string; company_id: string; name: string};
@@ -63,19 +64,20 @@ function Correction({api, card, saved, cancel, onBusy}: {
 }
 
 type Execution = {
-  kind: string; label: string; supported: boolean; reason: string;
+  kind: string; label: string; buttonLabel: string; supported: boolean; reason: string; resultCurrent: boolean; intentRevision?: string;
   revision: number; dispositionVersion: number;
   result: null | {id: string; kind: string; revision: number; dispositionVersion: number;
-    status: string; summary: string; scope: string; draftId?: string; draftText?: string; briefText?: string};
+    status: string; summary: string; scope: string; helperRequestId?: string;
+    delegation?: {status: string; tasks: {id: string; helper: string; status: string; reason: string; report?: unknown}[]}; draftId?: string; draftText?: string; briefText?: string};
 };
 
-function CardExecution({api, card, busy, onBusy, open, actions}: {
+function CardExecution({api, card, busy, onBusy, open, actions, refreshCard}: {
   api: Api; card: Card; busy: boolean; onBusy: (busy: boolean) => void; actions: ReactNode;
-  open: (recordId: string, cardId: string) => void;
+  open: (recordId: string, cardId: string) => void; refreshCard: () => void;
 }) {
   const [execution, setExecution] = useState<Execution>(), [error, setError] = useState('');
-  const [reload, setReload] = useState(0);
-  const pending = useRef<{revision: number; dispositionVersion: number; request_id: string; kind: string} | undefined>(undefined);
+  const [reload, setReload] = useState(0), [retryNote, setRetryNote] = useState('');
+  const pending = useRef<{revision: number; dispositionVersion: number; request_id: string; kind: string; intentRevision?: string} | undefined>(undefined);
   const inFlight = useRef(false), mounted = useRef(true);
   useEffect(() => {mounted.current=true; return () => {mounted.current=false}}, []);
   useEffect(() => {
@@ -83,12 +85,30 @@ function CardExecution({api, card, busy, onBusy, open, actions}: {
     api(root+'/cards/'+encodeURIComponent(card.id)+'/execution').then(data => {if (active) {setExecution(data); setError('')}})
       .catch(e => {if (active) setError(e.message)});
     return () => {active=false};
-  }, [api, card.id, reload]);
+  }, [api, card.id, card.revision, card.dispositionVersion, card.intentRevision, reload]);
+  useEffect(() => {
+    const job = execution?.result?.delegation;
+    if (!job?.tasks.some(task => !['completed','failed','blocked','unavailable','delivery_rejected'].includes(task.status))) return;
+    const timer = window.setTimeout(() => setReload(n => n+1), 3000);
+    return () => window.clearTimeout(timer);
+  }, [execution]);
+  async function retryHelpers() {
+    const id = execution?.result?.helperRequestId;
+    if (!id || inFlight.current) return;
+    inFlight.current=true; onBusy(true); setError('');
+    try {
+      const job = await api('/admin/helper-requests/'+encodeURIComponent(id)+'/retry','POST',{});
+      if (mounted.current) setRetryNote(job.retryNote || 'Check the updated helper status before requesting more work.');
+      setReload(n => n+1);
+    }
+    catch (e) {if (mounted.current) setError((e as Error).message)}
+    finally {inFlight.current=false; onBusy(false)}
+  }
   async function execute() {
     if (!execution || inFlight.current) return;
     inFlight.current=true; onBusy(true); setError('');
     const body=pending.current || {revision: execution.revision, dispositionVersion: execution.dispositionVersion,
-      request_id: crypto.randomUUID(), kind: execution.kind};
+      request_id: crypto.randomUUID(), kind: execution.kind, intentRevision: execution.intentRevision};
     pending.current=body;
     try {
       const data=await api(root+'/cards/'+encodeURIComponent(card.id)+'/execute','POST',body);
@@ -97,20 +117,42 @@ function CardExecution({api, card, busy, onBusy, open, actions}: {
     } catch (e) {if (mounted.current) setError((e as Error).message)}
     finally {inFlight.current=false; onBusy(false)}
   }
-  const stale = execution && (execution.revision!==card.revision || execution.dispositionVersion!==card.dispositionVersion);
-  const alreadyExecuted = execution?.result && execution.result.revision===execution.revision
-    && execution.result.dispositionVersion===execution.dispositionVersion;
+  const stale = execution && (execution.revision!==card.revision || execution.dispositionVersion!==card.dispositionVersion
+    || execution.intentRevision!==card.intentRevision && !!card.intentRevision);
+  const resultPanel = useRef<HTMLDetailsElement>(null);
+  const retry = () => {pending.current=undefined; setExecution(undefined); setError(''); setReload(n => n+1)};
+  const primaryLabel = stale ? 'Refresh suggestion' : !execution ? (error ? 'Retry action' : 'Checking action…')
+    : execution.resultCurrent ? 'View result' : !execution.supported ? 'Open record' : execution.buttonLabel;
+  function primaryAction() {
+    if (stale) refreshCard();
+    else if (!execution) retry();
+    else if (execution.resultCurrent) {if (resultPanel.current) {resultPanel.current.open=true; resultPanel.current.focus()}}
+    else if (!execution.supported) open(card.id,card.id);
+    else void execute();
+  }
   return <section className="cc-execution" aria-label="Agent action">
     <div className="cc-execution-content" tabIndex={0} aria-label="Agent action and result">
-    {error && <p role="alert">{error} <button disabled={busy} onClick={() => {pending.current=undefined; setReload(n => n+1)}}>Refresh action</button></p>}
+    {error && <p role="alert">{error} <button disabled={busy} onClick={retry}>Refresh action</button></p>}
     {!execution && !error && <p role="status">Checking available action…</p>}
     {execution && <>
       {execution.label!=='Do it' && execution.label.toLowerCase()!==card.action.toLowerCase() &&
         <p className="cc-operation">{execution.label}</p>}
       {stale && <p role="alert">This card changed. Refresh the feed before asking the agent to act.</p>}
       {execution.reason && <p>{execution.reason}</p>}
-      {execution.result && <details open><summary>Agent result</summary>
+      {execution.result && <details ref={resultPanel} tabIndex={-1} open><summary>{execution.resultCurrent ? 'Agent result' : 'Earlier result'}</summary>
         <p>{execution.result.summary}</p><p>{execution.result.scope}</p>
+        {execution.result.delegation && <div aria-live="polite">
+          <p>Research request: {execution.result.delegation.status}</p>
+          {execution.result.delegation.tasks.map(task => <div key={task.id}>
+            <p>{task.helper}: {task.status}{task.reason ? ' · '+task.reason : ''}</p>
+            {!task.reason && ['failed','blocked'].includes(task.status) && <p>Inspect the helper report or original conversation before requesting replacement work.</p>}
+            {!!task.report && <pre className="cc-result">{typeof task.report==='string' ? task.report : JSON.stringify(task.report,null,2)}</pre>}
+          </div>)}
+          {retryNote && <p role="status">{retryNote}</p>}
+          {execution.result.delegation.tasks.some(task => task.status==='unavailable'
+            || task.helper==='grokbot' && ['delivery_unknown','delivery_rejected','sending'].includes(task.status)) &&
+            <button disabled={busy} onClick={() => void retryHelpers()}>Retry available work</button>}
+        </div>}
         <small>Record revision {execution.result.revision} · decision version {execution.result.dispositionVersion}</small>
         {execution.result.draftText && <pre className="cc-result">{execution.result.draftText}</pre>}
         {execution.result.briefText && <pre className="cc-result">{execution.result.briefText}</pre>}
@@ -120,8 +162,8 @@ function CardExecution({api, card, busy, onBusy, open, actions}: {
     </div>
     <div className="cc-decision-bar" aria-label="Suggestion actions">
       {card.disposition==='active' && card.action && <button className="admin-primary"
-        disabled={busy || !execution || !execution.supported || !!alreadyExecuted || !!stale}
-        onClick={() => void execute()}>Do it</button>}
+        disabled={busy || !execution && !error}
+        onClick={primaryAction}>{primaryLabel}</button>}
       {actions}
     </div>
   </section>;
@@ -162,14 +204,16 @@ export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, 
     async function load() {
       const data = await api(root+'?scope='+scope+'&offset='+offset);
       let extra: Card | undefined;
+      let missingSelected = false;
       if (selected && !data.cards.some((c: Card) => c.id===selected)) {
-        extra = await api(root+'/cards/'+encodeURIComponent(selected));
+        try {extra = await api(root+'/cards/'+encodeURIComponent(selected))}
+        catch (e) {if ((e as Error & {status?: number}).status===404) missingSelected=true; else throw e}
       }
       if (active) {
         setCards(data.cards); setDetached(extra); setNextOffset(data.nextOffset);
-        const resolvedId = selected || data.cards[selectLast.current ? data.cards.length-1 : 0]?.id || '';
+        const resolvedId = (!missingSelected && selected) || data.cards[selectLast.current ? data.cards.length-1 : 0]?.id || '';
         if (resolvedId===previousCard.current?.id) setAnimating(false);
-        if (!selected) {
+        if (!selected || missingSelected) {
           const nextId = data.cards[selectLast.current ? data.cards.length-1 : 0]?.id || '';
           setSelected(nextId);
           notifyLocation(nextId);
@@ -213,7 +257,7 @@ export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, 
     inFlight.current=true; setSaving(true); setError(''); setDirection(1);
     const previous = pending.current;
     const body = previous?.id===current.id && previous.state===state ? previous.body : {
-      revision: current.revision, disposition_version: current.dispositionVersion,
+      revision: current.revision, disposition_version: current.dispositionVersion, intent_revision: current.intentRevision,
       state, request_id: crypto.randomUUID(),
     };
     pending.current={id: current.id, state, body};
@@ -261,11 +305,19 @@ export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, 
               {visibleCard.action && <div className="cc-next-step"><span>Suggested next step</span><p>{visibleCard.action}</p></div>}
               {visibleCard.disposition==='later' && <p>Returns {new Date(visibleCard.resumeAt!).toLocaleString()}</p>}
               {visibleCard.disposition==='dismissed' && <p>You chose not to do this.</p>}
-              {visibleCard.evidence && <figure className="cc-evidence">
+              {visibleCard.newEvidence?.map((item, index) => <figure className="cc-evidence" key={item.id+':'+index}>
+                <blockquote>{item.evidence || [item.stage,item.date].filter(Boolean).join(' · ')}</blockquote>
+                <figcaption>New evidence · {item.source}{item.date ? ' · '+item.date : ''}</figcaption>
+              </figure>)}
+              {!visibleCard.newEvidence?.length && visibleCard.evidence && <figure className="cc-evidence">
                 <blockquote>{visibleCard.evidence}</blockquote>
                 <figcaption>{visibleCard.source}</figcaption>
               </figure>}
               <details><summary>Inspect evidence</summary>
+                {visibleCard.newEvidence?.map((item, index) => <p key={item.id+':'+index}>
+                  <button onClick={() => onOpenRecord(item.id,visibleCard.id)}>Inspect new evidence</button>
+                  {item.sourceUrl && <a href={item.sourceUrl} target="_blank" rel="noreferrer">Open original source</a>}
+                </p>)}
                 {visibleCard.evidence && <blockquote>{visibleCard.evidence}</blockquote>}
                 {visibleCard.sourceUrl && <a href={visibleCard.sourceUrl} target="_blank" rel="noreferrer">Open original message</a>}
                 <div className="cc-actions">{visibleCard.kind==='import' ? <button onClick={onOpenMyCareer}>Open My Career</button> :
@@ -277,8 +329,8 @@ export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, 
                   saved={() => {setEditing(''); refresh()}} onBusy={setSaving}/>}
               </details>
             </div>
-            <CardExecution key={visibleCard.id+':'+visibleCard.revision+':'+visibleCard.dispositionVersion}
-              api={api} card={visibleCard} busy={saving || transitioning} onBusy={setSaving} open={onOpenRecord}
+            <CardExecution key={visibleCard.id+':'+visibleCard.revision+':'+visibleCard.dispositionVersion+':'+(visibleCard.intentRevision || '')+':'+generation}
+              api={api} card={visibleCard} busy={saving || transitioning} onBusy={setSaving} open={onOpenRecord} refreshCard={refresh}
               actions={<>
                 {visibleCard.disposition==='active' && visibleCard.action && <>
                   <button disabled={saving} onClick={() => void decide('done')}>Done myself</button>
