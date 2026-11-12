@@ -20,6 +20,7 @@ type Props = {
 type Card = {
   id: string; revision: number; intentRevision?: string; disposition: 'active'|'done'|'later'|'dismissed'; dispositionVersion: number; resumeAt: string|null; kind: string; reviewed: boolean; title: string; company: string; companyId: string;
   person: string; personId: string; why: string; evidence: string; source: string;
+  newEvidence?: {id:string; evidence:string; source:string; sourceUrl:string; date:string; stage:string}[];
   sourceUrl: string; action: string; date: string; stage: string; receiptId: string | null;
 };
 type Contact = {id: string; kind: string; company_id: string; name: string};
@@ -249,7 +250,7 @@ export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, 
     inFlight.current=true; setSaving(true); setError(''); setDirection(1);
     const previous = pending.current;
     const body = previous?.id===current.id && previous.state===state ? previous.body : {
-      revision: current.revision, disposition_version: current.dispositionVersion,
+      revision: current.revision, disposition_version: current.dispositionVersion, intent_revision: current.intentRevision,
       state, request_id: crypto.randomUUID(),
     };
     pending.current={id: current.id, state, body};
@@ -297,11 +298,19 @@ export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, 
               {visibleCard.action && <div className="cc-next-step"><span>Suggested next step</span><p>{visibleCard.action}</p></div>}
               {visibleCard.disposition==='later' && <p>Returns {new Date(visibleCard.resumeAt!).toLocaleString()}</p>}
               {visibleCard.disposition==='dismissed' && <p>You chose not to do this.</p>}
-              {visibleCard.evidence && <figure className="cc-evidence">
+              {visibleCard.newEvidence?.map((item, index) => <figure className="cc-evidence" key={item.id+':'+index}>
+                <blockquote>{item.evidence || [item.stage,item.date].filter(Boolean).join(' · ')}</blockquote>
+                <figcaption>New evidence · {item.source}{item.date ? ' · '+item.date : ''}</figcaption>
+              </figure>)}
+              {!visibleCard.newEvidence?.length && visibleCard.evidence && <figure className="cc-evidence">
                 <blockquote>{visibleCard.evidence}</blockquote>
                 <figcaption>{visibleCard.source}</figcaption>
               </figure>}
               <details><summary>Inspect evidence</summary>
+                {visibleCard.newEvidence?.map((item, index) => <p key={item.id+':'+index}>
+                  <button onClick={() => onOpenRecord(item.id,visibleCard.id)}>Inspect new evidence</button>
+                  {item.sourceUrl && <a href={item.sourceUrl} target="_blank" rel="noreferrer">Open original source</a>}
+                </p>)}
                 {visibleCard.evidence && <blockquote>{visibleCard.evidence}</blockquote>}
                 {visibleCard.sourceUrl && <a href={visibleCard.sourceUrl} target="_blank" rel="noreferrer">Open original message</a>}
                 <div className="cc-actions">{visibleCard.kind==='import' ? <button onClick={onOpenMyCareer}>Open My Career</button> :
