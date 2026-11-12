@@ -18,7 +18,7 @@ type Props = {
   renderChat: (agent: 'owner', context: string, disabled: boolean) => ReactNode;
 };
 type Card = {
-  id: string; intentRevision?: string; revision: number; disposition: 'active'|'done'|'later'|'dismissed'; dispositionVersion: number; resumeAt: string|null; kind: string; reviewed: boolean; title: string; company: string; companyId: string;
+  id: string; revision: number; intentRevision?: string; disposition: 'active'|'done'|'later'|'dismissed'; dispositionVersion: number; resumeAt: string|null; kind: string; reviewed: boolean; title: string; company: string; companyId: string;
   person: string; personId: string; why: string; evidence: string; source: string;
   sourceUrl: string; action: string; date: string; stage: string; receiptId: string | null;
 };
@@ -170,7 +170,7 @@ export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, 
   const [direction, setDirection] = useState(1), [animating, setAnimating] = useState(false);
   const previousCard = useRef<Card | undefined>(undefined);
   const enteringCard = useRef('');
-  const [scope, setScope] = useState<ReviewScope>(reviewScope || 'review'), [freeChat, setFreeChat] = useState(false);
+  const [scope, setScope] = useState<ReviewScope>(reviewScope || 'review');
   const [offset, setOffset] = useState(reviewOffset || 0), [nextOffset, setNextOffset] = useState<number|null>(null);
   const [generation, setGeneration] = useState(0), [notice, setNotice] = useState('');
   const pending = useRef<{id: string; body: unknown; state: string} | undefined>(undefined);
@@ -266,7 +266,7 @@ export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, 
     finally {inFlight.current=false; setSaving(false)}
   }
   const index = cards.findIndex(c => c.id===current?.id);
-  const target = freeChat ? '' : current?.id || selected;
+  const target = current?.id || '';
   const transitioning = loading || animating;
   return <div className="command-center">
     <header className="cc-header"><h1>Command center</h1><button onClick={onOpenMyCareer}>My Career</button></header>
@@ -334,19 +334,11 @@ export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, 
       </nav>
     </section>
     <section className="cc-chat" aria-label="Chat">
-      <div className="cc-chat-heading">
-        <h2>{freeChat ? 'Ask your agent' : current ? 'Discuss this suggestion' : 'Ask your agent'}</h2>
-        <div className="cc-chat-modes">
-          <button aria-pressed={!freeChat} disabled={!current || transitioning} onClick={() => setFreeChat(false)}>Current card</button>
-          <button aria-pressed={freeChat} onClick={() => setFreeChat(true)}>Free chat</button>
-        </div>
-      </div>
-      <p className="cc-chat-target" aria-live="polite">{freeChat ? 'Using current app evidence.' :
-        current ? current.title+' · '+(current.company || 'My Career') : 'Select a suggestion or use free chat.'}</p>
+      <div className="cc-chat-heading"><h2>Ask your agent</h2></div>
       <div className="cc-chat-body">
         {renderChat('owner', JSON.stringify({surface:'command-center',card:target,
-          ...(!freeChat && current ? {revision:current.revision,dispositionVersion:current.dispositionVersion,title:current.title} : {})}),
-          transitioning || saving || (!freeChat && !current))}
+          ...(current ? {revision:current.revision,dispositionVersion:current.dispositionVersion,intentRevision:current.intentRevision,title:current.title} : {})}),
+          transitioning || saving)}
       </div>
     </section>
   </div>;

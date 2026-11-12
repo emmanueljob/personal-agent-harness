@@ -188,3 +188,39 @@ def test_selected_card_snapshot_guard_and_accepted_retry(tmp_path, monkeypatch):
             record['stage'] = 'closed'
             crm.write_record(db, record, card_id, row['revision'])
         assert send(current)[0].status_code == 409
+
+
+def test_optional_intent_snapshot_guard_preserves_accepted_retry(tmp_path, monkeypatch):
+    import json
+    from harness import command_center, conversations
+
+    module, store = setup(tmp_path, monkeypatch)
+    conversations.initialize(store)
+    monkeypatch.setattr(conversations, 'availability', lambda *_: '')
+    sent = []
+    monkeypatch.setattr(grok, 'push_webhook', lambda payload: sent.append(payload) or 200)
+    current = {'id':'synthetic-group', 'revision':1, 'dispositionVersion':0, 'intentRevision':'a'*64}
+    monkeypatch.setattr(command_center, 'resolve_card', lambda *_: current)
+    monkeypatch.setattr(command_center, 'chat_evidence', lambda *_args, **_kwargs: {'cards':[], 'references':[]})
+    with TestClient(module.app) as client:
+        thread = client.post(ROOT, headers=OWNER, json={'agent':'grokbot'}).json()['id']
+        path = ROOT+'/'+thread+'/messages'
+        scope = {'surface':'command-center','card':'synthetic-group','revision':1,'dispositionVersion':0,
+                 'intentRevision':current['intentRevision']}
+        body = {'request_id':'synthetic-intent-first','text':'Explain the suggestion','context':json.dumps(scope)}
+        first = client.post(path, headers=OWNER, json=body)
+        assert first.status_code == 200, first.text
+        task = first.json()['turns'][0]['id']
+        grok.acknowledge(store, task, 'synthetic-intent-claim')
+        grok.submit(store, task, 'synthetic-intent-claim', grok.Result(
+            submission_id='synthetic-intent-result', outcome='completed', report='Synthetic response'))
+        current['intentRevision'] = 'b'*64
+        assert client.post(path, headers=OWNER, json=body).status_code == 200
+        assert len(sent) == 1
+        stale = client.post(path, headers=OWNER, json={**body,'request_id':'synthetic-intent-stale'})
+        assert stale.status_code == 409 and len(sent) == 1
+        # Older clients remain valid and get freshly resolved evidence.
+        scope.pop('intentRevision')
+        compatible = client.post(path, headers=OWNER, json={**body,'request_id':'synthetic-intent-old',
+                                                           'context':json.dumps(scope)})
+        assert compatible.status_code == 200
