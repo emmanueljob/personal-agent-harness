@@ -301,7 +301,7 @@ export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, 
       <div className="cc-chat-heading"><h2>Ask your agent</h2></div>
       <div className="cc-chat-body">
         {renderChat('owner', JSON.stringify({surface:'command-center',card:target,
-          ...(current ? {revision:current.revision,dispositionVersion:current.dispositionVersion,title:current.title} : {})}),
+          ...(current ? {revision:current.revision,dispositionVersion:current.dispositionVersion,intentRevision:current.intentRevision,title:current.title} : {})}),
           transitioning || saving)}
       </div>
     </section>
