@@ -37,7 +37,7 @@ function Conversation({api, agent, context = '', disabled = false, threadId, onT
   const pending = useRef<{thread: string; text: string; context: string; request_id: string} | null>(null);
   const mounted = useRef(true);
   const historyElement = useRef<HTMLDivElement>(null), followHistory = useRef(true);
-  const sendLock = useRef(false);
+  const sendLock = useRef(false), composing = useRef(false);
   useEffect(() => { mounted.current = true; return () => {mounted.current = false;}; }, []);
   useEffect(() => {select(threadId || ''); setChooseNew(false);}, [threadId]);
 
@@ -93,6 +93,8 @@ function Conversation({api, agent, context = '', disabled = false, threadId, onT
   }
 
   const last = thread?.turns.at(-1);
+  const canSend = !busy && !disabled && !reason && !!draft.trim()
+    && (!last || done.includes(last.status));
   useEffect(() => {
     if (agent==='owner' && followHistory.current && historyElement.current) {
       historyElement.current.scrollTop=historyElement.current.scrollHeight;
@@ -155,12 +157,19 @@ function Conversation({api, agent, context = '', disabled = false, threadId, onT
       }}>{history}</div> : history}
     <form onSubmit={e => {
       e.preventDefault();
-      if (busy || disabled || sendLock.current) return;
+      if (!canSend || sendLock.current) return;
       sendLock.current = true;
       void run(send).finally(() => {sendLock.current = false;});
     }}>
-      <label>Message<textarea aria-label="Message" maxLength={4000} value={draft} disabled={busy || disabled} onChange={e => setDraft(e.target.value)}/></label>
-      <button disabled={busy || disabled || !!reason || !draft.trim() || (!!last && !done.includes(last.status))}>Send</button>
+      <label>Message<textarea aria-label="Message" maxLength={4000} value={draft} disabled={busy || disabled} onChange={e => setDraft(e.target.value)}
+        onCompositionStart={() => {composing.current = true;}}
+        onCompositionEnd={() => {composing.current = false;}}
+        onKeyDown={e => {
+          if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing || composing.current || e.keyCode === 229) return;
+          e.preventDefault();
+          if (canSend) e.currentTarget.form?.requestSubmit();
+        }}/></label>
+      <button disabled={!canSend}>Send</button>
     </form>
   </section>;
 }
