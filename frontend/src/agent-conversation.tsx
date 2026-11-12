@@ -148,10 +148,12 @@ function Conversation({api, agent, context = '', disabled = false, threadId, onT
             <p style={{whiteSpace: 'pre-wrap'}}>{task.report}</p></details>}
         </div>)}
         {job.answerStatus === 'failed' && <p role="alert">The personal agent could not compose the results. The helper reports are saved.</p>}
+        {(job.answerStatus === 'failed' || job.tasks.some(task =>
+          task.status === 'unavailable' || (task.helper === 'grokbot' && ['delivery_unknown', 'delivery_rejected', 'sending'].includes(task.status)))) &&
         <button type="button" disabled={busy || disabled} onClick={() => void run(async () => {
           await api('/admin/helper-requests/'+job.id+'/retry', 'POST');
           setThread(await api(root+'/'+thread!.id));
-        })}>Retry available work</button>
+        })}>Retry available work</button>}
       </section>)}
 
       {((agent === 'grokbot' && ['sending', 'queued', 'delivery_unknown', 'delivery_rejected'].includes(t.status)) || (agent === 'owner' && t.status === 'failed')) &&

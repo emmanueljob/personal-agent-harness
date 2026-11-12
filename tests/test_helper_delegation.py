@@ -152,3 +152,114 @@ def test_local_crm_uses_local_tools_without_helper_assignment(tmp_path, monkeypa
             json={'request_id':'synthetic-local-crm','text':'Show my local CRM records.','context':''})
         runner.run_turn(store,response.json()['turns'][0]['id'])
         assert not store.query('SELECT * FROM owner_helper_requests')
+
+
+def test_named_helpers_permissions_and_unknown_muse_are_truthful(tmp_path, monkeypatch):
+    module, store = ready(tmp_path, monkeypatch)
+    for helper in ('Muse','Grokbot'):
+        body = helpers.WorkRequest(request_id='synthetic-named-'+helper,source_kind='card_action',
+            source_id='synthetic-named-action-'+helper,kind='research',instruction='Research a synthetic topic',
+            user_message='Ask '+helper+' to research a synthetic topic.')
+        job = helpers.request_work(store,body)
+        assert [t['helper'] for t in job['tasks']] == [helper.lower()]
+    forbidden = helpers.WorkRequest(request_id='synthetic-no-send',source_kind='card_action',
+        source_id='synthetic-no-send-source',kind='send_outreach',instruction='Send a note',
+        user_message='Do not message anyone. Draft only.')
+    with pytest.raises(Exception):
+        helpers.request_work(store,forbidden)
+    assert not store.query('SELECT * FROM owner_helper_requests WHERE request_id=?',(forbidden.request_id,))
+    allowed = forbidden.model_copy(update={'request_id':'synthetic-explicit-send',
+        'user_message':'Send the approved synthetic message to Casey Fixture by email.'})
+    job = helpers.request_work(store,allowed)
+    assert job['tasks'][0]['helper']=='muse'
+    task = job['tasks'][0]['id']
+    with store.connect() as db:
+        db.execute("UPDATE muse_turns SET status='delivery_unknown' WHERE id=?", (task,))
+    retried = helpers.retry_request(store,job['id'])
+    assert retried['status']=='unknown'
+    assert retried['tasks'][0]['status']=='delivery_unknown'
+    assert retried['tasks'][0]['deliveryVerified'] is False
+    assert 'not resent' in retried['retryNote']
+
+
+def test_enqueue_rollback_and_snapshot_guard(tmp_path, monkeypatch):
+    from harness import command_center
+    from test_command_center import add, company
+    module, store = ready(tmp_path, monkeypatch)
+    ident = add(store,company('Fixture company',next_action='Research this company'))
+    body = helpers.WorkRequest(request_id='synthetic-rollback',source_kind='card_action',
+        source_id='synthetic-action-rollback',kind='research',instruction='Research Fixture company',
+        include_card=True,card_id=ident,revision=999)
+    with pytest.raises(Exception):
+        helpers.request_work(store,body)
+    assert not store.query('SELECT * FROM owner_helper_requests')
+    with pytest.raises(ValueError):
+        with store.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            helpers.request_work(store,body.model_copy(update={'revision':1}),connection=db)
+            raise ValueError('synthetic outer transaction failure')
+    assert not store.query('SELECT * FROM owner_helper_requests')
+    assert not store.query('SELECT * FROM owner_helper_tasks')
+
+
+def test_local_crm_write_and_automatic_research_routing(tmp_path, monkeypatch):
+    from test_command_center import add, company
+    module,store=ready(tmp_path,monkeypatch)
+    record=add(store,company('Fixture local CRM'))
+    model=ToolModel(responses=[
+        AIMessage(content='',tool_calls=[{'id':'local-update','name':'update_job_record',
+            'args':{'record_id':record,'revision':1,'changes':{'notes':'Synthetic local correction'}}}]),
+        AIMessage(content='Updated the local CRM.'),
+        AIMessage(content='',tool_calls=[{'id':'automatic-research','name':'delegate_work',
+            'args':{'instruction':'Research Fixture Company','kind':'research'}}]),
+        AIMessage(content='Research is pending with the helper.')])
+    monkeypatch.setattr(agent,'local_model',lambda *_:model)
+    with TestClient(module.app) as client:
+        thread=client.post('/api/admin/conversations',headers=OWNER,json={'agent':'owner'}).json()['id']
+        path='/api/admin/conversations/'+thread
+        for i,text in enumerate(('Change the local CRM notes.','Research Fixture Company.')):
+            result=client.post(path+'/messages',headers=OWNER,json={
+                'request_id':f'synthetic-routing-{i}','text':text,'context':''})
+            assert result.status_code==200,result.text
+            runner.run_turn(store,result.json()['turns'][-1]['id'])
+            if i==0:
+                assert not store.query('SELECT * FROM owner_helper_requests')
+                assert json.loads(store.query('SELECT body FROM crm_records WHERE id=?',(record,))[0]['body'])['notes']=='Synthetic local correction'
+        jobs=store.query('SELECT id FROM owner_helper_requests')
+        assert len(jobs)==1
+        assert helpers.job_status(store,jobs[0]['id'])['tasks'][0]['helper']=='grokbot'
+
+
+def test_lost_tool_result_retry_reuses_persisted_assignment(tmp_path, monkeypatch):
+    module,store=ready(tmp_path,monkeypatch)
+    model=ToolModel(responses=[
+        AIMessage(content='',tool_calls=[{'id':'crash-safe-helper','name':'delegate_work',
+            'args':{'instruction':'Research a synthetic company','kind':'research'}}]),
+        AIMessage(content='The existing helper request is pending.')])
+    monkeypatch.setattr(agent,'local_model',lambda *_:model)
+    original=helpers.request_work
+    def crash_after_commit(*args,**kwargs):
+        original(*args,**kwargs)
+        raise RuntimeError('Synthetic process failure after durable enqueue')
+    monkeypatch.setattr(helpers,'request_work',crash_after_commit)
+    with TestClient(module.app) as client:
+        thread=client.post('/api/admin/conversations',headers=OWNER,json={'agent':'owner'}).json()['id']
+        path='/api/admin/conversations/'+thread
+        result=client.post(path+'/messages',headers=OWNER,json={
+            'request_id':'synthetic-lost-result','text':'Research a synthetic company.','context':''})
+        turn=result.json()['turns'][0]['id']
+        with pytest.raises(RuntimeError):
+            runner.run_turn(store,turn)
+        original_task=store.query('SELECT task_id FROM owner_helper_tasks')[0]['task_id']
+        monkeypatch.setattr(helpers,'request_work',original)
+        assert store.retry(turn)
+        runner.run_turn(store,turn)
+        assert [r['task_id'] for r in store.query('SELECT task_id FROM owner_helper_tasks')]==[original_task]
+        assert len(store.query('SELECT * FROM owner_helper_requests'))==1
+        assert client.get(path,headers=OWNER).json()['turns'][0]['reply'].startswith('The existing helper request')
+
+
+def test_deep_catalog_registers_owner_tools():
+    from harness import deep_runtime
+    deep_runtime.register_tools()
+    assert {'delegate_work','read_helper_work'} <= deep_runtime.ROUTED.keys()
