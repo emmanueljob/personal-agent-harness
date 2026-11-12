@@ -115,6 +115,8 @@ def submit(store, ident, claim_id, result):
         if row['action']=='export_job_search' and result.outcome=='completed':
             insert_source(db,Source(provider='grokbot',reference='assignment:'+ident,title='Grok Bot job-search report',
                                     report=result.report,complete=result.complete_export))
+    from .helper_delegation import mark_result
+    mark_result(store, ident)
     return {'task_id': ident, 'accepted': True, 'duplicate': False}
 
 

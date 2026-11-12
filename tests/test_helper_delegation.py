@@ -329,3 +329,88 @@ def test_explicit_sending_instructions_are_forwarded_without_verified_claim(tmp_
     job=helpers.request_work(store,body)
     assert job['status']=='pending'
     assert all(t['deliveryVerified'] is False for t in job['tasks'])
+
+
+def test_valid_late_grok_report_replaces_unavailable_answer_without_new_assignment(tmp_path, monkeypatch):
+    module,store=ready(tmp_path,monkeypatch)
+    model=ToolModel(responses=[
+        AIMessage(content='',tool_calls=[{'id':'late-request','name':'delegate_work',
+            'args':{'instruction':'Research a synthetic topic','kind':'research'}}]),
+        AIMessage(content='Grokbot research is pending.'),
+        AIMessage(content='Grokbot is unavailable; no work completion is established.'),
+        AIMessage(content='The delayed Grokbot report arrived. Its statements remain unverified.')])
+    monkeypatch.setattr(agent,'local_model',lambda *_:model)
+    sent=[]
+    def uncertain(payload):
+        sent.append(payload)
+        raise TimeoutError('Synthetic uncertain webhook acceptance')
+    monkeypatch.setattr(grok,'push_webhook',uncertain)
+    with TestClient(module.app) as client:
+        thread=client.post('/api/admin/conversations',headers=OWNER,json={'agent':'owner'}).json()['id']
+        path='/api/admin/conversations/'+thread
+        posted=client.post(path+'/messages',headers=OWNER,json={
+            'request_id':'synthetic-late-owner','text':'Ask Grokbot to research a synthetic topic.','context':''})
+        owner_turn=posted.json()['turns'][0]['id']
+        runner.run_turn(store,owner_turn)
+        helpers.resume(store)
+        job_id=store.query('SELECT id FROM owner_helper_requests')[0]['id']
+        task=helpers.job_status(store,job_id)['tasks'][0]['id']
+        assert helpers.job_status(store,job_id)['status']=='unknown'
+        helpers.retry_request(store,job_id)
+        # Connection disappears before the queued retry can send. The first uncertain delivery can still report later.
+        monkeypatch.delenv('GROKBOT_WEBHOOK_KEY')
+        helpers.resume(store)
+        first_answer=store.query('SELECT synthesis_id FROM owner_helper_requests WHERE id=?',(job_id,))[0]['synthesis_id']
+        runner.run_turn(store,first_answer)
+        assert 'unavailable' in client.get(path,headers=OWNER).json()['turns'][0]['reply']
+        monkeypatch.setenv('GROKBOT_WEBHOOK_KEY','synthetic-webhook-key')
+        claim={'task_id':task,'claim_id':'synthetic-delayed-claim'}
+        assert content(call(client,'acknowledge_assignment',claim))['should_run']
+        result={'submission_id':'synthetic-delayed-result','outcome':'completed','report':'Synthetic late research report.'}
+        assert content(call(client,'submit_result',{**claim,'result':result}))['accepted']
+        helpers.resume(store)
+        second_answer=store.query('SELECT synthesis_id FROM owner_helper_requests WHERE id=?',(job_id,))[0]['synthesis_id']
+        assert second_answer!=first_answer
+        runner.run_turn(store,second_answer)
+        assert 'delayed Grokbot report arrived' in client.get(path,headers=OWNER).json()['turns'][0]['reply']
+        assert len(sent)==1 and sent[0]['task_id']==task
+        assert len(store.query('SELECT * FROM owner_helper_tasks'))==1
+        assert content(call(client,'submit_result',{**claim,'result':result}))['duplicate']
+        assert store.query('SELECT synthesis_id FROM owner_helper_requests WHERE id=?',(job_id,))[0]['synthesis_id']==second_answer
+
+
+def test_muse_unavailable_task_cannot_submit_unclaimed_reply(tmp_path, monkeypatch):
+    module,store=ready(tmp_path,monkeypatch)
+    with store.connect() as db:
+        db.execute('UPDATE muse_bridge_state SET ready=0')
+    job=helpers.request_work(store,helpers.WorkRequest(
+        request_id='synthetic-unclaimed-muse',source_kind='card_action',source_id='synthetic-unclaimed-source',
+        kind='research',instruction='Research a synthetic topic',helpers=['muse']))
+    task=job['tasks'][0]['id']
+    with TestClient(module.app) as client:
+        headers={'Authorization':'Bearer synthetic-bridge'}
+        assert client.post('/api/muse-companion/turns/'+task,headers=headers,
+                           json={'reply':'Unclaimed synthetic reply'}).status_code==404
+        client.post('/api/muse-companion/claim',headers=headers,json={'ready':True})
+        helpers.retry_request(store,job['id'])
+        claim=client.post('/api/muse-companion/claim',headers=headers,json={'ready':True}).json()
+        assert claim['send']['id']==task
+        assert client.post('/api/muse-companion/turns/'+task,headers=headers,
+                           json={'reply':'Claimed synthetic reply'}).status_code==200
+        assert helpers.job_status(store,job['id'])['status']=='completed'
+
+
+def test_both_helpers_get_one_sender_and_one_review_role(tmp_path, monkeypatch):
+    _,store=ready(tmp_path,monkeypatch)
+    job=helpers.request_work(store,helpers.WorkRequest(
+        request_id='synthetic-one-sender',source_kind='card_action',source_id='synthetic-send-source',
+        kind='send_outreach',instruction='Send the approved synthetic message.',
+        user_message='Ask Muse and Grokbot to send the approved note to Casey Fixture by email.'))
+    assert {t['role'] for t in job['tasks']}=={'sender','draft_review'}
+    for task in job['tasks']:
+        prompt=store.query('SELECT prompt FROM agent_turns WHERE id=?',(task['id'],))[0]['prompt']
+        data=json.loads(prompt.split('\n',1)[1])
+        assert data['delegation_role']==task['role']
+        assert data['kind']==('send_outreach' if task['role']=='sender' else 'draft_outreach')
+        if task['role']=='draft_review':
+            assert 'Do not send any message' in data['task']

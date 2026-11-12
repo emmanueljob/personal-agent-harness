@@ -75,8 +75,9 @@ def mount(app, get_store):
         with store.connect() as db:
             db.execute('BEGIN IMMEDIATE')
             row = db.execute('SELECT * FROM muse_turns WHERE id=?', (ident,)).fetchone()
-            if not row or row['status'] == 'queued':
+            if not row or row['status'] not in ('sending', 'delivered', 'delivery_unknown', 'completed'):
                 raise HTTPException(404, 'Claimed Muse turn not found.')
+            new_reply = body.reply is not None and row['reply'] != body.reply
             if body.reply is not None:
                 if row['reply'] is not None and row['reply'] != body.reply:
                     raise HTTPException(409, 'A reply already exists.')
@@ -84,6 +85,9 @@ def mount(app, get_store):
             elif row['status'] == 'sending':
                 status = 'delivered' if body.delivered else 'delivery_unknown'
                 db.execute('UPDATE muse_turns SET status=? WHERE id=?', (status, ident))
+        if new_reply:
+            from .helper_delegation import mark_result
+            mark_result(store, ident)
         return private({'accepted': True})
 
     app.include_router(router)

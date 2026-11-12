@@ -3,7 +3,7 @@ import {useEffect, useRef, useState} from 'react';
 type Api = (path: string, method?: string, body?: unknown) => Promise<any>;
 type Agent = 'grokbot' | 'muse' | 'owner';
 type Props = {api: Api; agent: Agent; context?: string; disabled?: boolean; threadId?: string | null; onThreadChange?: (id: string) => void};
-type HelperTask = {id: string; helper: string; status: string; reason: string; report: string | null; deliveryVerified: boolean};
+type HelperTask = {id: string; helper: string; status: string; reason: string; report: string | null; deliveryVerified: boolean; role?: string};
 type HelperRequest = {id: string; status: string; tasks: HelperTask[]; answerStatus: string | null; answer: string | null};
 type Turn = {id: string; text: string; reply: string | null; status: string; target?: string; delegations?: HelperRequest[]};
 type Thread = {id: string; agent: Agent; turns: Turn[]};
@@ -142,7 +142,7 @@ function Conversation({api, agent, context = '', disabled = false, threadId, onT
       {t.delegations?.map(job => <section key={job.id} aria-label="Helper request">
         <p>{job.status === 'completed' ? 'Helper reports received' : 'Helper request · '+job.status}</p>
         {job.tasks.map(task => <div key={task.id}>
-          <p>{task.helper === 'muse' ? 'Muse' : 'Grokbot'} · {task.status.replaceAll('_', ' ')}</p>
+          <p>{task.helper === 'muse' ? 'Muse' : 'Grokbot'} · {task.status.replaceAll('_', ' ')}{task.role === 'sender' ? ' · Assigned sender' : task.role === 'draft_review' ? ' · Draft/review only' : ''}</p>
           {task.reason && <p>{task.reason}</p>}
           {task.report && <details><summary>Helper report · delivery unverified</summary>
             <p style={{whiteSpace: 'pre-wrap'}}>{task.report}</p></details>}
