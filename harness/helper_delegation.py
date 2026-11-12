@@ -65,8 +65,11 @@ def task_status(db, row):
     else:
         task = db.execute('SELECT status,reply FROM muse_turns WHERE id=?', (row['task_id'],)).fetchone()
         report = task['reply']
+    reason = row['reason'] if task['status'] == 'unavailable' else ''
+    if row['helper'] == 'muse' and task['status'] == 'delivery_unknown':
+        reason = 'Muse delivery is uncertain. Inspect the original paired chat before requesting a replacement.'
     return {'id': row['task_id'], 'helper': row['helper'], 'status': task['status'],
-            'reason': row['reason'] if task['status'] == 'unavailable' else '',
+            'reason': reason,
             'report': report, 'verification': 'helper_report_only', 'deliveryVerified': False}
 
 
@@ -90,7 +93,8 @@ def read_request(db, ident):
     return {'id': ident, 'status': status, 'tasks': tasks, 'created': row['created'],
             'answerStatus': synthesis['status'] if synthesis else None,
             'answer': synthesis['result'] if synthesis and synthesis['status'] == 'completed' else None,
-            'reportsOnly': True}
+            'reportsOnly': True, 'sourceKind': json.loads(row['body'])['source_kind'],
+            'sourceId': json.loads(row['body'])['source_id'], 'originalCardId': json.loads(row['body'])['card_id']}
 
 
 def job_status(store, ident, connection=None):
@@ -105,13 +109,15 @@ def helper_capabilities(store):
     from .conversations import availability
     result = {}
     for helper in ('grokbot', 'muse'):
-        reason = availability(store, helper)
+        table = 'grok_assignments' if helper == 'grokbot' else 'muse_bridge_state'
+        exists = store.query("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,))
+        reason = availability(store, helper) if exists else 'Complete the helper connection setup first.'
         result[helper] = {'available': not reason, 'reason': reason}
     return result
 
 
 def selected_context(db, body):
-    if not body.card_id:
+    if not body.card_id or not body.include_card:
         return {}
     from .command_center import resolve_card
     card = resolve_card(db, body.card_id)
@@ -123,16 +129,19 @@ def selected_context(db, body):
         raise HTTPException(409, 'This suggestion decision changed. Refresh before requesting help.')
     if body.intent_revision is not None and card.get('intentRevision') != body.intent_revision:
         raise HTTPException(409, 'This suggestion has new evidence. Refresh before requesting help.')
-    if not body.include_card:
-        return {}
     return {key: card[key] for key in ('id', 'title', 'company', 'person', 'action', 'source', 'evidence')}
 
 
 def helper_targets(body, store):
     named = []
-    for name, pattern in [('grokbot', r'\bgrok(?:bot)?\b'), ('muse', r'\bmuse\b')]:
-        if re.search(pattern, body.user_message, re.I):
-            named.append(name)
+    name = r'(grokbot|grok|muse)'
+    pattern = rf'(?:\b(?:ask|get|have|consult|use|tell|to)\s+|^){name}(?:\s*(?:and|&|,)\s*{name})?'
+    for match in re.finditer(pattern, body.user_message, re.I):
+        for value in match.groups():
+            if value:
+                helper = 'muse' if value.lower() == 'muse' else 'grokbot'
+                if helper not in named:
+                    named.append(helper)
     if named:
         return named
     if re.search(r'\bboth\s+(?:helpers|agents)\b', body.user_message, re.I):
@@ -159,9 +168,19 @@ def request_work(store, body: WorkRequest, connection=None):
         context = selected_context(db, body)
         if body.kind == 'send_outreach':
             explicit = re.search(r'\b(send|email|contact|message)\b', body.user_message, re.I)
-            forbidden = re.search(r"\b(don.t|do not|never)\s+send\b|\bdraft\s+only\b", body.user_message, re.I)
-            if not explicit or forbidden:
+            forbidden = re.search(r"\b(don.t|do not|never)\s+(send|email|contact|message)\b|\bdraft\s+only\b", body.user_message, re.I)
+            draft = re.search(r'\b(draft|compose|write|prepare)\b', body.user_message, re.I)
+            sending = re.search(r'\b(send|email|contact|message)\b', body.user_message, re.I)
+            draft_only = draft and not (
+                sending and sending.start() < draft.start()
+                or re.search(r'\b(and|then)\s+(send|email|contact|message)\b', body.user_message, re.I))
+            if not explicit or forbidden or draft_only:
                 raise HTTPException(409, 'Sending needs an explicit owner request. Ask for a draft otherwise.')
+        if body.source_kind == 'owner_chat' and (not body.owner_turn_id or not body.owner_thread_id
+                or body.source_id != body.owner_turn_id):
+            raise HTTPException(409, 'Owner helper requests require their original conversation turn.')
+        if bool(body.owner_thread_id) != bool(body.owner_turn_id):
+            raise HTTPException(409, 'Supply both owner conversation identifiers.')
         if body.owner_turn_id:
             parent = db.execute("""SELECT t.id FROM agent_turns t JOIN agent_threads a ON a.id=t.thread_id
                 WHERE t.id=? AND t.thread_id=? AND a.agent='owner'""",
@@ -295,7 +314,7 @@ def tools(ctx):
     def delegate_work(instruction: str, kind: Kind, helpers: list[Helper] | None = None,
                       include_card: bool = False) -> dict:
         """Ask Muse/Grokbot to do research, outreach drafting/sending, or non-CRM work.
-        Include the whole requested non-CRM task in one request. Honor named helpers or both.
+        Include the whole requested non-CRM task in one request. Leave helpers empty for availability-aware automatic selection. Honor named helpers or both.
         Pass a standalone minimal instruction, never unrelated history. Include the card only
         when relevant. Sending requires an explicit owner request. Reports are not verified delivery.
         A pending result means work was queued, not performed. Do not create a replacement on timeout."""
@@ -309,9 +328,30 @@ def tools(ctx):
         body = WorkRequest(request_id='owner-'+ctx['turn_id'], source_kind='owner_chat',
             source_id=ctx['turn_id'], kind=kind, instruction=instruction, user_message=turn['text'],
             helpers=helpers or [], card_id=scope.get('card', ''), include_card=include_card,
+            revision=scope.get('revision'), disposition_version=scope.get('dispositionVersion'),
+            intent_revision=scope.get('intentRevision'),
             owner_thread_id=ctx['thread_id'], owner_turn_id=ctx['turn_id'])
-        return request_work(store, body)
-    return [delegate_work]
+        try:
+            return request_work(store, body)
+        except HTTPException as error:
+            return {'status': 'rejected', 'reason': error.detail, 'tasks': []}
+    @tool
+    def read_helper_work() -> dict:
+        """Read pending, failed and completed helper requests from this owner conversation.
+        Use this for follow-up/status questions instead of asking helpers to repeat work.
+        Reports are attributed statements, not verified external delivery."""
+        store = ctx['store']
+        initialize(store)
+        rows = store.query('SELECT id FROM owner_helper_requests WHERE owner_thread_id=? ORDER BY created DESC LIMIT 3',
+                           (ctx['thread_id'],))
+        jobs = [job_status(store, r['id']) for r in rows]
+        for job in jobs:
+            for task in job['tasks']:
+                report = task['report'] or ''
+                task['report'] = report[:3000]
+                task['reportTruncated'] = len(report) > 3000
+        return {'requests': jobs, 'coverage': 'Latest three requests in this owner conversation.'}
+    return [delegate_work, read_helper_work]
 
 
 def mount(app, get_store, owner):
