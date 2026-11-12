@@ -39,7 +39,7 @@ function Conversation({api, agent, context = '', disabled = false, threadId, onT
   const pending = useRef<{thread: string; text: string; context: string; request_id: string} | null>(null);
   const mounted = useRef(true);
   const historyElement = useRef<HTMLDivElement>(null), followHistory = useRef(true);
-  const sendLock = useRef(false);
+  const sendLock = useRef(false), composing = useRef(false);
   useEffect(() => { mounted.current = true; return () => {mounted.current = false;}; }, []);
   useEffect(() => {select(threadId || ''); setChooseNew(false);}, [threadId]);
 
@@ -99,6 +99,8 @@ function Conversation({api, agent, context = '', disabled = false, threadId, onT
     job.tasks.some(task => !['completed', 'failed', 'blocked', 'unavailable', 'delivery_rejected'].includes(task.status))
     || job.answerStatus === 'queued' || job.answerStatus === 'running'
     || (job.answerStatus === null && t.status === 'completed')));
+  const canSend = !busy && !disabled && !reason && !!draft.trim()
+    && (!last || done.includes(last.status));
   useEffect(() => {
     if (agent==='owner' && followHistory.current && historyElement.current) {
       historyElement.current.scrollTop=historyElement.current.scrollHeight;
@@ -129,11 +131,11 @@ function Conversation({api, agent, context = '', disabled = false, threadId, onT
   }, [api, agent, thread?.id, last?.status, last?.id, helperPending]);
   const history = <>
     {reason && <p role="status">{reason}</p>}
-    {sendingTarget && <p role="status">Sending about {sendingTarget}</p>}
+    {sendingTarget && <p role="status">{agent === 'owner' ? 'Sending…' : 'Sending about '+sendingTarget}</p>}
     {error && <p role="alert">{error}</p>}
     {pollError && <p role="alert">{pollError}</p>}
     {thread?.turns.map(t => <article key={t.id}>
-      {t.target && <small>About {t.target}</small>}
+      {agent !== 'owner' && t.target && <small>About {t.target}</small>}
       <p><strong>You</strong> {t.text}</p>
       <p><strong>{agent === 'owner' ? 'Your agent' : agent === 'muse' ? 'Muse' : 'Grokbot'}</strong> {t.reply || t.status.replaceAll('_', ' ')}</p>
       {t.reply && t.status !== 'completed' && <small>{t.status}</small>}
@@ -176,12 +178,19 @@ function Conversation({api, agent, context = '', disabled = false, threadId, onT
       }}>{history}</div> : history}
     <form onSubmit={e => {
       e.preventDefault();
-      if (busy || disabled || sendLock.current) return;
+      if (!canSend || sendLock.current) return;
       sendLock.current = true;
       void run(send).finally(() => {sendLock.current = false;});
     }}>
-      <label>Message<textarea aria-label="Message" maxLength={4000} value={draft} disabled={busy || disabled} onChange={e => setDraft(e.target.value)}/></label>
-      <button disabled={busy || disabled || !!reason || !draft.trim() || (!!last && !done.includes(last.status))}>Send</button>
+      <label>Message<textarea aria-label="Message" maxLength={4000} value={draft} disabled={busy || disabled} onChange={e => setDraft(e.target.value)}
+        onCompositionStart={() => {composing.current = true;}}
+        onCompositionEnd={() => {composing.current = false;}}
+        onKeyDown={e => {
+          if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing || composing.current || e.keyCode === 229) return;
+          e.preventDefault();
+          if (canSend) e.currentTarget.form?.requestSubmit();
+        }}/></label>
+      <button disabled={!canSend}>Send</button>
     </form>
   </section>;
 }

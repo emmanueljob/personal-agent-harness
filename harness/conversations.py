@@ -104,13 +104,20 @@ def current_evidence(db, ident, raw):
     selected = scope.get('card', '')
     if not isinstance(selected, str) or len(selected) > 200:
         raise HTTPException(422, 'Invalid command center card.')
-    if selected and 'revision' in scope and 'dispositionVersion' in scope:
+    versioned = 'revision' in scope and 'dispositionVersion' in scope
+    if selected and (versioned or 'intentRevision' in scope):
         from .command_center import resolve_card
         current = resolve_card(db, selected)
-        expected = (scope['revision'], scope['dispositionVersion'])
-        if (any(type(value) is not int for value in expected) or current is None
-                or (current['revision'], current['dispositionVersion']) != expected):
+        if current is None:
             raise HTTPException(409, 'This card changed. Refresh before sending a question about it.')
+        if versioned:
+            expected = (scope['revision'], scope['dispositionVersion'])
+            if (any(type(value) is not int for value in expected)
+                    or (current['revision'], current['dispositionVersion']) != expected):
+                raise HTTPException(409, 'This card changed. Refresh before sending a question about it.')
+        if 'intentRevision' in scope and (not isinstance(scope['intentRevision'], str)
+                or current.get('intentRevision') != scope['intentRevision']):
+            raise HTTPException(409, 'This suggestion has new evidence. Refresh before sending a question about it.')
     previous_ids = []
     rows = db.execute('SELECT context,prompt FROM agent_turns WHERE thread_id=? ORDER BY rowid DESC LIMIT 6',
                       (ident,)).fetchall()
