@@ -111,6 +111,8 @@ from .correspondence import mount as mount_correspondence
 mount_correspondence(app,lambda:store,studio_owner)
 from .command_center import mount as mount_command_center
 mount_command_center(app, lambda:store, studio_owner)
+from .helper_delegation import mount as mount_helpers
+mount_helpers(app, lambda:store, studio_owner)
 from .command_actions import mount as mount_command_actions
 mount_command_actions(app, lambda:store, studio_owner)
 from .cloud_browser import mount as mount_cloud_browser

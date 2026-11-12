@@ -43,6 +43,8 @@ async def dispatch_once(client, store):
     # turns overtaking an interrupted turn while Temporal retries it.
     from .crm_enrichment import resume as resume_enrichment
     resume_enrichment(store)
+    from .helper_delegation import resume as resume_helpers
+    await asyncio.to_thread(resume_helpers, store)
     turns = store.query("SELECT * FROM turns WHERE status IN ('queued','running') ORDER BY created,rowid LIMIT 1")
     if not turns:
         return

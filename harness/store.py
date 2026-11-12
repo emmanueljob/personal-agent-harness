@@ -123,9 +123,10 @@ class Store:
         rows=self.query('SELECT runtime FROM turn_runtime WHERE turn_id=?',(ident,))
         return rows[0]['runtime'] if rows else 'legacy'
 
-    def retry(self, ident):
-        with self.connect() as db:
-            db.execute("BEGIN IMMEDIATE")
+    def retry(self, ident, connection=None):
+        with (nullcontext(connection) if connection is not None else self.connect()) as db:
+            if connection is None:
+                db.execute("BEGIN IMMEDIATE")
             changed = db.execute("UPDATE turns SET status='queued',error=NULL WHERE id=? AND status='failed'", (ident,)).rowcount
             if changed:
                 db.execute("INSERT INTO dispatch_attempts VALUES (?,1) ON CONFLICT(turn_id) DO UPDATE SET generation=generation+1", (ident,))

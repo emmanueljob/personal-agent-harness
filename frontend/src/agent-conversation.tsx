@@ -3,7 +3,9 @@ import {useEffect, useRef, useState} from 'react';
 type Api = (path: string, method?: string, body?: unknown) => Promise<any>;
 type Agent = 'grokbot' | 'muse' | 'owner';
 type Props = {api: Api; agent: Agent; context?: string; disabled?: boolean; threadId?: string | null; onThreadChange?: (id: string) => void};
-type Turn = {id: string; text: string; reply: string | null; status: string; target?: string};
+type HelperTask = {id: string; helper: string; status: string; reason: string; report: string | null; deliveryVerified: boolean};
+type HelperRequest = {id: string; status: string; tasks: HelperTask[]; answerStatus: string | null; answer: string | null};
+type Turn = {id: string; text: string; reply: string | null; status: string; target?: string; delegations?: HelperRequest[]};
 type Thread = {id: string; agent: Agent; turns: Turn[]};
 type Summary = {id: string; title: string | null};
 const root = '/admin/conversations';
@@ -95,6 +97,10 @@ function Conversation({api, agent, context = '', disabled = false, threadId, onT
   const last = thread?.turns.at(-1);
   const canSend = !busy && !disabled && !reason && !!draft.trim()
     && (!last || done.includes(last.status));
+  const helperPending = !!thread?.turns.some(t => t.delegations?.some(job =>
+    job.tasks.some(task => !['completed', 'failed', 'blocked', 'unavailable', 'delivery_rejected'].includes(task.status))
+    || job.answerStatus === 'queued' || job.answerStatus === 'running'
+    || (job.answerStatus === null && t.status === 'completed')));
   useEffect(() => {
     if (agent==='owner' && followHistory.current && historyElement.current) {
       historyElement.current.scrollTop=historyElement.current.scrollHeight;
@@ -102,7 +108,7 @@ function Conversation({api, agent, context = '', disabled = false, threadId, onT
   }, [agent,last?.id,last?.status,last?.reply,sendingTarget,error,pollError,reason]);
 
   useEffect(() => {
-    if (agent !== 'owner' || !thread || !last || done.includes(last.status)) return;
+    if (agent !== 'owner' || !thread || !last || (done.includes(last.status) && !helperPending)) return;
     let current = true, polling = false;
     const poll = async () => {
       if (polling || foregroundBusy.current || sendLock.current) return;
@@ -122,7 +128,7 @@ function Conversation({api, agent, context = '', disabled = false, threadId, onT
     };
     const timer = window.setInterval(() => {void poll()}, 2000);
     return () => {current = false; window.clearInterval(timer)};
-  }, [api, agent, thread?.id, last?.status, last?.id]);
+  }, [api, agent, thread?.id, last?.status, last?.id, helperPending]);
   const history = <>
     {reason && <p role="status">{reason}</p>}
     {sendingTarget && <p role="status">{agent === 'owner' ? 'Sending…' : 'Sending about '+sendingTarget}</p>}
@@ -133,6 +139,21 @@ function Conversation({api, agent, context = '', disabled = false, threadId, onT
       <p><strong>You</strong> {t.text}</p>
       <p><strong>{agent === 'owner' ? 'Your agent' : agent === 'muse' ? 'Muse' : 'Grokbot'}</strong> {t.reply || t.status.replaceAll('_', ' ')}</p>
       {t.reply && t.status !== 'completed' && <small>{t.status}</small>}
+      {t.delegations?.map(job => <section key={job.id} aria-label="Helper request">
+        <p>{job.status === 'completed' ? 'Helper reports received' : 'Helper request · '+job.status}</p>
+        {job.tasks.map(task => <div key={task.id}>
+          <p>{task.helper === 'muse' ? 'Muse' : 'Grokbot'} · {task.status.replaceAll('_', ' ')}</p>
+          {task.reason && <p>{task.reason}</p>}
+          {task.report && <details><summary>Helper report · delivery unverified</summary>
+            <p style={{whiteSpace: 'pre-wrap'}}>{task.report}</p></details>}
+        </div>)}
+        {job.answerStatus === 'failed' && <p role="alert">The personal agent could not compose the results. The helper reports are saved.</p>}
+        <button type="button" disabled={busy || disabled} onClick={() => void run(async () => {
+          await api('/admin/helper-requests/'+job.id+'/retry', 'POST');
+          setThread(await api(root+'/'+thread!.id));
+        })}>Retry available work</button>
+      </section>)}
+
       {((agent === 'grokbot' && ['sending', 'queued', 'delivery_unknown', 'delivery_rejected'].includes(t.status)) || (agent === 'owner' && t.status === 'failed')) &&
         <button type="button" disabled={busy || disabled} onClick={() => void run(async () => {
           setThread(await api(root + '/' + thread.id + '/turns/' + t.id + '/retry', 'POST'));

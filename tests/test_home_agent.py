@@ -25,6 +25,7 @@ def test_home_runs_actual_agent_with_scoped_action_evidence(tmp_path, monkeypatc
     # No retrieval/profile/plugin path should be needed for this frozen, scoped Home turn.
     monkeypatch.setattr(store, 'profile', lambda *_: (_ for _ in ()).throw(AssertionError('profile read')))
     monkeypatch.setattr(store.brain, 'search', lambda *_: (_ for _ in ()).throw(AssertionError('brain search')))
+    monkeypatch.setattr(FakeListChatModel, 'bind_tools', lambda self, *args, **kwargs: self)
     model = FakeListChatModel(responses=['A starter draft is saved, and sending remains a separate action.',
                                         'We prepared the draft earlier; it has not established delivery.'])
     monkeypatch.setattr(agent, 'local_model', lambda *_: model)
@@ -130,3 +131,28 @@ def test_failed_owner_turn_retries_frozen_model_context(tmp_path, monkeypatch):
         assert client.get(path, headers=AUTH).json()['turns'][0]['status'] == 'queued'
         assert store.query('SELECT body FROM execution_context WHERE turn_id=?', (task,))[0]['body'] == original
         assert client.post(path+'/turns/'+task+'/retry', headers=AUTH).status_code == 409
+
+
+def test_group_evidence_keeps_original_member_action_target(tmp_path, monkeypatch):
+    from harness.home_agent import enrich
+    module, store = admin_app(tmp_path, monkeypatch)
+    conversations.initialize(store)
+    command_actions.initialize(store)
+    representative = add(store, company('Fixture group representative', next_action='Follow up'))
+    member = add(store, company('Fixture group member', next_action='Follow up'))
+    with store.connect() as db:
+        old = command_center.resolve_card(db, member)
+    saved = command_actions.execute(store, member, command_actions.Execute(
+        kind='draft_follow_up', revision=old['revision'], dispositionVersion=old['dispositionVersion'],
+        request_id='synthetic-member-draft'))['result']
+    with store.connect() as db:
+        current = command_center.resolve_card(db, representative)
+    current['memberIds'] = [representative, member]
+    monkeypatch.setattr(command_center, 'resolve_card', lambda *_:current)
+    with store.connect() as db:
+        evidence = enrich(db, {'cards':[{'id':representative}], 'references':[], 'selectedCard':representative})
+    record = next(item for item in evidence['actionEvidence'] if item['id']==saved['id'])
+    assert record['cardId'] == member
+    assert record['resolvedCardId'] == representative
+    assert record['revision'] == old['revision']
+    assert record['draftId'] == saved['draftId']

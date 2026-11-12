@@ -38,6 +38,8 @@ async def local_worker(store):
         db.execute("UPDATE turns SET status='queued' WHERE status='running'")
     while True:
         store.tick()
+        from .helper_delegation import resume as resume_helpers
+        await asyncio.to_thread(resume_helpers, store)
         from .crm_enrichment import resume as resume_enrichment
         resume_enrichment(store)
         turns = store.query("SELECT id FROM turns WHERE status='queued' ORDER BY created LIMIT 1")
