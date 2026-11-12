@@ -337,3 +337,25 @@ def test_distinct_application_tasks_keep_independent_dispositions(tmp_path):
     assert len(cards)==2
     decide(store, next(entry for entry in cards if entry['id']==first), 'dismissed')
     assert [entry['id'] for entry in review(store)]==[other]
+
+
+def test_restore_through_nonrepresentative_does_not_reclose_other_legacy_markers(tmp_path):
+    store = Store(tmp_path)
+    co = add(store, company())
+    first = add(store, {'kind':'activity','company_id':co,'title':'First','next_action':''})
+    other = add(store, {'kind':'activity','company_id':co,'title':'Second','next_action':''})
+    home.initialize(store)
+    with store.connect() as db:
+        for ident in (first, other):
+            db.execute('INSERT INTO command_center_reviews VALUES (?,?,?,NULL)',
+                       (ident,'proposed','Research company'))
+    assert len(home.feed(store, scope='completed')['cards'])==1
+    home.reopen(store, other, 1)
+    before = store.query('SELECT * FROM command_center_intent_decisions ORDER BY seq')
+    for _ in range(3):
+        cards = review(store)
+        assert len(cards)==1 and cards[0]['id']==first
+        assert cards[0]['action']=='Research company' and cards[0]['disposition']=='active'
+    assert not home.feed(store, scope='completed')['cards']
+    assert store.query('SELECT * FROM command_center_intent_decisions ORDER BY seq')==before
+    assert store.query('SELECT record_id FROM command_center_reviews')==[{'record_id':first}]

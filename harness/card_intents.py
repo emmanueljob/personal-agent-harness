@@ -214,6 +214,7 @@ def backfill(db):
         if entry:
             save(db, entry, 'done', request_id=key)
 
+    recovered_requests = set()
     for row in db.execute('''SELECT q.* FROM command_center_disposition_requests q
         LEFT JOIN command_center_intent_decisions d ON d.request_id=q.request_id
         WHERE d.seq IS NULL ORDER BY q.rowid'''):
@@ -222,16 +223,19 @@ def backfill(db):
         if entry:
             save(db, entry, payload['state'], request_id=row['request_id'],
                  version=result.get('dispositionVersion', 0), resume_at=result.get('resumeAt'))
+            recovered_requests.add(row['request_id'])
 
-    # Reopening a record removes its review marker. If an older client left
-    # a marker after its last restore, that direct completion happened later.
+    # Only infer completion while recovering an old server's restore receipt.
+    # Native intent restores can leave markers on equivalent members, and those
+    # earlier markers must never override the explicit restored intent.
     for review in db.execute('SELECT * FROM command_center_reviews'):
         entry = historical(db, review['record_id'], None, context, review)
         if not entry:
             continue
         latest = db.execute('SELECT * FROM command_center_intent_decisions WHERE intent_key=? ORDER BY seq DESC LIMIT 1',
                             (entry['intentKey'],)).fetchone()
-        if latest and latest['state']=='active' and latest['card_id']==review['record_id']:
+        if (latest and latest['request_id'] in recovered_requests
+                and latest['state']=='active' and latest['card_id']==review['record_id']):
             save(db, entry, 'done', request_id='legacy-review-after:'+str(latest['seq']))
 
 
