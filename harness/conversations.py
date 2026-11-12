@@ -37,6 +37,8 @@ def initialize(store):
             CREATE INDEX IF NOT EXISTS agent_turns_thread ON agent_turns(thread_id, created);
         """)
         muse_bridge.initialize(db)
+        from .helper_delegation import initialize_tables
+        initialize_tables(db)
 
 
 def availability(store, agent):
@@ -68,6 +70,14 @@ def transcript(store, ident):
             LEFT JOIN muse_turns m ON m.id=t.id
             LEFT JOIN turns o ON o.id=t.id WHERE t.thread_id=? ORDER BY t.rowid""", (ident,))
     for turn in turns:
+        if info['agent'] == 'owner':
+            from .helper_delegation import read_request
+            jobs = store.query('SELECT id FROM owner_helper_requests WHERE owner_turn_id=? ORDER BY created', (turn['id'],))
+            with store.connect() as db:
+                turn['delegations'] = [read_request(db, job['id']) for job in jobs]
+            answers = [j['answer'] for j in turn['delegations'] if j['answer']]
+            if answers:
+                turn['reply'] = answers[-1]
         prompt = context_object(turn.pop('prompt').split('\n', 1)[-1])
         evidence = prompt.get('current_evidence')
         if info['agent'] == 'owner' and isinstance(evidence, dict):
@@ -221,7 +231,7 @@ def mount(app, get_store, owner):
     def threads(agent: Literal['grokbot', 'muse', 'owner']):
         return private({'threads': store().query("""SELECT a.*, (SELECT text FROM agent_turns
             WHERE thread_id=a.id ORDER BY rowid LIMIT 1) AS title FROM agent_threads a
-            WHERE agent=? ORDER BY created DESC""", (agent,))})
+            WHERE agent=? AND a.id NOT IN (SELECT helper_thread_id FROM owner_helper_tasks) ORDER BY created DESC""", (agent,))})
 
     @router.post('')
     def create(body: NewThread):
