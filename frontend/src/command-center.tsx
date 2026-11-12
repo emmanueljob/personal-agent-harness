@@ -322,7 +322,7 @@ export function CommandCenter({api, onOpenRecord, onOpenMyCareer, returnCardId, 
                   saved={() => {setEditing(''); refresh()}} onBusy={setSaving}/>}
               </details>
             </div>
-            <CardExecution key={visibleCard.id+':'+visibleCard.revision+':'+visibleCard.dispositionVersion+':'+(visibleCard.intentRevision || '')}
+            <CardExecution key={visibleCard.id+':'+visibleCard.revision+':'+visibleCard.dispositionVersion+':'+(visibleCard.intentRevision || '')+':'+generation}
               api={api} card={visibleCard} busy={saving || transitioning} onBusy={setSaving} open={onOpenRecord} refreshCard={refresh}
               actions={<>
                 {visibleCard.disposition==='active' && visibleCard.action && <>

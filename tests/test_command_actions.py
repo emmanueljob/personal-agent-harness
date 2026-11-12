@@ -286,6 +286,11 @@ def test_grouped_result_reuse_and_new_evidence_guard(tmp_path, monkeypatch):
         changed = client.get(ROOT+first+'/execution',headers=AUTH).json()
         assert changed['revision']==info['revision'] and changed['dispositionVersion']==info['dispositionVersion']
         assert changed['intentRevision']!=info['intentRevision'] and not changed['resultCurrent']
+        from harness.home_agent import enrich
+        with store.connect() as db:
+            evidence=enrich(db,{'cards':[{'id':first}]})['actionEvidence']
+            assert evidence[0]['id']==result['id'] and not evidence[0]['resultCurrent']
+            assert evidence[0]['intentRevision']==info['intentRevision']
         stale = client.post(ROOT+first+'/execute',headers=AUTH,json={**body,'request_id':'grouped-stale-request'})
         assert stale.status_code==409
         payload = {k:changed[k] for k in ('kind','revision','dispositionVersion','intentRevision')}
@@ -318,6 +323,57 @@ def test_legacy_member_result_is_found_without_rewriting_provenance(tmp_path, mo
         with store.connect() as db:
             row = db.execute('SELECT * FROM command_action_results').fetchone()
             assert row['card_id']==member and json.loads(row['result'])==original
+            from harness.home_agent import enrich
+            evidence=enrich(db,{'cards':[{'id':first}]})['actionEvidence']
+            assert evidence[0]['cardId']==member and evidence[0]['resolvedCardId']==first
+            assert evidence[0]['resultCurrent'] and evidence[0]['intentRevision']==info['intentRevision']
         replay = client.post(ROOT+member+'/execute',headers=AUTH,json={
             'kind':'prepare_review','revision':1,'dispositionVersion':0,'request_id':'member-old-request'})
         assert replay.status_code==200 and replay.json()['result']['id']==original['id']
+
+
+def test_research_action_queues_once_projects_real_reports_and_retries_same_task(tmp_path, monkeypatch):
+    from test_helper_delegation import ready
+    from harness import grok_connection as grok
+    module, store = ready(tmp_path,monkeypatch)
+    monkeypatch.setenv('OWNER_STUDIO_TOKEN','synthetic-owner-access')
+    co = add(store,company('Synthetic research company'))
+    ident = add(store,dict(kind='activity',company_id=co,title='Research team',next_action='Research the engineering team'))
+    monkeypatch.delenv('GROKBOT_WEBHOOK_KEY')
+    monkeypatch.delenv('MUSE_BRIDGE_TOKEN')
+    sent=[]
+    monkeypatch.setattr(grok,'push_webhook',lambda payload: sent.append(payload) or 200)
+    with TestClient(module.app,base_url='https://testserver') as client:
+        info = client.get(ROOT+ident+'/execution',headers=AUTH).json()
+        assert info['supported'] and info['kind']=='delegate_research'
+        body={k:info[k] for k in ('kind','revision','dispositionVersion','intentRevision')}
+        body['request_id']='synthetic-research-action'
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            responses=list(pool.map(lambda _:client.post(ROOT+ident+'/execute',headers=AUTH,json=body),range(4)))
+        assert all(r.status_code==200 for r in responses),[r.text for r in responses]
+        result=responses[0].json()['result']
+        assert len({r.json()['result']['id'] for r in responses})==1
+        job=result['delegation']
+        assert job['status']=='unavailable'
+        assert len(store.query('SELECT * FROM owner_helper_requests'))==1 and not sent
+        task=job['tasks'][0]
+        monkeypatch.setenv('GROKBOT_WEBHOOK_KEY','synthetic-webhook-key')
+        retried=client.post('/api/admin/helper-requests/'+job['id']+'/retry',headers=AUTH,json={})
+        assert retried.status_code==200 and retried.json()['status']=='pending'
+        assert retried.json()['tasks'][0]['id']==task['id'] and not sent
+        request=json.loads(store.query('SELECT body FROM owner_helper_requests')[0]['body'])
+        assert request['kind']=='research' and request['source_kind']=='card_action'
+        assert request['card_id']==ident and request['intent_revision']==info['intentRevision']
+        assert not any(t['deliveryVerified'] for t in job['tasks'])
+        # The transport callback updates the same task; the descriptor reads its real status.
+        assert task['helper']=='grokbot'
+        grok.dispatch_assignment(store,task['id'])
+        assert len(sent)==1
+        assert grok.acknowledge(store,task['id'],'synthetic-action-claim')['should_run']
+        grok.submit(store,task['id'],'synthetic-action-claim',grok.Result(
+            submission_id='synthetic-action-report',outcome='completed',
+            report='Synthetic research report; no outreach performed.'))
+        polled=client.get(ROOT+ident+'/execution',headers=AUTH).json()['result']['delegation']
+        assert polled['status']=='completed' and polled['tasks'][0]['report'].startswith('Synthetic research report')
+        assert polled['tasks'][0]['verification']=='helper_report_only' and not polled['tasks'][0]['deliveryVerified']
+        assert len(store.query('SELECT * FROM command_action_results'))==1

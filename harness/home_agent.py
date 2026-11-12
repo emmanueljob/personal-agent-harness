@@ -43,7 +43,7 @@ def enrich(db, evidence):
         aliases = list(member_ids) + [r[0] for r in db.execute('SELECT alias_id FROM crm_redirects')
                                      if canonical_id(db, r[0]) in member_ids]
         slots = ','.join('?' for _ in aliases)
-        results = db.execute(f'SELECT card_id,result FROM command_action_results WHERE card_id IN ({slots}) ORDER BY rowid DESC LIMIT 3',
+        results = db.execute(f'SELECT * FROM command_action_results WHERE card_id IN ({slots}) ORDER BY rowid DESC LIMIT 3',
                              aliases)
         for result in results:
             from .career_email import hidden_activity_ids
@@ -54,6 +54,9 @@ def enrich(db, evidence):
                                          'dispositionVersion', 'checkedAt', 'draftId') if k in value}
             item['cardId'] = result['card_id']
             item['resolvedCardId'] = card['id']
+            from . import command_actions
+            item['intentRevision'] = result['intent_revision']
+            item['resultCurrent'] = command_actions._current_result(result, card, command_actions.suggestion(card)[0])
             if value.get('draftId'):
                 draft = db.execute('SELECT body,certainty FROM crm_records WHERE id=?',
                                    (canonical_id(db, value['draftId']),)).fetchone()
