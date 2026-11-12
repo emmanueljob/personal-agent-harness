@@ -229,3 +229,95 @@ def test_action_result_requires_same_kind_and_meaningful_snapshot():
     assert actions._current_result(row,card,'prepare_review')
     assert not actions._current_result(row,card,'draft_follow_up')
     assert not actions._current_result(row,{**card,'intentRevision':'snapshot-two'},'prepare_review')
+
+
+def test_legacy_accepted_request_replays_after_schema_upgrade(tmp_path, monkeypatch):
+    module, store = admin_app(tmp_path, monkeypatch)
+    co = add(store, company('Synthetic legacy company'))
+    ident = add(store, dict(kind='activity',company_id=co,title='Review legacy',next_action='Review the plan'))
+    command_center.initialize(store)
+    with store.connect() as db:
+        card = command_center.resolve_card(db,ident)
+        original = {'id':'legacy-accepted-result','kind':'prepare_review','revision':card['revision'],
+                    'dispositionVersion':card['dispositionVersion'],'status':'completed',
+                    'summary':'Original saved synthetic result','scope':'Captured records only',
+                    'briefText':'Original immutable brief'}
+        db.execute('''CREATE TABLE command_action_results (
+            id TEXT PRIMARY KEY,card_id TEXT NOT NULL,kind TEXT NOT NULL,revision INTEGER NOT NULL,
+            disposition_version INTEGER NOT NULL,request_id TEXT NOT NULL UNIQUE,result TEXT NOT NULL,
+            UNIQUE(card_id,kind,revision,disposition_version))''')
+        db.execute('''CREATE TABLE command_action_requests (
+            request_id TEXT PRIMARY KEY,result_id TEXT NOT NULL REFERENCES command_action_results(id))''')
+        db.execute('INSERT INTO command_action_results VALUES (?,?,?,?,?,?,?)',
+                   (original['id'],ident,'prepare_review',card['revision'],card['dispositionVersion'],
+                    'legacy-accepted-request',json.dumps(original)))
+        db.execute('INSERT INTO command_action_requests VALUES (?,?)',('legacy-accepted-request',original['id']))
+    with TestClient(module.app,base_url='https://testserver') as client:
+        replay = client.post(ROOT+ident+'/execute',headers=AUTH,json={
+            'kind':'prepare_review','revision':card['revision'],'dispositionVersion':card['dispositionVersion'],
+            'request_id':'legacy-accepted-request'})
+        assert replay.status_code==200, replay.text
+        assert {k:replay.json()['result'][k] for k in original}==original
+        assert replay.json()['resultCurrent']
+        assert len(store.query('SELECT * FROM command_action_results'))==1
+        with store.connect() as db:
+            assert json.loads(db.execute('SELECT result FROM command_action_results').fetchone()['result'])==original
+            assert not list(db.execute('PRAGMA foreign_key_check'))
+
+
+def test_grouped_result_reuse_and_new_evidence_guard(tmp_path, monkeypatch):
+    from test_card_intents import edit
+    module, store = admin_app(tmp_path, monkeypatch)
+    co = add(store,company('Synthetic grouped company'))
+    first = add(store,dict(kind='activity',company_id=co,title='First review',next_action='Review role',
+                          notes='Synthetic captured plan.'))
+    second = add(store,dict(kind='activity',company_id=co,title='Second review',next_action='Assess this opportunity',
+                           notes='Synthetic captured plan.'))
+    with TestClient(module.app,base_url='https://testserver') as client:
+        info = client.get(ROOT+second+'/execution',headers=AUTH).json()
+        body = {k:info[k] for k in ('kind','revision','dispositionVersion','intentRevision')}
+        result = client.post(ROOT+second+'/execute',headers=AUTH,
+                             json={**body,'request_id':'grouped-first-request'}).json()['result']
+        assert client.get(ROOT+first+'/execution',headers=AUTH).json()['result']['id']==result['id']
+        edit(store,second,title='Cosmetic renamed title')
+        same = client.get(ROOT+first+'/execution',headers=AUTH).json()
+        assert same['resultCurrent'] and same['intentRevision']==info['intentRevision']
+        edit(store,second,notes='Synthetic captured plan. Budget approved.')
+        changed = client.get(ROOT+first+'/execution',headers=AUTH).json()
+        assert changed['revision']==info['revision'] and changed['dispositionVersion']==info['dispositionVersion']
+        assert changed['intentRevision']!=info['intentRevision'] and not changed['resultCurrent']
+        stale = client.post(ROOT+first+'/execute',headers=AUTH,json={**body,'request_id':'grouped-stale-request'})
+        assert stale.status_code==409
+        payload = {k:changed[k] for k in ('kind','revision','dispositionVersion','intentRevision')}
+        fresh = client.post(ROOT+first+'/execute',headers=AUTH,json={**payload,'request_id':'grouped-new-request'})
+        assert fresh.status_code==200 and fresh.json()['result']['id']!=result['id']
+        # Accepted old retries return their immutable artifact, not a second action or a new claim.
+        replay = client.post(ROOT+second+'/execute',headers=AUTH,json={**body,'request_id':'grouped-first-request'})
+        assert replay.status_code==200 and replay.json()['result']['id']==result['id']
+        assert not replay.json()['resultCurrent']
+        assert len(store.query('SELECT * FROM command_action_results'))==2
+
+
+def test_legacy_member_result_is_found_without_rewriting_provenance(tmp_path, monkeypatch):
+    module, store = admin_app(tmp_path,monkeypatch)
+    co = add(store,company('Synthetic historical member company'))
+    first = add(store,dict(kind='activity',company_id=co,title='First',next_action='Review role',notes='Same synthetic evidence.'))
+    member = add(store,dict(kind='activity',company_id=co,title='Member',next_action='Assess this opportunity',notes='Same synthetic evidence.'))
+    actions.initialize(store)
+    original = {'id':'member-old-result','kind':'prepare_review','revision':1,'dispositionVersion':0,
+                'status':'completed','summary':'Saved on the other member','scope':'Synthetic evidence',
+                'briefText':'Original member brief'}
+    with store.connect() as db:
+        db.execute('INSERT INTO command_action_results VALUES (?,?,?,?,?,?,?,?)',
+                   (original['id'],member,'prepare_review',1,0,'member-old-request',json.dumps(original),''))
+        db.execute('INSERT INTO command_action_requests VALUES (?,?)',('member-old-request',original['id']))
+    with TestClient(module.app,base_url='https://testserver') as client:
+        info = client.get(ROOT+first+'/execution',headers=AUTH).json()
+        assert info['resultCurrent'] and info['result']['id']==original['id']
+        assert info['result']['intentRevision']==info['intentRevision']
+        with store.connect() as db:
+            row = db.execute('SELECT * FROM command_action_results').fetchone()
+            assert row['card_id']==member and json.loads(row['result'])==original
+        replay = client.post(ROOT+member+'/execute',headers=AUTH,json={
+            'kind':'prepare_review','revision':1,'dispositionVersion':0,'request_id':'member-old-request'})
+        assert replay.status_code==200 and replay.json()['result']['id']==original['id']
