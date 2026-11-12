@@ -41,7 +41,8 @@ def operation(action):
     text = wording(action)
     patterns = (
         ('draft_follow_up', r'^(?:prepare|write|draft)(?: an?)? (?:follow up)(?: draft)?\b'),
-        ('follow_up', r'^(?:send )?follow up\b|^check (?:for |inbox for )?(?:a )?reply\b'),
+        ('follow_up', r'^(?:send )?follow up\b'),
+        ('check_reply', r'^check (?:for |inbox for )?(?:a )?reply\b'),
         ('review_reply', r'^(?:review|read) (?:new )?reply\b'),
         ('review_plan', r'^(?:review|read) plan\b'),
         ('research', r'^research\b'),
@@ -55,6 +56,14 @@ def operation(action):
         if match:
             return family, text[match.end():].strip()
     return 'custom', text
+
+
+
+def evidence_wording(value, labels):
+    text = wording(value)
+    for label, ident in labels:
+        text = re.sub(r'\b'+re.escape(label)+r'\b', 'target-'+ident, text)
+    return text
 
 
 def describe(entry, record, receipt, context):
@@ -86,12 +95,14 @@ def describe(entry, record, receipt, context):
         peer = sorted({value.get('email', '').casefold() or value.get('profile_url', '').rstrip('/').casefold()
                        for value in people} - {''})
     family, qualifier = operation(action)
-    for ident in (company, person, application):
-        labels = {wording(label) for target, entity in entities.items()
-                  if redirects.get(target, target)==ident for label in entity['labels']}
-        for label in sorted(labels, key=lambda value: (-len(value), value)):
-            if label:
-                qualifier = re.sub(r'\b'+re.escape(label)+r'\b', '', qualifier)
+    roles = {company:'company', person:'person', application:'application'}
+    labels = {(wording(label), roles[redirects.get(target, target)])
+              for target, entity in entities.items()
+              if redirects.get(target, target) in roles
+              for label in entity['labels'] if wording(label)}
+    labels = sorted(labels, key=lambda value: (-len(value[0]), value[0], value[1]))
+    for label, _ in labels:
+        qualifier = re.sub(r'\b'+re.escape(label)+r'\b', '', qualifier)
     qualifier = ' '.join(word for word in qualifier.split()
                          if word not in {'with', 'for', 'at', 'about', 'on', 'from', 'regarding', 'company', 'contact'})
     conversation = ''
@@ -109,15 +120,15 @@ def describe(entry, record, receipt, context):
         facts.add('stage:'+stage)
     if record.get('happened_on'):
         facts.add('date:'+record['happened_on'])
-    content = record.get('notes') or record.get('summary') or ''
+    content = receipt.get('text', '') if receipt else record.get('notes') or record.get('summary') or ''
+    content = evidence_wording(content, labels)
     if receipt:
-        content = receipt.get('text', '')
-        facts.add('message:'+digest([receipt['direction'], receipt.get('occurred_at'), wording(content)]))
-    elif content.strip():
-        facts.add('content:'+digest(wording(content)))
+        facts.add('message:'+digest([receipt['direction'], receipt.get('occurred_at'), content]))
+    elif content:
+        facts.add('content:'+digest(content))
     if entry.get('evidence') and not receipt:
-        facts.add('evidence:'+digest(wording(entry['evidence'])))
-    return {'intentKey': digest(identity), 'intentOperation': family, 'evidenceFacts': sorted(facts),
+        facts.add('evidence:'+digest(evidence_wording(entry['evidence'], labels)))
+    return {'intentKey': digest(identity), 'intentIdentity': identity, 'intentOperation': family, 'evidenceFacts': sorted(facts),
             'personId': person, 'person': entities.get(person, {}).get('name', '') or entry['person'],
             'intentApplicationId': application}
 
@@ -125,6 +136,7 @@ def describe(entry, record, receipt, context):
 def save(db, entry, state, *, request_id=None, version=0, resume_at=None):
     snapshot = {key: entry.get(key) for key in ('action', 'due', 'stage', 'id', 'revision')}
     snapshot['action'] = entry.get('intentAction') or entry.get('action', '')
+    snapshot['intentIdentity'] = entry.get('intentIdentity')
     db.execute('''INSERT OR IGNORE INTO command_center_intent_decisions
         (request_id,card_id,intent_key,evidence,state,resume_at,version,snapshot) VALUES (?,?,?,?,?,?,?,?)''',
         (request_id, entry['id'], entry['intentKey'], json.dumps(entry['evidenceFacts']), state,
@@ -196,11 +208,20 @@ def group(db, ranked):
     """Apply one decision to the equivalent task before ranking, scopes and pagination."""
     from datetime import datetime, timezone
     decisions = {}
+    redirects = dict(db.execute('SELECT alias_id,record_id FROM crm_redirects'))
     versions = dict(db.execute('SELECT card_id,version FROM command_center_dispositions'))
     for row in db.execute('''SELECT i.*,d.resume_at AS current_resume,d.version AS current_version
         FROM command_center_intent_decisions i
         LEFT JOIN command_center_dispositions d ON d.card_id=i.card_id ORDER BY i.seq'''):
-        decisions[row['intent_key']] = dict(row)
+        identity = json.loads(row['snapshot']).get('intentIdentity')
+        key = row['intent_key']
+        if identity:
+            targets = (1,) if identity[0]=='record' else (0, 1, 2)
+            for index in targets:
+                if isinstance(identity[index], str):
+                    identity[index] = redirects.get(identity[index], identity[index])
+            key = digest(identity)
+        decisions[key] = dict(row)
     groups = {}
     for order, entry in ranked:
         groups.setdefault(entry['intentKey'], []).append((order, entry))

@@ -176,12 +176,14 @@ def test_historical_target_names_and_representative_reopening_are_stable(tmp_pat
     co = add(store, company())
     person = add(store, {'kind':'person','company_id':co,'name':'Original Contact'})
     first = add(store, {'kind':'activity','company_id':co,'person_id':person,
-                        'title':'First task','next_action':'Follow up with Original Contact'})
+                        'title':'First task','next_action':'Follow up with Original Contact',
+                        'notes':'Original Contact requested a discussion.'})
     other = add(store, {'kind':'activity','company_id':co,'person_id':person,
-                        'title':'Other task','next_action':'Check in with Original Contact'})
+                        'title':'Other task','next_action':'Check in with Original Contact',
+                        'notes':'Original Contact requested a discussion.'})
     decide(store, review(store)[0], 'dismissed')
     edit(store, person, name='Corrected Contact')
-    edit(store, first, next_action='Follow up with Corrected Contact')
+    edit(store, first, next_action='Follow up with Corrected Contact', notes='Corrected Contact requested a discussion.')
     assert not review(store)
     hidden = home.feed(store, scope='dismissed')['cards'][0]
     decide(store, hidden, 'active')
@@ -213,3 +215,31 @@ def test_unrecognized_unicode_actions_remain_distinct(tmp_path):
     first = add(store, {'kind':'activity','company_id':co,'title':'Synthetic task','next_action':'调查薪资'})
     second = add(store, {'kind':'activity','company_id':co,'title':'Synthetic task','next_action':'安排面试'})
     assert {entry['id'] for entry in review(store)}=={first, second}
+
+
+def test_saved_decision_follows_later_entity_redirection(tmp_path):
+    store = Store(tmp_path)
+    old_company = add(store, company('Original company'))
+    canonical = add(store, company('Canonical company'))
+    target = add(store, {'kind':'activity','company_id':old_company,'title':'Role',
+                         'next_action':'Review role','notes':'Original company shared role evidence.'})
+    decide(store, review(store)[0], 'dismissed')
+    with store.connect() as db:
+        db.execute('INSERT INTO crm_redirects VALUES (?,?)', (old_company, canonical))
+    edit(store, target, company_id=canonical, notes='Canonical company shared role evidence.')
+    assert not review(store)
+
+
+def test_checking_for_reply_and_following_up_are_distinct_operations(tmp_path):
+    store = Store(tmp_path)
+    co = add(store, company('Separate operations'))
+    first = add(store, {'kind':'activity','company_id':co,'title':'Follow-up','next_action':'Follow up'})
+    second = add(store, {'kind':'activity','company_id':co,'title':'Reply check','next_action':'Check for a reply'})
+    cards = review(store)
+    assert len(cards)==2
+    follow_up = next(entry for entry in cards if entry['id']==first)
+    assert follow_up['intentOperation']=='follow_up'
+    decide(store, follow_up, 'dismissed')
+    pending = review(store)
+    assert [entry['id'] for entry in pending]==[second]
+    assert pending[0]['intentOperation']=='check_reply'
