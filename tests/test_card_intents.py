@@ -320,3 +320,20 @@ def test_real_group_evidence_digest_invalidates_selected_chat_snapshot(tmp_path)
         current = conversations.current_evidence(db, 'fixture-thread', json.dumps(scope))
         assert current['references'][0]['id']==first
         assert current['references'][0]['memberIds']==sorted([first, other])
+
+
+def test_distinct_application_tasks_keep_independent_dispositions(tmp_path):
+    store = Store(tmp_path)
+    co = add(store, company())
+    first_app = add(store, {'kind':'application','company_id':co,'title':'Platform Lead'})
+    second_app = add(store, {'kind':'application','company_id':co,'title':'Infrastructure Lead'})
+    first = add(store, {'kind':'activity','company_id':co,'application_id':first_app,
+                        'title':'Role review','next_action':'Review role'})
+    add(store, {'kind':'activity','company_id':co,'application_id':first_app,
+                'title':'Equivalent role review','next_action':'Assess opportunity'})
+    other = add(store, {'kind':'activity','company_id':co,'application_id':second_app,
+                       'title':'Role review','next_action':'Review role'})
+    cards = review(store)
+    assert len(cards)==2
+    decide(store, next(entry for entry in cards if entry['id']==first), 'dismissed')
+    assert [entry['id'] for entry in review(store)]==[other]
