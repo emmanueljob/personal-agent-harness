@@ -52,7 +52,8 @@ def initialize(store):
     with store.connect() as db:
         db.execute(RESULT_SCHEMA.format(name='command_action_results'))
         db.execute("""CREATE TABLE IF NOT EXISTS command_action_requests (
-            request_id TEXT PRIMARY KEY, result_id TEXT NOT NULL REFERENCES command_action_results(id))""")
+            request_id TEXT PRIMARY KEY, result_id TEXT NOT NULL REFERENCES command_action_results(id),
+            binding TEXT NOT NULL DEFAULT '')""")
         db.commit()
         db.execute('BEGIN IMMEDIATE')
         if 'intent_revision' not in {row['name'] for row in db.execute('PRAGMA table_info(command_action_results)')}:
@@ -62,6 +63,8 @@ def initialize(store):
                 FROM command_action_results""")
             db.execute('DROP TABLE command_action_results')
             db.execute('ALTER TABLE command_action_results_revised RENAME TO command_action_results')
+        if 'binding' not in {row['name'] for row in db.execute('PRAGMA table_info(command_action_requests)')}:
+            db.execute("ALTER TABLE command_action_requests ADD COLUMN binding TEXT NOT NULL DEFAULT ''")
         _bind_legacy_intents(db)
 
 
@@ -230,15 +233,24 @@ def execute(store, ident, body):
         if card is None:
             raise HTTPException(404, 'This suggestion is no longer available.')
         # Eligibility is checked even on retries so hidden or removed cards cannot leak old content.
-        old = db.execute('SELECT r.* FROM command_action_requests q JOIN command_action_results r ON r.id=q.result_id WHERE q.request_id=?', (body.request_id,)).fetchone()
+        old = db.execute('SELECT r.*,q.binding AS request_binding FROM command_action_requests q JOIN command_action_results r ON r.id=q.result_id WHERE q.request_id=?', (body.request_id,)).fetchone()
         identity = (card['id'], body.kind, body.revision, body.dispositionVersion)
         intent_revision = body.intentRevision or card.get('intentRevision', '')
+        binding = json.dumps({'card_id':card['id'], 'body':body.model_dump(mode='json')}, sort_keys=True)
         if old:
-            previous_card = command_center.resolve_card(db, old['card_id'])
-            if (not previous_card or previous_card['id']!=card['id']
-                    or (old['kind'],old['revision'],old['disposition_version']) != identity[1:]
-                    or (body.intentRevision and old['intent_revision']!=body.intentRevision)):
+            receipt = json.loads(old['request_binding']) if old['request_binding'] else None
+            previous_card = command_center.resolve_card(db, receipt['card_id'] if receipt else old['card_id'])
+            if receipt:
+                matches = receipt['body']==body.model_dump(mode='json')
+            else:
+                # Old receipts did not retain their accepted body. Preserve their
+                # historical artifact-based retry check, then freeze this binding.
+                matches = ((old['kind'],old['revision'],old['disposition_version']) == identity[1:]
+                           and (not body.intentRevision or old['intent_revision']==body.intentRevision))
+            if not previous_card or previous_card['id']!=card['id'] or not matches:
                 raise HTTPException(409, 'This request ID belongs to another action.')
+            if not receipt:
+                db.execute('UPDATE command_action_requests SET binding=? WHERE request_id=?', (binding,body.request_id))
             return {**descriptor(db, card), 'kind': body.kind, 'result': _result(old),
                     'resultCurrent': _current_result(old, card, body.kind)}
         if (card['revision'], card['dispositionVersion']) != (body.revision, body.dispositionVersion):
@@ -249,7 +261,7 @@ def execute(store, ident, body):
         if info['kind'] != body.kind or not info['supported']:
             raise HTTPException(409, info['reason'] or 'This action is no longer available.')
         if info['resultCurrent']:
-            db.execute('INSERT INTO command_action_requests VALUES (?,?)', (body.request_id, info['result']['id']))
+            db.execute('INSERT INTO command_action_requests(request_id,result_id,binding) VALUES (?,?,?)', (body.request_id, info['result']['id'],binding))
             return info
         action_id = str(uuid.uuid4())
         try:
@@ -265,7 +277,7 @@ def execute(store, ident, body):
                       dispositionVersion=body.dispositionVersion, intentRevision=intent_revision)
         db.execute('INSERT INTO command_action_results VALUES (?,?,?,?,?,?,?,?)',
                    (action_id, *identity, body.request_id, json.dumps(result), intent_revision))
-        db.execute('INSERT INTO command_action_requests VALUES (?,?)', (body.request_id, action_id))
+        db.execute('INSERT INTO command_action_requests(request_id,result_id,binding) VALUES (?,?,?)', (body.request_id, action_id,binding))
         return {**info, 'result': result, 'resultCurrent': True}
 
 

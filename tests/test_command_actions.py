@@ -201,7 +201,7 @@ def test_legacy_migration_preserves_results_requests_and_rolls_back(tmp_path, mo
             request_id TEXT PRIMARY KEY, result_id TEXT NOT NULL REFERENCES command_action_results(id))''')
         db.execute('INSERT INTO command_action_results VALUES (?,?,?,?,?,?,?)',
                    ('legacy-result','missing-card','prepare_review',1,0,'legacy-request',original))
-        db.execute('INSERT INTO command_action_requests VALUES (?,?)',('legacy-retry','legacy-result'))
+        db.execute('INSERT INTO command_action_requests(request_id,result_id) VALUES (?,?)',('legacy-retry','legacy-result'))
     bind = actions._bind_legacy_intents
     def fail(db):
         raise RuntimeError('Synthetic migration interruption')
@@ -210,6 +210,7 @@ def test_legacy_migration_preserves_results_requests_and_rolls_back(tmp_path, mo
         actions.initialize(store)
     with store.connect() as db:
         assert 'intent_revision' not in {r['name'] for r in db.execute('PRAGMA table_info(command_action_results)')}
+        assert 'binding' not in {r['name'] for r in db.execute('PRAGMA table_info(command_action_requests)')}
         assert db.execute('SELECT result FROM command_action_results').fetchone()['result']==original
     monkeypatch.setattr(actions,'_bind_legacy_intents',bind)
     with ThreadPoolExecutor(max_workers=4) as pool:
@@ -251,7 +252,7 @@ def test_legacy_accepted_request_replays_after_schema_upgrade(tmp_path, monkeypa
         db.execute('INSERT INTO command_action_results VALUES (?,?,?,?,?,?,?)',
                    (original['id'],ident,'prepare_review',card['revision'],card['dispositionVersion'],
                     'legacy-accepted-request',json.dumps(original)))
-        db.execute('INSERT INTO command_action_requests VALUES (?,?)',('legacy-accepted-request',original['id']))
+        db.execute('INSERT INTO command_action_requests(request_id,result_id) VALUES (?,?)',('legacy-accepted-request',original['id']))
     with TestClient(module.app,base_url='https://testserver') as client:
         replay = client.post(ROOT+ident+'/execute',headers=AUTH,json={
             'kind':'prepare_review','revision':card['revision'],'dispositionVersion':card['dispositionVersion'],
@@ -310,14 +311,16 @@ def test_legacy_member_result_is_found_without_rewriting_provenance(tmp_path, mo
     co = add(store,company('Synthetic historical member company'))
     first = add(store,dict(kind='activity',company_id=co,title='First',next_action='Review role',notes='Same synthetic evidence.'))
     member = add(store,dict(kind='activity',company_id=co,title='Member',next_action='Assess this opportunity',notes='Same synthetic evidence.'))
+    from test_card_intents import edit
+    edit(store,member,title='Cosmetic member revision two')
     actions.initialize(store)
-    original = {'id':'member-old-result','kind':'prepare_review','revision':1,'dispositionVersion':0,
+    original = {'id':'member-old-result','kind':'prepare_review','revision':2,'dispositionVersion':0,
                 'status':'completed','summary':'Saved on the other member','scope':'Synthetic evidence',
                 'briefText':'Original member brief'}
     with store.connect() as db:
         db.execute('INSERT INTO command_action_results VALUES (?,?,?,?,?,?,?,?)',
-                   (original['id'],member,'prepare_review',1,0,'member-old-request',json.dumps(original),''))
-        db.execute('INSERT INTO command_action_requests VALUES (?,?)',('member-old-request',original['id']))
+                   (original['id'],member,'prepare_review',2,0,'member-old-request',json.dumps(original),''))
+        db.execute('INSERT INTO command_action_requests(request_id,result_id) VALUES (?,?)',('member-old-request',original['id']))
     with TestClient(module.app,base_url='https://testserver') as client:
         info = client.get(ROOT+first+'/execution',headers=AUTH).json()
         assert info['resultCurrent'] and info['result']['id']==original['id']
@@ -332,8 +335,19 @@ def test_legacy_member_result_is_found_without_rewriting_provenance(tmp_path, mo
             assert evidence[0]['cardId']==member and evidence[0]['resolvedCardId']==first
             assert evidence[0]['resultCurrent'] and evidence[0]['intentRevision']==info['intentRevision']
         replay = client.post(ROOT+member+'/execute',headers=AUTH,json={
-            'kind':'prepare_review','revision':1,'dispositionVersion':0,'request_id':'member-old-request'})
+            'kind':'prepare_review','revision':2,'dispositionVersion':0,'request_id':'member-old-request'})
         assert replay.status_code==200 and replay.json()['result']['id']==original['id']
+
+        request={k:info[k] for k in ('kind','revision','dispositionVersion','intentRevision')}
+        request['request_id']='member-reused-request'
+        assert request['revision']!=original['revision']
+        for _ in range(2):
+            reused=client.post(ROOT+first+'/execute',headers=AUTH,json=request)
+            assert reused.status_code==200, reused.text
+            assert reused.json()['result']['id']==original['id']
+        assert client.post(ROOT+first+'/execute',headers=AUTH,
+                           json={**request,'revision':original['revision']}).status_code==409
+        assert len(store.query('SELECT * FROM command_action_results'))==1
 
 
 def test_research_action_queues_once_projects_real_reports_and_retries_same_task(tmp_path, monkeypatch):
@@ -381,3 +395,28 @@ def test_research_action_queues_once_projects_real_reports_and_retries_same_task
         assert polled['status']=='completed' and polled['tasks'][0]['report'].startswith('Synthetic research report')
         assert polled['tasks'][0]['verification']=='helper_report_only' and not polled['tasks'][0]['deliveryVerified']
         assert len(store.query('SELECT * FROM command_action_results'))==1
+
+
+def test_reused_result_binds_new_request_snapshot_independently(tmp_path, monkeypatch):
+    from test_card_intents import edit
+    module, store = admin_app(tmp_path,monkeypatch)
+    co=add(store,company('Synthetic request binding company'))
+    ident=add(store,dict(kind='activity',company_id=co,title='Original review',next_action='Review role'))
+    with TestClient(module.app,base_url='https://testserver') as client:
+        info=client.get(ROOT+ident+'/execution',headers=AUTH).json()
+        body={k:info[k] for k in ('kind','revision','dispositionVersion','intentRevision')}
+        original=client.post(ROOT+ident+'/execute',headers=AUTH,json={**body,'request_id':'binding-original'}).json()['result']
+        edit(store,ident,title='Cosmetically renamed review')
+        revised=client.get(ROOT+ident+'/execution',headers=AUTH).json()
+        assert revised['revision']!=original['revision'] and revised['resultCurrent']
+        request={k:revised[k] for k in ('kind','revision','dispositionVersion','intentRevision')}
+        request['request_id']='binding-reused'
+        reused=client.post(ROOT+ident+'/execute',headers=AUTH,json=request)
+        assert reused.status_code==200 and reused.json()['result']==original
+        retry=client.post(ROOT+ident+'/execute',headers=AUTH,json=request)
+        assert retry.status_code==200, retry.text
+        assert retry.json()['result']==original
+        for change in ({'revision':body['revision']},{'intentRevision':''},{'dispositionVersion':1},{'kind':'draft_outreach'}):
+            assert client.post(ROOT+ident+'/execute',headers=AUTH,json={**request,**change}).status_code==409
+        assert len(store.query('SELECT * FROM command_action_results'))==1
+        assert json.loads(store.query('SELECT result FROM command_action_results')[0]['result'])==original
