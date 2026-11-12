@@ -76,7 +76,7 @@ function CardExecution({api, card, busy, onBusy, open, actions, refreshCard}: {
   open: (recordId: string, cardId: string) => void; refreshCard: () => void;
 }) {
   const [execution, setExecution] = useState<Execution>(), [error, setError] = useState('');
-  const [reload, setReload] = useState(0);
+  const [reload, setReload] = useState(0), [retryNote, setRetryNote] = useState('');
   const pending = useRef<{revision: number; dispositionVersion: number; request_id: string; kind: string; intentRevision?: string} | undefined>(undefined);
   const inFlight = useRef(false), mounted = useRef(true);
   useEffect(() => {mounted.current=true; return () => {mounted.current=false}}, []);
@@ -96,7 +96,11 @@ function CardExecution({api, card, busy, onBusy, open, actions, refreshCard}: {
     const id = execution?.result?.helperRequestId;
     if (!id || inFlight.current) return;
     inFlight.current=true; onBusy(true); setError('');
-    try {await api('/admin/helper-requests/'+encodeURIComponent(id)+'/retry','POST',{}); setReload(n => n+1)}
+    try {
+      const job = await api('/admin/helper-requests/'+encodeURIComponent(id)+'/retry','POST',{});
+      if (mounted.current) setRetryNote(job.retryNote || 'Check the updated helper status before requesting more work.');
+      setReload(n => n+1);
+    }
     catch (e) {if (mounted.current) setError((e as Error).message)}
     finally {inFlight.current=false; onBusy(false)}
   }
@@ -141,10 +145,13 @@ function CardExecution({api, card, busy, onBusy, open, actions, refreshCard}: {
           <p>Research request: {execution.result.delegation.status}</p>
           {execution.result.delegation.tasks.map(task => <div key={task.id}>
             <p>{task.helper}: {task.status}{task.reason ? ' · '+task.reason : ''}</p>
+            {!task.reason && ['failed','blocked'].includes(task.status) && <p>Inspect the helper report or original conversation before requesting replacement work.</p>}
             {!!task.report && <pre className="cc-result">{typeof task.report==='string' ? task.report : JSON.stringify(task.report,null,2)}</pre>}
           </div>)}
-          {['unavailable','failed','unknown','partial'].includes(execution.result.delegation.status) &&
-            <button disabled={busy} onClick={() => void retryHelpers()}>Retry helper request</button>}
+          {retryNote && <p role="status">{retryNote}</p>}
+          {execution.result.delegation.tasks.some(task => task.status==='unavailable'
+            || task.helper==='grokbot' && ['delivery_unknown','delivery_rejected','sending'].includes(task.status)) &&
+            <button disabled={busy} onClick={() => void retryHelpers()}>Retry available work</button>}
         </div>}
         <small>Record revision {execution.result.revision} · decision version {execution.result.dispositionVersion}</small>
         {execution.result.draftText && <pre className="cc-result">{execution.result.draftText}</pre>}
