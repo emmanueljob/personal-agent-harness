@@ -205,3 +205,11 @@ def test_explicit_unique_contact_uses_the_same_target_as_its_record(tmp_path):
     assert len(cards)==1 and cards[0]['id']==co
     assert cards[0]['memberIds']==sorted([co, person])
     assert cards[0]['personId']==person and cards[0]['person']=='Casey Fixture'
+
+
+def test_unrecognized_unicode_actions_remain_distinct(tmp_path):
+    store = Store(tmp_path)
+    co = add(store, company())
+    first = add(store, {'kind':'activity','company_id':co,'title':'Synthetic task','next_action':'调查薪资'})
+    second = add(store, {'kind':'activity','company_id':co,'title':'Synthetic task','next_action':'安排面试'})
+    assert {entry['id'] for entry in review(store)}=={first, second}

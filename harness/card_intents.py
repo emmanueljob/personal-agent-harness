@@ -2,8 +2,7 @@
 import hashlib
 import json
 import re
-
-from .crm_imports import normalized
+import unicodedata
 
 
 def digest(value):
@@ -24,7 +23,9 @@ def catalog(db):
 
 
 def wording(value):
-    text = normalized(value)
+    text = ' '.join(re.findall(r'[^\W_]+', unicodedata.normalize('NFKC', value).casefold()))
+    if not text:
+        return value.strip().casefold()
     for old, new in (
         (r'\bfollowup\b', 'follow up'), (r'\bcheck in\b', 'follow up'),
         (r'\bcircle back\b', 'follow up'), (r'\bresponse\b', 'reply'),
@@ -92,7 +93,7 @@ def describe(entry, record, receipt, context):
             if label:
                 qualifier = re.sub(r'\b'+re.escape(label)+r'\b', '', qualifier)
     qualifier = ' '.join(word for word in qualifier.split()
-                         if word not in {'with', 'for', 'at', 'about', 'on', 'company', 'contact'})
+                         if word not in {'with', 'for', 'at', 'about', 'on', 'from', 'regarding', 'company', 'contact'})
     conversation = ''
     if receipt and wording(action).startswith('check'):
         conversation = [receipt['provider'], receipt['account'].casefold(), receipt['thread_id']]
