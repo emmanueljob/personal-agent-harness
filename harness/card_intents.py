@@ -59,6 +59,19 @@ def operation(action):
 
 
 
+
+def without_schedule(value):
+    value = re.sub(r'\b(?:today|tomorrow|tonight|soon|later|(?:this|next) (?:week|month))\b', '', value)
+    weekday = r'(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)'
+    value = re.sub(r'\b(?:on|next|this) '+weekday+r'\b', '', value)
+    if re.fullmatch(weekday, value.strip()):
+        return ''
+    value = re.sub(r'\bin \d+ (?:days?|weeks?|months?)\b', '', value)
+    value = re.sub(r'\bat \d{1,2}(?: \d{2})? ?(?:am|pm)\b', '', value)
+    value = re.sub(r'\b(?:on )?20\d{2} \d{1,2} \d{1,2}\b', '', value)
+    return value
+
+
 def evidence_wording(value, labels):
     text = wording(value)
     for label, ident in labels:
@@ -103,6 +116,8 @@ def describe(entry, record, receipt, context):
     labels = sorted(labels, key=lambda value: (-len(value[0]), value[0], value[1]))
     for label, _ in labels:
         qualifier = re.sub(r'\b'+re.escape(label)+r'\b', '', qualifier)
+    if family!='custom':
+        qualifier = without_schedule(qualifier)
     qualifier = ' '.join(word for word in qualifier.split()
                          if word not in {'with', 'for', 'at', 'about', 'on', 'from', 'regarding', 'company', 'contact'})
     conversation = ''
@@ -178,17 +193,13 @@ def historical(db, ident, revision, context, review=None):
 def backfill(db):
     """Import old receipts once. Their requested revisions preserve harmless-edit history."""
     context = catalog(db)
-    for row in db.execute('''SELECT q.* FROM command_center_disposition_requests q
-        LEFT JOIN command_center_intent_decisions d ON d.request_id=q.request_id
-        WHERE d.seq IS NULL ORDER BY q.rowid'''):
-        payload, result = json.loads(row['payload']), json.loads(row['result'])
-        entry = historical(db, result.get('id', payload['id']), payload.get('revision'), context)
-        if entry:
-            save(db, entry, payload['state'], request_id=row['request_id'],
-                 version=result.get('dispositionVersion', 0), resume_at=result.get('resumeAt'))
     for row in db.execute('''SELECT d.* FROM command_center_dispositions d
         WHERE NOT EXISTS (SELECT 1 FROM command_center_intent_decisions i
-                          WHERE i.card_id=d.card_id AND i.version=d.version) ORDER BY d.rowid'''):
+                          WHERE i.card_id=d.card_id AND i.version=d.version)
+          AND NOT EXISTS (SELECT 1 FROM command_center_disposition_requests q
+                          WHERE json_extract(q.result,'$.id')=d.card_id
+                            AND json_extract(q.result,'$.dispositionVersion')=d.version)
+        ORDER BY d.rowid'''):
         review = db.execute('SELECT * FROM command_center_reviews WHERE record_id=?', (row['card_id'],)).fetchone()
         entry = historical(db, row['card_id'], None, context, review)
         if entry:
@@ -202,6 +213,26 @@ def backfill(db):
         entry = historical(db, review['record_id'], None, context, review)
         if entry:
             save(db, entry, 'done', request_id=key)
+
+    for row in db.execute('''SELECT q.* FROM command_center_disposition_requests q
+        LEFT JOIN command_center_intent_decisions d ON d.request_id=q.request_id
+        WHERE d.seq IS NULL ORDER BY q.rowid'''):
+        payload, result = json.loads(row['payload']), json.loads(row['result'])
+        entry = historical(db, result.get('id', payload['id']), payload.get('revision'), context)
+        if entry:
+            save(db, entry, payload['state'], request_id=row['request_id'],
+                 version=result.get('dispositionVersion', 0), resume_at=result.get('resumeAt'))
+
+    # Reopening a record removes its review marker. If an older client left
+    # a marker after its last restore, that direct completion happened later.
+    for review in db.execute('SELECT * FROM command_center_reviews'):
+        entry = historical(db, review['record_id'], None, context, review)
+        if not entry:
+            continue
+        latest = db.execute('SELECT * FROM command_center_intent_decisions WHERE intent_key=? ORDER BY seq DESC LIMIT 1',
+                            (entry['intentKey'],)).fetchone()
+        if latest and latest['state']=='active' and latest['card_id']==review['record_id']:
+            save(db, entry, 'done', request_id='legacy-review-after:'+str(latest['seq']))
 
 
 def group(db, ranked):

@@ -243,3 +243,55 @@ def test_checking_for_reply_and_following_up_are_distinct_operations(tmp_path):
     pending = review(store)
     assert [entry['id'] for entry in pending]==[second]
     assert pending[0]['intentOperation']=='check_reply'
+
+
+def test_schedule_wording_is_not_another_task_but_substantive_qualifiers_are(tmp_path):
+    store = Store(tmp_path)
+    co = add(store, company())
+    first = add(store, {'kind':'activity','company_id':co,'title':'First','next_action':'Follow up'})
+    add(store, {'kind':'activity','company_id':co,'title':'Tomorrow','next_action':'Follow up tomorrow'})
+    add(store, {'kind':'activity','company_id':co,'title':'Scheduled','next_action':'Follow up next Monday'})
+    compensation = add(store, {'kind':'activity','company_id':co,'title':'Pay','next_action':'Follow up about compensation'})
+    add(store, {'kind':'activity','company_id':co,'title':'Scheduled pay',
+                'next_action':'Follow up on Friday about compensation'})
+    cards = review(store)
+    assert len(cards)==2
+    entry = next(card for card in cards if card['id']==first)
+    decide(store, entry, 'dismissed')
+    assert [card['id'] for card in review(store)]==[compensation]
+
+
+def test_explicit_legacy_restore_overrides_untimed_review_of_equivalent_member(tmp_path):
+    store = Store(tmp_path)
+    co = add(store, company())
+    done = add(store, {'kind':'activity','company_id':co,'title':'Old review','next_action':''})
+    restored = add(store, {'kind':'activity','company_id':co,'title':'Other member','next_action':'Research company'})
+    home.initialize(store)
+    with store.connect() as db:
+        db.execute('INSERT INTO command_center_reviews VALUES (?,?,?,NULL)', (done,'proposed','Research company'))
+        payload = {'id':restored,'revision':1,'disposition_version':1,'state':'active','request_id':'old-restore'}
+        result = {'id':restored,'dispositionVersion':2,'state':'active','resumeAt':None}
+        db.execute("INSERT INTO command_center_dispositions VALUES (?,2,'active',NULL)", (restored,))
+        db.execute('INSERT INTO command_center_disposition_requests VALUES (?,?,?)',
+                   ('old-restore',json.dumps(payload),json.dumps(result)))
+    assert len(review(store))==1
+    assert review(store)[0]['action']=='Research company'
+
+
+def test_direct_legacy_completion_after_restoring_same_record_stays_done(tmp_path):
+    store = Store(tmp_path)
+    target = add(store, company('Legacy completion', next_action='Research company'))
+    home.initialize(store)
+    with store.connect() as db:
+        payload = {'id':target,'revision':1,'disposition_version':1,'state':'active','request_id':'old-restore'}
+        result = {'id':target,'dispositionVersion':2,'state':'active','resumeAt':None}
+        db.execute("INSERT INTO command_center_dispositions VALUES (?,2,'active',NULL)", (target,))
+        db.execute('INSERT INTO command_center_disposition_requests VALUES (?,?,?)',
+                   ('old-restore',json.dumps(payload),json.dumps(result)))
+        body = json.loads(db.execute('SELECT body FROM crm_records WHERE id=?', (target,)).fetchone()['body'])
+        body['next_action']=''
+        crm.write_record(db, body, target, 1)
+        db.execute('INSERT INTO command_center_reviews VALUES (?,?,?,NULL)',
+                   (target,'interested','Research company'))
+    assert not review(store)
+    assert home.feed(store, scope='completed')['cards'][0]['id']==target
