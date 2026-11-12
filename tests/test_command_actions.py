@@ -287,6 +287,8 @@ def test_grouped_result_reuse_and_new_evidence_guard(tmp_path, monkeypatch):
         assert changed['revision']==info['revision'] and changed['dispositionVersion']==info['dispositionVersion']
         assert changed['intentRevision']!=info['intentRevision'] and not changed['resultCurrent']
         from harness.home_agent import enrich
+        from harness.helper_delegation import initialize as initialize_helpers
+        initialize_helpers(store)
         with store.connect() as db:
             evidence=enrich(db,{'cards':[{'id':first}]})['actionEvidence']
             assert evidence[0]['id']==result['id'] and not evidence[0]['resultCurrent']
@@ -320,6 +322,8 @@ def test_legacy_member_result_is_found_without_rewriting_provenance(tmp_path, mo
         info = client.get(ROOT+first+'/execution',headers=AUTH).json()
         assert info['resultCurrent'] and info['result']['id']==original['id']
         assert info['result']['intentRevision']==info['intentRevision']
+        from harness.helper_delegation import initialize as initialize_helpers
+        initialize_helpers(store)
         with store.connect() as db:
             row = db.execute('SELECT * FROM command_action_results').fetchone()
             assert row['card_id']==member and json.loads(row['result'])==original
