@@ -174,7 +174,15 @@ def request_work(store, body: WorkRequest, connection=None):
             draft_only = draft and not (
                 sending and sending.start() < draft.start()
                 or re.search(r'\b(and|then)\s+(send|email|contact|message)\b', body.user_message, re.I))
-            if not explicit or forbidden or draft_only:
+            observational = re.search(
+                r'^\s*(did|has|had|was|were|is|are|when|where|why|how|what|whether)\b|^\s*have\s+(we|i|you|they|the helpers)\b',
+                body.user_message, re.I)
+            status_question = re.search(
+                r'^\s*(can|could|would|will)\s+you\s+(check|tell|confirm|find|see|show|explain|recall|verify)\b',
+                body.user_message, re.I)
+            subsequent_send = re.search(r'\b(and|then)\s+(send|email|contact|message)\b',
+                                        body.user_message, re.I)
+            if not explicit or forbidden or draft_only or observational or (status_question and not subsequent_send):
                 raise HTTPException(409, 'Sending needs an explicit owner request. Ask for a draft otherwise.')
         if body.source_kind == 'owner_chat' and (not body.owner_turn_id or not body.owner_thread_id
                 or body.source_id != body.owner_turn_id):

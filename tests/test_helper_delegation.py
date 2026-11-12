@@ -263,3 +263,69 @@ def test_deep_catalog_registers_owner_tools():
     from harness import deep_runtime
     deep_runtime.register_tools()
     assert {'delegate_work','read_helper_work'} <= deep_runtime.ROUTED.keys()
+
+
+@pytest.mark.parametrize('text', [
+    "Don't email anyone.", "Do not contact Casey.", "Never message anyone.",
+    "Did we send the message to Casey?", "Have we emailed Casey already?",
+    "Can you check whether we send this to Casey?", "Draft an email to Casey.",
+])
+def test_negation_status_and_drafts_do_not_authorize_sending(tmp_path, monkeypatch, text):
+    _,store=ready(tmp_path,monkeypatch)
+    body=helpers.WorkRequest(request_id='synthetic-send-guard',source_kind='card_action',
+        source_id='synthetic-send-guard-source',kind='send_outreach',instruction='Send a synthetic note',
+        user_message=text)
+    with pytest.raises(Exception):
+        helpers.request_work(store,body)
+    assert not store.query('SELECT * FROM owner_helper_requests')
+
+
+@pytest.mark.parametrize('include_card', [True, False])
+def test_card_change_between_send_and_helper_dispatch(tmp_path, monkeypatch, include_card):
+    from harness import command_center,crm
+    from test_command_center import add, company
+    module,store=ready(tmp_path,monkeypatch)
+    target=add(store,company('Fixture selected target',next_action='Follow up'))
+    model=ToolModel(responses=[
+        AIMessage(content='',tool_calls=[{'id':'snapshot-request','name':'delegate_work',
+            'args':{'instruction':'Research a synthetic topic','kind':'research','include_card':include_card}}]),
+        AIMessage(content='The helper request state is recorded.')])
+    monkeypatch.setattr(agent,'local_model',lambda *_:model)
+    with TestClient(module.app) as client:
+        thread=client.post('/api/admin/conversations',headers=OWNER,json={'agent':'owner'}).json()['id']
+        path='/api/admin/conversations/'+thread
+        marker={'surface':'command-center','card':target,'revision':1,'dispositionVersion':0}
+        response=client.post(path+'/messages',headers=OWNER,json={
+            'request_id':'synthetic-tool-snapshot','text':'Research a synthetic topic.','context':json.dumps(marker)})
+        assert response.status_code==200,response.text
+        with store.connect() as db:
+            if include_card:
+                row=db.execute('SELECT body FROM crm_records WHERE id=?',(target,)).fetchone()
+                record=json.loads(row['body'])
+                record['notes']='Changed after the accepted owner message'
+                crm.write_record(db,record,target,1)
+            else:
+                db.execute('DELETE FROM crm_records WHERE id=?',(target,))
+        runner.run_turn(store,response.json()['turns'][0]['id'])
+        jobs=store.query('SELECT id FROM owner_helper_requests')
+        assert len(jobs)==(0 if include_card else 1)
+        if jobs:
+            task=helpers.job_status(store,jobs[0]['id'])['tasks'][0]['id']
+            instruction=grok.instruction(grok.get_task(store,task))
+            assert '"relevant_card": {}' in instruction
+            assert 'Fixture selected target' not in instruction
+
+
+@pytest.mark.parametrize('text', [
+    'Have Muse send the approved synthetic note to Casey by email.',
+    'Ask Grokbot to send the approved synthetic note to Casey by email.',
+    'Please draft the note and then send it to Casey by email.',
+])
+def test_explicit_sending_instructions_are_forwarded_without_verified_claim(tmp_path, monkeypatch, text):
+    _,store=ready(tmp_path,monkeypatch)
+    body=helpers.WorkRequest(request_id='synthetic-authorized-send',source_kind='card_action',
+        source_id='synthetic-authorized-source',kind='send_outreach',instruction='Send approved synthetic note',
+        user_message=text)
+    job=helpers.request_work(store,body)
+    assert job['status']=='pending'
+    assert all(t['deliveryVerified'] is False for t in job['tasks'])
