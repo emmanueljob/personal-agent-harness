@@ -46,6 +46,10 @@ def saved_config(store, turn):
 
 @activity.defn(name='portfolio.deep.prepare')
 async def prepare(ident: str) -> dict:
+    return await asyncio.to_thread(_prepare, ident)
+
+
+def _prepare(ident):
     store, turn, mode = binding()
     if ident != turn['id']:
         raise ApplicationError('Invalid execution binding.', non_retryable=True)
@@ -53,7 +57,7 @@ async def prepare(ident: str) -> dict:
         return {'completed': True}
     with store.connect() as db:
         db.execute("UPDATE turns SET status='running',error=NULL WHERE id=?", (ident,))
-    mode, snapshot = await asyncio.to_thread(prepare_turn, store, turn)
+    mode, snapshot = prepare_turn(store, turn)
     transcript = store.query('SELECT body FROM deep_transcripts WHERE turn_id=?', (ident,))
     store.event(ident, 'runtime', 'Deep Agents · Temporal per-call execution')
     return dict(completed=False, model=snapshot['config']['provider']+':'+snapshot['config']['model'],
@@ -64,6 +68,10 @@ async def prepare(ident: str) -> dict:
 
 @activity.defn(name='portfolio.deep.checkpoint')
 async def checkpoint(messages: list) -> None:
+    await asyncio.to_thread(_checkpoint, messages)
+
+
+def _checkpoint(messages):
     store, turn, _ = binding()
     with store.connect() as db:
         db.execute('INSERT INTO deep_transcripts VALUES (?,?) ON CONFLICT(turn_id) DO UPDATE SET body=excluded.body',
@@ -72,6 +80,10 @@ async def checkpoint(messages: list) -> None:
 
 @activity.defn(name='portfolio.deep.complete')
 async def complete(answer: str) -> None:
+    await asyncio.to_thread(_complete, answer)
+
+
+def _complete(answer):
     store, turn, _ = binding()
     with store.connect() as db:
         db.execute("UPDATE turns SET status='completed',result=?,error=NULL WHERE id=? AND status!='completed'", (answer, turn['id']))
@@ -95,15 +107,49 @@ def provide_model(name):
     return model
 
 
-async def invoke_tool(name, kwargs):
+
+class DeferredModel:
+    """Build the bound provider off-loop when the SDK starts async model I/O."""
+    def __init__(self, name, bindings=()):
+        self.name = name
+        self.bindings = bindings
+
+    def bind_tools(self, tools):
+        return DeferredModel(self.name, (*self.bindings, ('bind_tools', tools)))
+
+    def bind(self, **kwargs):
+        return DeferredModel(self.name, (*self.bindings, ('bind', kwargs)))
+
+    async def _model(self):
+        model = await asyncio.to_thread(provide_model, self.name)
+        for operation, value in self.bindings:
+            model = model.bind_tools(value) if operation == 'bind_tools' else model.bind(**value)
+        return model
+
+    async def ainvoke(self, messages, config=None):
+        model = await self._model()
+        return await model.ainvoke(messages, config=config)
+
+    async def astream(self, messages, config=None):
+        model = await self._model()
+        async for chunk in model.astream(messages, config=config):
+            yield chunk
+
+
+def tool_binding():
     store, turn, mode = binding()
     tools = {t.name: t for t in plugins.tools(context(store, turn, mode, saved_config(store, turn)))}
+    return store, turn, tools
+
+
+async def invoke_tool(name, kwargs):
+    store, turn, tools = await asyncio.to_thread(tool_binding)
     if name not in tools:
         raise ApplicationError('Tool unavailable for this execution.', non_retryable=True)
     events = ActivityEvents(store, turn['id'])
-    events.on_tool_start({'name': name}, '')
+    await asyncio.to_thread(events.on_tool_start, {'name': name}, '')
     result = await tools[name].ainvoke(kwargs)
-    events.on_tool_end(result)
+    await asyncio.to_thread(events.on_tool_end, result)
     return result
 
 
@@ -128,7 +174,7 @@ def routed_tools(names):
 async def make_worker(address, queue):
     register_tools()
     from .deep_workflows import DeepAgentTurnV1
-    plugin = DeepAgentsPlugin(model_provider=provide_model,
+    plugin = DeepAgentsPlugin(model_provider=DeferredModel,
         model_activity_options={'start_to_close_timeout': timedelta(minutes=5),
                                 'heartbeat_timeout': timedelta(seconds=20),
                                 'retry_policy': RetryPolicy(maximum_attempts=2)},

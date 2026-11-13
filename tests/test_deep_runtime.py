@@ -83,3 +83,43 @@ def test_dispatch_preserves_sync_and_async_tool_failures(tmp_path, monkeypatch, 
     monkeypatch.setattr(deep_runtime.plugins, 'tools', lambda _: [tool])
     with pytest.raises(ValueError, match='Synthetic tool failure'):
         asyncio.run(deep_runtime.invoke_tool('fixture_failure', {}))
+
+
+def test_deferred_model_forwards_bindings_invocation_streaming_and_errors(monkeypatch):
+    from langchain_core.messages import AIMessage, AIMessageChunk
+    bindings = []
+    tools = [{'name': 'synthetic_tool'}]
+    config = {'tags': ['synthetic']}
+    reply = AIMessage(content='Synthetic reply')
+    chunk = AIMessageChunk(content='Synthetic stream')
+
+    class Model:
+        def bind_tools(self, value):
+            bindings.append(('tools', value))
+            return self
+
+        def bind(self, **kwargs):
+            bindings.append(('options', kwargs))
+            return self
+
+        async def ainvoke(self, messages, config=None):
+            assert messages == [] and config == {'tags': ['synthetic']}
+            return reply
+
+        async def astream(self, messages, config=None):
+            assert messages == [] and config == {'tags': ['synthetic']}
+            yield chunk
+
+    monkeypatch.setattr(deep_runtime, 'provide_model', lambda name: Model())
+    deferred = deep_runtime.DeferredModel('synthetic:model').bind_tools(tools).bind(temperature=0)
+    async def check():
+        assert await deferred.ainvoke([], config=config) is reply
+        assert [part async for part in deferred.astream([], config=config)] == [chunk]
+    asyncio.run(check())
+    assert bindings == [('tools', tools), ('options', {'temperature': 0})] * 2
+
+    def failure(_):
+        raise ValueError('Synthetic provider unavailable')
+    monkeypatch.setattr(deep_runtime, 'provide_model', failure)
+    with pytest.raises(ValueError, match='Synthetic provider unavailable'):
+        asyncio.run(deferred.ainvoke([]))

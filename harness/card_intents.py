@@ -190,7 +190,34 @@ def historical(db, ident, revision, context, review=None):
     return entry
 
 
+def needs_backfill(db):
+    """Current decisions need no historical reconstruction during polling."""
+    pending = db.execute("""
+        SELECT 1 FROM command_center_dispositions d JOIN crm_records r ON r.id=d.card_id
+        WHERE NOT EXISTS (SELECT 1 FROM command_center_intent_decisions i
+                          WHERE i.card_id=d.card_id AND i.version=d.version)
+          AND NOT EXISTS (SELECT 1 FROM command_center_disposition_requests q
+                          WHERE json_extract(q.result,'$.id')=d.card_id
+                            AND json_extract(q.result,'$.dispositionVersion')=d.version)
+        UNION ALL
+        SELECT 1 FROM command_center_reviews r JOIN crm_records c ON c.id=r.record_id
+        WHERE NOT EXISTS (SELECT 1 FROM command_center_intent_decisions i WHERE i.card_id=r.record_id)
+        UNION ALL
+        SELECT 1 FROM command_center_disposition_requests q
+        WHERE NOT EXISTS (SELECT 1 FROM command_center_intent_decisions d WHERE d.request_id=q.request_id)
+        LIMIT 1
+    """).fetchone()
+    return bool(pending and next(_backfill_steps(db), None))
+
+
 def backfill(db):
+    # Re-plan under the writer lock. Other processes may have changed source
+    # evidence or completed migration since the read-only preflight.
+    for entry, state, options in _backfill_steps(db):
+        save(db, entry, state, **options)
+
+
+def _backfill_steps(db):
     """Import old receipts once. Their requested revisions preserve harmless-edit history."""
     context = catalog(db)
     for row in db.execute('''SELECT d.* FROM command_center_dispositions d
@@ -203,16 +230,16 @@ def backfill(db):
         review = db.execute('SELECT * FROM command_center_reviews WHERE record_id=?', (row['card_id'],)).fetchone()
         entry = historical(db, row['card_id'], None, context, review)
         if entry:
-            save(db, entry, 'done' if review and row['state']=='active' else row['state'],
-                 request_id='legacy-disposition:'+row['card_id']+':'+str(row['version']),
-                 version=row['version'], resume_at=row['resume_at'])
+            yield entry, 'done' if review and row['state']=='active' else row['state'], dict(
+                request_id='legacy-disposition:'+row['card_id']+':'+str(row['version']),
+                version=row['version'], resume_at=row['resume_at'])
     for review in db.execute('SELECT * FROM command_center_reviews ORDER BY rowid'):
         key = 'legacy-review:'+review['record_id']
         if db.execute('SELECT 1 FROM command_center_intent_decisions WHERE card_id=?', (review['record_id'],)).fetchone():
             continue
         entry = historical(db, review['record_id'], None, context, review)
         if entry:
-            save(db, entry, 'done', request_id=key)
+            yield entry, 'done', dict(request_id=key)
 
     recovered_requests = set()
     for row in db.execute('''SELECT q.* FROM command_center_disposition_requests q
@@ -221,13 +248,15 @@ def backfill(db):
         payload, result = json.loads(row['payload']), json.loads(row['result'])
         entry = historical(db, result.get('id', payload['id']), payload.get('revision'), context)
         if entry:
-            save(db, entry, payload['state'], request_id=row['request_id'],
-                 version=result.get('dispositionVersion', 0), resume_at=result.get('resumeAt'))
+            yield entry, payload['state'], dict(request_id=row['request_id'],
+                version=result.get('dispositionVersion', 0), resume_at=result.get('resumeAt'))
             recovered_requests.add(row['request_id'])
 
     # Only infer completion while recovering an old server's restore receipt.
     # Native intent restores can leave markers on equivalent members, and those
     # earlier markers must never override the explicit restored intent.
+    if not recovered_requests:
+        return
     for review in db.execute('SELECT * FROM command_center_reviews'):
         entry = historical(db, review['record_id'], None, context, review)
         if not entry:
@@ -236,7 +265,7 @@ def backfill(db):
                             (entry['intentKey'],)).fetchone()
         if (latest and latest['request_id'] in recovered_requests
                 and latest['state']=='active' and latest['card_id']==review['record_id']):
-            save(db, entry, 'done', request_id='legacy-review-after:'+str(latest['seq']))
+            yield entry, 'done', dict(request_id='legacy-review-after:'+str(latest['seq']))
 
 
 def group(db, ranked):
