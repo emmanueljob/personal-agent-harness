@@ -16,10 +16,30 @@ def external_title_match(body, query):
                 or (len(normalized_title.split()) >= 2 and normalized_title in phrase))
 
 
+
+def matching_words(text, tokens):
+    """Find whole query words without allocating every word in each excerpt."""
+    if len(tokens) > 24:
+        return set(tokens) & set(re.findall(r"\w+", text))
+    matches = set()
+    for token in tokens:
+        start = text.find(token)
+        if start == -1:
+            continue
+        end = start + len(token)
+        left = text[start-1] if start else ''
+        right = text[end] if end < len(text) else ''
+        whole = not (left.isalnum() or left == '_') and not (right.isalnum() or right == '_')
+        if whole or re.search(r"(?<!\w)" + re.escape(token) + r"(?!\w)", text):
+            matches.add(token)
+    return matches
+
+
 def external_score(body, tokens, query):
     title = body.split('\n', 1)[0].removeprefix('# External reference: ').lower()
     words = set(re.findall(r'\w+', title))
-    return len(set(tokens) & set(re.findall(r'\w+', body.lower()))) + 5*len(set(tokens)&words) + (60 if external_title_match(body, query) else 0)
+    matches = matching_words(body.lower(), tokens)
+    return len(matches) + 5*len(set(tokens)&words) + (60 if external_title_match(body, query) else 0)
 
 
 class KnowledgeProvider(Protocol):
@@ -109,7 +129,7 @@ class FileBrain:
                     continue
                 body = p.read_text()[:60000]
                 paragraphs = body.split("\n\n")
-                scored = [(len(tokens & set(re.findall(r"\w+", part.lower()))), part) for part in paragraphs]
+                scored = [(len(matching_words(part.lower(), tokens)), part) for part in paragraphs]
                 matching = sorted((x for x in scored if x[0]), key=lambda x: x[0], reverse=True)[:3]
                 if matching:
                     excerpts = [x[1] for x in matching]
@@ -131,11 +151,24 @@ class FileBrain:
                 score = len(tokens & set(re.findall(r"\w+", text.lower())))
                 if score:
                     results.append({"source": visibility + "/bookshelf.json#" + book["id"], "text": text, "score": score})
-        from .ingestion import external_documents
+        from .ingestion import iter_external_documents, reference_version
+        references = {}
+        versions = {}
+        reference_order = 0
         for visibility in visibilities:
-            for source, body in external_documents(self, visibility).items():
-                score = external_score(body,tokens,query)
-                if score:
-                    results.append({"source":source,"text":body,"score":score,"knowledge_role":"external_reference","exact_title_match":external_title_match(body,query)})
+            for source, body in iter_external_documents(self, visibility, tokens, versions):
+                score = external_score(body, tokens, query)
+                key = source.split('#chunk-', 1)[0]
+                previous = references.get(key)
+                if score and (previous is None or score > previous[1]['score']):
+                    references[key] = (reference_order, {"source":source,"text":body,"score":score,"knowledge_role":"external_reference","exact_title_match":external_title_match(body,query)})
+                reference_order += 1
+        for _, hit in sorted(references.values(), key=lambda item: item[0]):
+            path, version = versions[hit['source'].split('#chunk-', 1)[0]]
+            try:
+                if reference_version(path) == version:
+                    results.append(hit)
+            except FileNotFoundError:
+                continue
         from .retrieval import rank_knowledge
         return rank_knowledge(results, limit=12)

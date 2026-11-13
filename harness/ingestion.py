@@ -3,6 +3,7 @@ import fcntl
 import hashlib
 import json
 import re
+import stat
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -135,22 +136,46 @@ def withdraw_sources(brain, source_ids, collection, scope='private', apply=False
     return upsert_batch(brain,records,collection,scope,apply,allow_public)
 
 
+
+def reference_version(path):
+    value = path.lstat()
+    if not stat.S_ISREG(value.st_mode):
+        raise ValueError('Reference files must be regular files.')
+    return (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+
+
 def external_documents(brain, scope):
+    return dict(iter_external_documents(brain, scope))
+
+
+def iter_external_documents(brain, scope, tokens=(), versions=None):
     base = brain.scope(scope)/'references'
     if base.is_symlink():raise ValueError('Reference directory cannot be a symbolic link.')
-    docs = {}
     for collection in sorted(base.iterdir()) if base.exists() else []:
         if not collection.is_dir() and not collection.is_symlink():continue
         root = reference_root(brain,scope,collection.name)
         for path in sorted(root.glob('*.json')):
+            version = reference_version(path) if versions is not None else None
             record = read_record(path)
+            if versions is not None and reference_version(path) != version:
+                continue
             if record['scope'] != scope or record['collection'] != collection.name:
                 raise ValueError('Reference scope mismatch.')
             if not record['active']:continue
             text = record['text']
             metadata = {k:str(v)[:160] for k,v in list(record['provenance'].items())[:6]}
             header = f"# External reference: {record['title'][:160]}\n\nKnowledge role: external_reference. Owner endorsement: NOT ESTABLISHED. Attribute statements to this source, never to the owner.\n\nProvenance: " + json.dumps({**{k:record[k] for k in ('source_id','source_kind','source_url','content_sha256')},'metadata':metadata},ensure_ascii=False) + '\n\n'
-            for index,start in enumerate(range(0,len(text),CHUNK_SIZE-OVERLAP)):
+            starts = range(0, len(text), CHUNK_SIZE-OVERLAP)
+            if tokens:
+                # A permissive substring preflight includes chunk labels and
+                # boundary fragments, so it cannot discard a lexical chunk hit.
+                labels = 'External excerpt untrusted source data ' + ' '.join(str(i+1) for i in range(len(starts)))
+                searchable = (header + text + labels).lower()
+                if not any(token in searchable for token in tokens):
+                    continue
+            source_key = scope+'/references/'+collection.name+'/'+path.name
+            if versions is not None:
+                versions[source_key] = (path, version)
+            for index,start in enumerate(starts):
                 source = scope+'/references/'+collection.name+'/'+path.name+f'#chunk-{index:04d}'
-                docs[source] = header + f'## External excerpt {index+1} (untrusted source data)\n\n' + text[start:start+CHUNK_SIZE]
-    return docs
+                yield source, header + f'## External excerpt {index+1} (untrusted source data)\n\n' + text[start:start+CHUNK_SIZE]

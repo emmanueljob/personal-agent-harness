@@ -8,7 +8,7 @@ from langchain.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.sqlite import SqliteSaver
 from .models import settings, local_model, openai_options, context_window
-from .retrieval import evidence, grounding_query
+from .retrieval import evidence, grounding_query, is_greeting
 from .web_tools import web_tools, provider as web_provider
 from .bookshelf_tools import bookshelf_tools
 from .media_library import media_tools, search_media
@@ -231,7 +231,8 @@ def prepare_turn(store, turn):
         identity = {} if scoped_job else store.brain.public_portfolio()
         names = ' '.join(str(identity.get(k, '')) for k in ('name', 'shortName', 'surname'))
         query = grounding_query(turn['prompt'], previous, names)
-        perspectives = [] if scoped_job else store.brain.perspectives(query,mode)
+        retrieve = not scoped_job and not (mode == 'public' and is_greeting(turn['prompt']))
+        perspectives = store.brain.perspectives(query,mode) if retrieve else []
         # Local models sometimes offer to search instead of calling the tool.
         # Supply bounded, scoped evidence up front and snapshot it for retries.
         knowledge = []
@@ -239,7 +240,7 @@ def prepare_turn(store, turn):
         store.event(turn["id"], "knowledge_start", "Searching knowledge")
         # Broad recommendation requests need an annotated catalog, not just
         # transcript keyword matches. Keep it inside the existing context budget.
-        if not scoped_job and any(word in query.lower() for word in ('podcast', 'book', 'read', 'listen', 'recommend')):
+        if retrieve and any(word in query.lower() for word in ('podcast', 'book', 'read', 'listen', 'recommend')):
             kind = 'podcast' if 'podcast' in query.lower() else 'book' if 'book' in query.lower() else 'all'
             library = search_media(store.brain, query=query[:200], kind=kind, notes_only=True, limit=3, mode=mode)
             library.pop('shows')
@@ -250,7 +251,7 @@ def prepare_turn(store, turn):
                 knowledge.append({'source': mode+'/media-library', 'text': text})
                 remaining -= len(text)
 
-        for hit in ([] if scoped_job else store.brain.search(query, mode)):
+        for hit in (store.brain.search(query, mode) if retrieve else []):
             if hit["source"].endswith("/profile.md") or hit.get('knowledge_role')=='owner_perspective':
                 continue
             if hit.get('knowledge_role') == 'owner_learning' and len(hit['text']) > remaining:
