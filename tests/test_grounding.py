@@ -126,3 +126,31 @@ def test_required_input_still_rejects_oversized_question():
     with pytest.raises(ValueError, match='configured model context'):
         fit_turn_evidence('Required profile', 'large question ' * 5000,
                           dict(provider='ollama', context_window=8192), '', [], [])
+
+
+@pytest.mark.parametrize('prompt', ['Hi', 'Hello there!', ' hey? ', 'Good morning!', 'Good evening.'])
+def test_public_greetings_keep_profile_without_unrelated_retrieval(tmp_path, monkeypatch, prompt):
+    monkeypatch.setenv('MODEL_PROVIDER', 'ollama')
+    store = Store(tmp_path)
+    store.set_profile('public', 'Synthetic published career profile.')
+    monkeypatch.setattr(store.brain, 'search', lambda *_: pytest.fail('Greeting scanned knowledge'))
+    monkeypatch.setattr(store.brain, 'perspectives', lambda *_: pytest.fail('Greeting scanned perspectives'))
+    ident = store.enqueue(store.thread('public')['id'], prompt)
+    turn = store.query('SELECT * FROM turns WHERE id=?', (ident,))[0]
+    mode, snapshot = prepare_turn(store, turn)
+    assert mode == 'public'
+    assert snapshot['profile'].startswith('Synthetic published career profile.')
+    assert snapshot['knowledge'] == [] and snapshot['perspectives'] == []
+    assert snapshot['messages'][-1]['content'] == prompt
+
+
+@pytest.mark.parametrize('prompt', ['Hi, what is your leadership experience?', 'Hello explain testing',
+                                  'Who are you?', 'Why?', 'More', 'highlight your work'])
+def test_factual_questions_and_followups_still_retrieve(tmp_path, monkeypatch, prompt):
+    monkeypatch.setenv('MODEL_PROVIDER', 'ollama')
+    store = Store(tmp_path)
+    calls = []
+    monkeypatch.setattr(store.brain, 'search', lambda query, mode: calls.append((query, mode)) or [])
+    ident = store.enqueue(store.thread('public')['id'], prompt)
+    prepare_turn(store, store.query('SELECT * FROM turns WHERE id=?', (ident,))[0])
+    assert len(calls) == 1 and calls[0][1] == 'public'

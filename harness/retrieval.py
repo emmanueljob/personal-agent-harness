@@ -35,6 +35,15 @@ def personal_source(hit):
             or ('/wiki/' in source and ('/influences/' not in source or '/working-influences' in source)))
 
 
+
+def is_greeting(prompt):
+    """Only standalone social greetings can omit factual grounding."""
+    import re
+    return bool(re.fullmatch(
+        r"\s*(?:hi|hello|hey)(?:\s+there)?[\s!.?,]*|\s*good\s+(?:morning|afternoon|evening)[\s!.?,]*",
+        prompt, re.IGNORECASE))
+
+
 def grounding_query(prompt, previous=(), names=''):
     """Resolve short follow-ups using user questions, never generated answers."""
     import re

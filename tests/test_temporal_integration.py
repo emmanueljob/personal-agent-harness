@@ -9,6 +9,7 @@ import pytest
 from temporalio.client import Client
 from harness.store import Store
 from harness.durable import dispatch_once, reconcile_schedules
+from test_retrieval_latency import corpus
 
 pytestmark = pytest.mark.skipif(not os.getenv("TEMPORAL_TEST_ADDRESS"), reason="Requires a running Temporal dev server")
 
@@ -181,13 +182,15 @@ def test_company_reads_then_async_browser_status_through_tool_activity(tmp_path,
             process.wait()
 
 
-def test_public_chat_completes_under_home_polling(tmp_path, monkeypatch):
+def test_public_chat_completes_under_home_polling(tmp_path, monkeypatch, corpus):
     from fastapi.testclient import TestClient
     from test_admin import admin_app, AUTH
     from test_crm import add, company
     from harness import command_actions
 
     module, store = admin_app(tmp_path, monkeypatch)
+    import shutil
+    shutil.copytree(corpus[0].root, store.brain.root, dirs_exist_ok=True)
     queue = 'public-latency-' + str(uuid.uuid4())
     monkeypatch.setenv('AGENT_RUNTIME', 'deepagents')
     monkeypatch.setenv('EXECUTOR', 'temporal')
@@ -210,7 +213,7 @@ def test_public_chat_completes_under_home_polling(tmp_path, monkeypatch):
                 thread = visitor.post('/api/threads', json={'mode': 'public'})
                 assert thread.status_code == 200
                 thread_id = thread.json()['id']
-                for prompt in ('Hi', 'What professional experience is published here?'):
+                for prompt in ('Hi', 'What does the published orchard leadership evidence say?'):
                     started = time.monotonic()
                     accepted = visitor.post('/api/threads/'+thread_id+'/turns', json={'prompt': prompt})
                     assert accepted.status_code == 202
@@ -235,6 +238,15 @@ def test_public_chat_completes_under_home_polling(tmp_path, monkeypatch):
                         time.sleep(.05)
                     assert turn['status'] == 'completed'
                     assert turn['result'] == 'Synthetic public answer'
+                    import json
+                    snapshot = json.loads(store.query(
+                        'SELECT body FROM execution_context WHERE turn_id=?', (turn_id,))[0]['body'])
+                    if prompt == 'Hi':
+                        assert snapshot['knowledge'] == [] and snapshot['perspectives'] == []
+                    else:
+                        evidence = json.dumps(snapshot['knowledge'])
+                        assert '2001-01-01' in evidence and '2026-01-01' in evidence
+                    assert 'PRIVATE_CANARY' not in json.dumps(snapshot)
                     assert polls
                     async def history():
                         client = await Client.connect(env['TEMPORAL_ADDRESS'])
