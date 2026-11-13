@@ -55,6 +55,12 @@ def initialize(store):
             request_id TEXT PRIMARY KEY, result_id TEXT NOT NULL REFERENCES command_action_results(id),
             binding TEXT NOT NULL DEFAULT '')""")
         db.commit()
+        migrate = (
+            'intent_revision' not in {row['name'] for row in db.execute('PRAGMA table_info(command_action_results)')}
+            or 'binding' not in {row['name'] for row in db.execute('PRAGMA table_info(command_action_requests)')}
+        )
+        if not migrate and not db.execute("SELECT 1 FROM command_action_results WHERE intent_revision='' LIMIT 1").fetchone():
+            return
         db.execute('BEGIN IMMEDIATE')
         if 'intent_revision' not in {row['name'] for row in db.execute('PRAGMA table_info(command_action_results)')}:
             db.execute(RESULT_SCHEMA.format(name='command_action_results_revised'))

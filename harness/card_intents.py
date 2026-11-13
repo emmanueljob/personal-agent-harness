@@ -190,6 +190,25 @@ def historical(db, ident, revision, context, review=None):
     return entry
 
 
+def needs_backfill(db):
+    """Current decisions need no historical reconstruction during polling."""
+    return bool(db.execute("""
+        SELECT 1 FROM command_center_dispositions d JOIN crm_records r ON r.id=d.card_id
+        WHERE NOT EXISTS (SELECT 1 FROM command_center_intent_decisions i
+                          WHERE i.card_id=d.card_id AND i.version=d.version)
+          AND NOT EXISTS (SELECT 1 FROM command_center_disposition_requests q
+                          WHERE json_extract(q.result,'$.id')=d.card_id
+                            AND json_extract(q.result,'$.dispositionVersion')=d.version)
+        UNION ALL
+        SELECT 1 FROM command_center_reviews r JOIN crm_records c ON c.id=r.record_id
+        WHERE NOT EXISTS (SELECT 1 FROM command_center_intent_decisions i WHERE i.card_id=r.record_id)
+        UNION ALL
+        SELECT 1 FROM command_center_disposition_requests q
+        WHERE NOT EXISTS (SELECT 1 FROM command_center_intent_decisions d WHERE d.request_id=q.request_id)
+        LIMIT 1
+    """).fetchone())
+
+
 def backfill(db):
     """Import old receipts once. Their requested revisions preserve harmless-edit history."""
     context = catalog(db)
@@ -228,6 +247,8 @@ def backfill(db):
     # Only infer completion while recovering an old server's restore receipt.
     # Native intent restores can leave markers on equivalent members, and those
     # earlier markers must never override the explicit restored intent.
+    if not recovered_requests:
+        return
     for review in db.execute('SELECT * FROM command_center_reviews'):
         entry = historical(db, review['record_id'], None, context, review)
         if not entry:

@@ -11,7 +11,10 @@ from harness.temporal_worker import main
 
 class RecoveryModel(FakeModel):
     async def _agenerate(self, messages, **kwargs):
-        if os.getenv('TOOL_SEQUENCE_FIXTURE'):
+        if os.getenv('PUBLIC_LATENCY_FIXTURE'):
+            await asyncio.sleep(.05)
+            message = AIMessage(content='Synthetic public answer')
+        elif os.getenv('TOOL_SEQUENCE_FIXTURE'):
             calls = [
                 dict(name='read_job_messages', args={'query': 'Synthetic Company'}),
                 dict(name='read_job_workspace', args={'query': 'Synthetic Company'}),
