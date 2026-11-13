@@ -15,7 +15,8 @@ from test_admin import AUTH, admin_app
 from test_crm import add, company
 
 
-def test_initialized_home_polls_do_not_wait_for_writer(tmp_path, monkeypatch):
+@pytest.mark.parametrize('legacy', [False, True], ids=['current', 'unrecoverable-history'])
+def test_initialized_home_polls_do_not_wait_for_writer(tmp_path, monkeypatch, legacy):
     module, store = admin_app(tmp_path, monkeypatch)
     ident = add(store, company('Synthetic latency company', next_action='Review the role'))
     command_actions.initialize(store)
@@ -23,6 +24,27 @@ def test_initialized_home_polls_do_not_wait_for_writer(tmp_path, monkeypatch):
     card = command_center.feed(store)['cards'][0]
     command_center.disposition(store, ident, command_center.Disposition(
         revision=card['revision'], disposition_version=card['dispositionVersion'], state='later', request_id='synthetic-latency-decision'))
+    if legacy:
+        unsupported = add(store, company('Synthetic unsupported history', stage='closed'))
+        closed = add(store, company('Synthetic closed history', stage='closed'))
+        changed = add(store, company('Synthetic changed evidence', next_action='Review role'))
+        from harness import crm
+        with store.connect() as db:
+            row = db.execute('SELECT * FROM crm_records WHERE id=?', (changed,)).fetchone()
+            record = json.loads(row['body'])
+            record['next_action'] = 'Draft an outreach message'
+            crm.write_record(db, record, changed, 1)
+            for old in ('missing-record', unsupported, closed, changed):
+                db.execute('INSERT INTO command_action_results VALUES (?,?,?,?,?,?,?,?)',
+                           ('result-'+old, old, 'prepare_review', 1, 0, 'action-'+old, '{}', ''))
+            for old in ('missing-record', unsupported):
+                db.execute('INSERT INTO command_center_reviews VALUES (?,?,?,?)', (old, 'closed', '', None))
+                db.execute('INSERT INTO command_center_disposition_requests VALUES (?,?,?)', (
+                    'review-'+old, json.dumps({'id': old, 'revision': 1, 'state': 'done'}),
+                    json.dumps({'id': old, 'dispositionVersion': 1})))
+    tables = ('command_action_results', 'command_center_reviews',
+              'command_center_disposition_requests', 'command_center_intent_decisions')
+    before = {table: store.query('SELECT * FROM '+table) for table in tables}
     # The fixture application's data directory is tmp_path/state.
     other_store = Store(store.root)
     with TestClient(module.app, base_url='https://testserver') as client:
@@ -42,9 +64,10 @@ def test_initialized_home_polls_do_not_wait_for_writer(tmp_path, monkeypatch):
                 finally:
                     writer.rollback()
             assert all(reply.status_code == 200 for reply in replies)
+    assert {table: store.query('SELECT * FROM '+table) for table in tables} == before
 
 
-@pytest.mark.parametrize('stage', ['prepare', 'checkpoint', 'complete', 'tool'])
+@pytest.mark.parametrize('stage', ['prepare', 'checkpoint', 'complete', 'tool', 'model'])
 def test_activity_database_wait_does_not_block_event_loop(tmp_path, monkeypatch, stage):
     monkeypatch.setenv('DATA_DIR', str(tmp_path))
     monkeypatch.setenv('BRAIN_BACKEND', 'files')
@@ -54,12 +77,15 @@ def test_activity_database_wait_does_not_block_event_loop(tmp_path, monkeypatch,
     wid = store.workflow_id(ident)
     with store.connect() as db:
         db.execute('INSERT INTO workflow_turns VALUES (?,?,?)', (wid, ident, 'deepagents'))
-        db.execute('INSERT INTO execution_context VALUES (?,?)', (ident, json.dumps({'config': {'web_enabled': False}})))
-    monkeypatch.setattr(deep_runtime.activity, 'info', lambda: SimpleNamespace(workflow_id=wid))
+        db.execute('INSERT INTO execution_context VALUES (?,?)', (ident, json.dumps({'config': {'web_enabled': False, 'provider': 'ollama', 'model': 'fake'}})))
+    monkeypatch.setattr(deep_runtime.activity, 'info', lambda: SimpleNamespace(workflow_id=wid, heartbeat_timeout=None))
     monkeypatch.setattr(deep_runtime, 'prepare_turn', lambda *_: (
         'public', {'config': {'web_enabled': False, 'provider': 'ollama', 'model': 'fake'}, 'messages': []}))
     monkeypatch.setattr(deep_runtime, 'build_system_prompt', lambda *_: 'Synthetic')
     monkeypatch.setattr(deep_runtime.plugins, 'tools', lambda _: [])
+
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+    monkeypatch.setattr(deep_runtime, 'local_model', lambda _: FakeListChatModel(responses=['Synthetic model reply']))
 
     async def exercise():
         if stage == 'prepare':
@@ -68,6 +94,10 @@ def test_activity_database_wait_does_not_block_event_loop(tmp_path, monkeypatch,
             pending = deep_runtime.checkpoint([])
         elif stage == 'complete':
             pending = deep_runtime.complete('Synthetic reply')
+        elif stage == 'model':
+            from temporalio.deepagents._activity import DeepAgentActivities, ModelActivityInput
+            pending = DeepAgentActivities(model_provider=deep_runtime.DeferredModel).invoke_model(
+                ModelActivityInput(model_name='ollama:fake', messages=[]))
         else:
             pending = deep_runtime.invoke_tool('unavailable', {})
         task = asyncio.create_task(pending)

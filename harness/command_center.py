@@ -35,7 +35,10 @@ def initialize(store):
             seq INTEGER PRIMARY KEY AUTOINCREMENT, request_id TEXT UNIQUE, card_id TEXT NOT NULL,
             intent_key TEXT NOT NULL, evidence TEXT NOT NULL, state TEXT NOT NULL,
             resume_at TEXT, version INTEGER NOT NULL, snapshot TEXT NOT NULL)''')
-        if card_intents.needs_backfill(db):
+        db.execute('BEGIN')
+        pending = card_intents.needs_backfill(db)
+        db.rollback()
+        if pending:
             db.execute('BEGIN IMMEDIATE')
             card_intents.backfill(db)
 

@@ -107,6 +107,35 @@ def provide_model(name):
     return model
 
 
+
+class DeferredModel:
+    """Build the bound provider off-loop when the SDK starts async model I/O."""
+    def __init__(self, name, bindings=()):
+        self.name = name
+        self.bindings = bindings
+
+    def bind_tools(self, tools):
+        return DeferredModel(self.name, (*self.bindings, ('bind_tools', tools)))
+
+    def bind(self, **kwargs):
+        return DeferredModel(self.name, (*self.bindings, ('bind', kwargs)))
+
+    async def _model(self):
+        model = await asyncio.to_thread(provide_model, self.name)
+        for operation, value in self.bindings:
+            model = model.bind_tools(value) if operation == 'bind_tools' else model.bind(**value)
+        return model
+
+    async def ainvoke(self, messages, config=None):
+        model = await self._model()
+        return await model.ainvoke(messages, config=config)
+
+    async def astream(self, messages, config=None):
+        model = await self._model()
+        async for chunk in model.astream(messages, config=config):
+            yield chunk
+
+
 def tool_binding():
     store, turn, mode = binding()
     tools = {t.name: t for t in plugins.tools(context(store, turn, mode, saved_config(store, turn)))}
@@ -145,7 +174,7 @@ def routed_tools(names):
 async def make_worker(address, queue):
     register_tools()
     from .deep_workflows import DeepAgentTurnV1
-    plugin = DeepAgentsPlugin(model_provider=provide_model,
+    plugin = DeepAgentsPlugin(model_provider=DeferredModel,
         model_activity_options={'start_to_close_timeout': timedelta(minutes=5),
                                 'heartbeat_timeout': timedelta(seconds=20),
                                 'retry_policy': RetryPolicy(maximum_attempts=2)},

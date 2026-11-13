@@ -29,6 +29,11 @@ RESULT_SCHEMA = """CREATE TABLE IF NOT EXISTS {name} (
 
 
 def _bind_legacy_intents(db):
+    for ident, revision in _legacy_bindings(db):
+        db.execute('UPDATE command_action_results SET intent_revision=? WHERE id=?', (revision, ident))
+
+
+def _legacy_bindings(db):
     # A legacy result has no group fingerprint. Adopt its first current grouped
     # snapshot once, preserving the original result body and every request ID.
     for row in db.execute("SELECT * FROM command_action_results WHERE intent_revision=''").fetchall():
@@ -43,8 +48,7 @@ def _bind_legacy_intents(db):
             original = db.execute('SELECT revision FROM crm_records WHERE id=?', (row['card_id'],)).fetchone()
             matches = original and original['revision']==row['revision']
         if matches:
-            db.execute('UPDATE command_action_results SET intent_revision=? WHERE id=?',
-                       (card['intentRevision'], row['id']))
+            yield row['id'], card['intentRevision']
 
 
 def initialize(store):
@@ -59,8 +63,12 @@ def initialize(store):
             'intent_revision' not in {row['name'] for row in db.execute('PRAGMA table_info(command_action_results)')}
             or 'binding' not in {row['name'] for row in db.execute('PRAGMA table_info(command_action_requests)')}
         )
-        if not migrate and not db.execute("SELECT 1 FROM command_action_results WHERE intent_revision='' LIMIT 1").fetchone():
-            return
+        if not migrate:
+            db.execute('BEGIN')
+            pending = next(_legacy_bindings(db), None)
+            db.rollback()
+            if pending is None:
+                return
         db.execute('BEGIN IMMEDIATE')
         if 'intent_revision' not in {row['name'] for row in db.execute('PRAGMA table_info(command_action_results)')}:
             db.execute(RESULT_SCHEMA.format(name='command_action_results_revised'))
