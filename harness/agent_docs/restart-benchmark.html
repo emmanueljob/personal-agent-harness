@@ -1,0 +1,56 @@
+<article>
+  <header>
+    <h1>Personal Agent Harness restart benchmark</h1>
+    <p class="reading-byline">By $author · <time datetime="2026-11-21">November 21, 2026</time></p>
+    <p class="reading-lede">What happens when a scheduled AI agent loses its worker while waiting for approval or writing to another service? Across 18 trials, every scheduled turn completed with the recorded decision. A crash after the service committed exposed a duplicate-write risk. The same retry produced one write with deduplication enabled and two writes with it disabled.</p>
+  </header>
+
+  <section aria-labelledby="results">
+    <h2 id="results">Results</h2>
+    <p>Each scenario ran three times. A write attempt is a request to the mock service. An effective write is a new record in that service.</p>
+    <div class="reading-data" role="region" aria-label="Benchmark results table" tabindex="0">
+      <table>
+        <caption>Results per trial, with median recovery time across each set of three</caption>
+        <thead><tr><th scope="col">Scenario</th><th scope="col">Write attempts</th><th scope="col">Effective writes</th><th scope="col">Median recovery</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Approved, no restart</th><td>1</td><td>1</td><td>—</td></tr>
+          <tr><th scope="row">Restart before approval</th><td>1</td><td>1</td><td>11.123 s</td></tr>
+          <tr><th scope="row">Restart after approval, before write</th><td>1</td><td>1</td><td>11.083 s</td></tr>
+          <tr><th scope="row">Restart after commit, with deduplication</th><td>2</td><td>1</td><td>11.085 s</td></tr>
+          <tr><th scope="row">Declined during the outage</th><td>0</td><td>0</td><td>11.088 s</td></tr>
+          <tr><th scope="row">Restart after commit, without deduplication</th><td>2</td><td>2</td><td>11.082 s</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>In the post-commit trials, the worker died before returning its receipt to Temporal. Temporal retried the write activity. The deduplicating service returned the first receipt for the same key. The control returned a second receipt and kept both records. In the decline trials, the workflow completed without calling the write tool.</p>
+  </section>
+
+  <section aria-labelledby="method">
+    <h2 id="method">How the restart test works</h2>
+    <ol>
+      <li>Trigger a real Temporal Schedule and use the harness’s dispatcher to start one Deep Agents turn. A deterministic model reads a synthetic library notice and prepares a digest for review.</li>
+      <li>Kill the worker at one of three boundaries. The review is pending, the reviewer approved but the write has yet to start, or the service committed but the receipt has yet to reach Temporal.</li>
+      <li>Start a replacement worker on the same task queues. Compare the stored decision, the Temporal Activity history, the mock service’s recorded writes, and the final response.</li>
+    </ol>
+    <p>The mock service checks approval against the digest hash before it accepts a write. Its idempotency key combines the scheduled turn ID with that hash. Both remain stable across Activity attempts.</p>
+  </section>
+
+  <section aria-labelledby="reproduce">
+    <h2 id="reproduce">Reproduce the benchmark</h2>
+    <p>Install Git, Python 3.12, <a href="https://docs.astral.sh/uv/getting-started/installation/">uv</a> and the <a href="https://docs.temporal.io/cli">Temporal CLI</a>. The reported run used Python 3.12.16, Temporal CLI 1.9.1 with Server 1.32.0, and Python SDK 1.35.0 on macOS arm64.</p>
+    <pre><code>git clone https://github.com/emmanueljob/personal-agent-harness.git
+cd personal-agent-harness
+git checkout $runner_revision
+uv sync --locked
+.venv/bin/python -m experiments.restart_benchmark --trials 3 --output restart-results.json</code></pre>
+    <p>The benchmark starts its own loopback Temporal server and uses synthetic data in temporary directories. No model key or app configuration is required. Add <code>--case after_write</code> to run only the idempotent post-commit case, or use <code>--temporal-cli</code> to supply an executable path.</p>
+    <p>In the JSON output, look at <code>sink_write_attempts</code>, <code>effective_writes</code>, <code>events</code>, and <code>temporal_activities</code>. After a post-commit crash, the idempotent case should show two attempts, one record, and the same receipt twice. The non-idempotent control should show two records and two receipts.</p>
+    <p><a href="https://github.com/emmanueljob/personal-agent-harness/blob/$runner_revision/experiments/restart_benchmark.py">Benchmark runner</a> · <a href="https://github.com/emmanueljob/personal-agent-harness/blob/$runner_revision/docs/personal-harness-restart-benchmark.md">Reproduction guide and expected outcomes</a></p>
+  </section>
+
+  <section aria-labelledby="scope">
+    <h2 id="scope">What the results cover</h2>
+    <p>The scheduler, dispatcher, agent workflow, and checkpoint code came from the harness. The model, approval inbox, and downstream service were fixtures. Each interruption killed one worker while Temporal and both databases stayed up. The roughly 11-second recovery reflects the fixture’s 10-second Activity timeout and retry delay.</p>
+    <p>The measured source revision was <a href="https://github.com/emmanueljob/personal-agent-harness/commit/6ebcca32ea0dd7ac788227449911f441f31cd0f6"><code>6ebcca32</code></a>. The checkout in the reproduction steps pins the merged revision with the same benchmark code.</p>
+  </section>
+</article>

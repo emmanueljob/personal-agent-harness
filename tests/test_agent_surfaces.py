@@ -60,6 +60,7 @@ def test_discovery_contracts_public_reads_and_no_private_exposure(tmp_path,monke
         }
         assert c.get('/about').status_code == 404
         assert c.get('/writing/harness-over-headcount').status_code == 404
+        assert c.get('/writing/personal-agent-harness-restart-benchmark').status_code == 404
         assert c.get('/.well-known/agent-interface.json').json()['mcp']['url']=='/mcp'
         for path in ['/agents','/agents.md','/llms.txt','/.well-known/api-catalog','/api/public/openapi.json','/api/public/tools','/api/public/profile','/api/public/knowledge?query=leadership','/api/public/bookshelf']:
             r=c.get(path);assert r.status_code==200,(path,r.text)
@@ -91,15 +92,16 @@ def test_public_reading_pages_and_canonical_sitemap_behind_fly(tmp_path, monkeyp
                       'detail': 'The team counted completed reviews.', 'outcome': 'Twenty reviews', 'question': ''}],
     }))
     case = '/writing/harness-over-headcount'
+    benchmark = '/writing/personal-agent-harness-restart-benchmark'
     # The ASGI request has an HTTP base URL after TLS is terminated upstream.
     with TestClient(module.app, headers={'Fly-Forwarded-Proto': 'https'}) as c:
         urls = ElementTree.fromstring(c.get('/sitemap.xml').text)
         assert {item.text for item in urls.iter('{http://www.sitemaps.org/schemas/sitemap/0.9}loc')} == {
-            origin + path for path in ('/', '/about', '/agents', case)
+            origin + path for path in ('/', '/about', '/agents', case, benchmark)
         }
         assert f'Sitemap: {origin}/sitemap.xml' in c.get('/robots.txt').text
-        home, bio, article = (c.get(path) for path in ('/', '/about', case))
-        for path, response in zip(('/', '/about', case), (home, bio, article)):
+        home, bio, article, report = (c.get(path) for path in ('/', '/about', case, benchmark))
+        for path, response in zip(('/', '/about', case, benchmark), (home, bio, article, report)):
             assert response.status_code == 200
             assert f'rel="canonical" href="{origin}{path}"' in response.text
             assert 'PRIVATE PROFILE CANARY' not in response.text
@@ -112,7 +114,16 @@ def test_public_reading_pages_and_canonical_sitemap_behind_fly(tmp_path, monkeyp
         assert '<h1>Harness over headcount</h1>' in article.text
         assert 'The team counted completed reviews.' in article.text
         assert 'Human approval' in article.text and 'href="/about">Avery &lt;Lee&gt;' in article.text
+        for response in (home, bio, article):
+            assert f'href="{benchmark}">Personal Agent Harness restart benchmark' in response.text
+        assert '<h1>Personal Agent Harness restart benchmark</h1>' in report.text
+        assert 'Across 18 trials' in report.text and 'Reproduce the benchmark' in report.text
+        assert 'uv sync --locked' in report.text and 'git checkout dd0a21ef' in report.text
+        assert '<th scope="row">Restart after commit, with deduplication</th><td>2</td><td>1</td>' in report.text
+        assert '<th scope="row">Restart after commit, without deduplication</th><td>2</td><td>2</td>' in report.text
+        assert '"@type": "TechArticle"' in report.text and 'Avery &lt;Lee&gt;' in report.text
         assert c.head(case).status_code == 200
+        assert c.head(benchmark).status_code == 200
         assert c.get('/portfolio-reading.css').headers['content-type'].startswith('text/css')
         assert case not in c.get('/hi/unknown').text
 

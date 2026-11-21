@@ -67,6 +67,22 @@
 .reading-workflow span { display: block; margin-top: .25rem; }
 .reading-page a:focus-visible, .portfolio-reading a:focus-visible { outline: 2px solid currentColor; outline-offset: 4px; }
 
+.reading-data, .reading-content pre {
+  overflow-x: auto;
+  margin-block: 1rem;
+  border: 1px solid #d5e0d7;
+  border-radius: .5rem;
+}
+.reading-data:focus-visible { outline: 2px solid #274e35; outline-offset: 3px; }
+.reading-data table { width: 100%; min-width: 33rem; border-collapse: collapse; font-size: .875rem; }
+.reading-data caption { text-align: left; padding: .65rem .85rem; color: #4a6050; }
+.reading-data th, .reading-data td { border-top: 1px solid #d5e0d7; padding: .65rem .85rem; text-align: left; }
+.reading-data thead { background: #ecf3ed; }
+.reading-data td { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.reading-content pre { padding: .8rem 1rem; background: #ecf3ed; }
+.reading-content code { font-size: .9em; }
+.reading-content section > ol:not(.reading-workflow) > li + li { margin-top: .45rem; }
+
 @media (max-width: 38rem) {
   .reading-workflow { grid-template-columns: 1fr; }
 }
