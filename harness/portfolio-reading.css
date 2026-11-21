@@ -1,0 +1,72 @@
+.portfolio-reading {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: .75rem 1.75rem;
+  padding: 1rem;
+  color: var(--text, #17241c);
+  background: var(--bg, #e4ede7);
+  font: .875rem/1.5 system-ui, sans-serif;
+}
+
+.portfolio-reading a,
+.reading-page a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: .24em;
+  overflow-wrap: anywhere;
+}
+
+.reading-page {
+  margin: 0;
+  color: #1b2921;
+  background: #f7faf7;
+  font: 1rem/1.7 system-ui, sans-serif;
+}
+
+.reading-header {
+  border-bottom: 1px solid #d5e0d7;
+  background: #e4ede7;
+}
+
+.reading-header nav,
+.reading-content {
+  width: min(48rem, calc(100% - 2.5rem));
+  margin-inline: auto;
+}
+
+.reading-header nav {
+  display: flex;
+  gap: 1.5rem;
+  padding-block: 1rem;
+}
+
+.reading-content { padding-block: clamp(2.5rem, 8vw, 5rem); }
+.reading-content h1 { margin: 0; font-size: clamp(2.5rem, 7vw, 4.5rem); line-height: 1.06; letter-spacing: -.055em; }
+.reading-content h2 { margin: 0 0 .65rem; font-size: 1.5rem; line-height: 1.2; }
+.reading-content h3 { margin: 0; font-size: 1.05rem; }
+.reading-content p { max-width: 65ch; margin: .55rem 0; }
+.reading-content section, .reading-content footer { margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid #d5e0d7; }
+.reading-content .reading-lede { margin-block: 1.2rem; max-width: 56ch; font-size: clamp(1.15rem, 3vw, 1.4rem); line-height: 1.48; }
+.reading-content .reading-byline, .reading-muted { color: #4a6050; }
+.reading-content .reading-byline { margin-block: 0 .75rem; }
+.reading-content h1 + .reading-byline { margin-top: .5rem; }
+.reading-result { color: #274e35; font-size: 1.15rem; font-weight: 700; }
+.reading-experience { list-style: none; padding: 0; }
+.reading-experience li + li { margin-top: 1.5rem; }
+
+.reading-workflow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: .75rem;
+  padding-left: 0;
+  list-style-position: inside;
+}
+
+.reading-workflow li { padding: .85rem; border: 1px solid #d5e0d7; border-radius: .5rem; background: #ecf3ed; }
+.reading-workflow span { display: block; margin-top: .25rem; }
+.reading-page a:focus-visible, .portfolio-reading a:focus-visible { outline: 2px solid currentColor; outline-offset: 4px; }
+
+@media (max-width: 38rem) {
+  .reading-workflow { grid-template-columns: 1fr; }
+}

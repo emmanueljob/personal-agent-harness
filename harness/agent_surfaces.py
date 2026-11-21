@@ -3,7 +3,6 @@ import os
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import urlsplit
-from xml.sax.saxutils import escape
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.openapi.utils import get_openapi
@@ -16,6 +15,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from mcp_types import ToolAnnotations
 from .public_agent import PublicAgent
 from .public_access import consume, digest
+from .public_pages import public_origin
 
 DOCS = Path(__file__).parent/'agent_docs'
 AGENT_NOTICE = '<aside id="agent-entry" aria-label="Agent access">Bringing an AI agent? <a href="/agents.md">Start here: /agents.md</a>. Search public knowledge and books through the <a href="/api/public/openapi.json">public API</a>, or connect to anonymous MCP at <a href="/agents">/mcp</a>. No login needed.</aside>'
@@ -179,17 +179,10 @@ def mount_agent_surfaces(app, get_store):
         return JSONResponse({'linkset':[{'anchor':'/api/public','service-desc':[{'href':'/api/public/openapi.json','type':'application/vnd.oai.openapi+json'}],
             'service-doc':[{'href':'/agents','type':'text/html'},{'href':'/agents.md','type':'text/markdown'}]}]},media_type='application/linkset+json')
 
-    @app.get('/robots.txt',include_in_schema=False)
+    @app.api_route('/robots.txt',methods=['GET', 'HEAD'],include_in_schema=False)
     def robots(request:Request):
-        origin=str(request.base_url).rstrip('/')
+        origin=public_origin(request)
         return PlainTextResponse('User-agent: *\nAllow: /\nDisallow: /api/owner\nDisallow: /api/threads\nDisallow: /api/public/answers/\n# Agent instructions: '+origin+'/agents.md\n# Machine-readable index: '+origin+'/llms.txt\nSitemap: '+origin+'/sitemap.xml\n')
-
-    @app.get('/sitemap.xml',include_in_schema=False)
-    def sitemap(request:Request):
-        origin=str(request.base_url).rstrip('/')
-        paths=['/','/agents','/agents.md','/llms.txt','/api/public/openapi.json','/api/public/profile','/api/public/bookshelf','/.well-known/agent-interface.json']
-        urls=''.join('<url><loc>'+escape(origin+path)+'</loc></url>' for path in paths)
-        return PlainTextResponse('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'+urls+'</urlset>',media_type='application/xml')
 
     @app.get('/.well-known/agent-interface.json',include_in_schema=False)
     def agent_interface():
