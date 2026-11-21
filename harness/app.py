@@ -153,6 +153,7 @@ class RoutineInput(TurnInput):
 @app.get("/")
 def index(request: Request):
     from .agent_surfaces import AGENT_NOTICE
+    from .public_pages import homepage_html, public_origin
     path = frontend_dist / "index.html" if (frontend_dist / "index.html").exists() else Path(__file__).parent / "index.html"
     html = path.read_text()
     if '</head>' not in html:
@@ -162,6 +163,8 @@ def index(request: Request):
     if request.url.path == '/admin':
         html = html.replace(AGENT_NOTICE, '')
         return HTMLResponse(html, headers={'Cache-Control':'private, no-store','X-Robots-Tag':'noindex, nofollow'})
+    if request.url.path == '/':
+        html = homepage_html(html, portfolio(), public_origin(request))
     import json
     bootstrap = visitor_profile(request)
     payload = json.dumps(bootstrap).replace('<', '\\u003c')
@@ -563,5 +566,7 @@ def cover_asset(ident: str):
 
 from .admin_mcp import mount_admin_mcp
 mount_admin_mcp(app, lambda: store)
+from .public_pages import mount_public_pages
+mount_public_pages(app, portfolio)
 from .agent_surfaces import mount_agent_surfaces
 mount_agent_surfaces(app, lambda: store)

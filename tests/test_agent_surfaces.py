@@ -55,7 +55,11 @@ def test_discovery_contracts_public_reads_and_no_private_exposure(tmp_path,monke
         assert '/sitemap.xml' in c.get('/robots.txt').text and '/agents.md' in c.get('/robots.txt').text
         import xml.etree.ElementTree as ET
         sitemap=ET.fromstring(c.get('/sitemap.xml').text)
-        assert any(n.text=='http://testserver/agents.md' for n in sitemap.iter('{http://www.sitemaps.org/schemas/sitemap/0.9}loc'))
+        assert {n.text for n in sitemap.iter('{http://www.sitemaps.org/schemas/sitemap/0.9}loc')} == {
+            'http://testserver/', 'http://testserver/agents',
+        }
+        assert c.get('/about').status_code == 404
+        assert c.get('/writing/harness-over-headcount').status_code == 404
         assert c.get('/.well-known/agent-interface.json').json()['mcp']['url']=='/mcp'
         for path in ['/agents','/agents.md','/llms.txt','/.well-known/api-catalog','/api/public/openapi.json','/api/public/tools','/api/public/profile','/api/public/knowledge?query=leadership','/api/public/bookshelf']:
             r=c.get(path);assert r.status_code==200,(path,r.text)
@@ -70,6 +74,47 @@ def test_discovery_contracts_public_reads_and_no_private_exposure(tmp_path,monke
         assert c.get('/api/public/knowledge?query=leadership&limit=99').status_code==422
         assert c.get('/api/public/knowledge?query=x&scope=private').json()['scope']=='public'
         assert c.post('/api/public/questions',json={'question':'hello','mode':'private'}).status_code==422
+
+
+def test_public_reading_pages_and_canonical_sitemap_behind_fly(tmp_path, monkeypatch):
+    from xml.etree import ElementTree
+
+    module, store = fixture_app(tmp_path, monkeypatch)
+    origin = 'https://portfolio.example.test'
+    monkeypatch.setenv('PUBLIC_ORIGIN', origin)
+    monkeypatch.setenv('FLY_APP_NAME', 'fixture-portfolio')
+    (store.brain.scope('public') / 'portfolio.json').write_text(json.dumps({
+        'name': 'Avery <Lee>', 'role': 'Engineering Lead', 'location': 'Bay Area',
+        'summary': 'This bio is available as HTML.', 'linkedin': 'https://example.test/avery',
+        'projects': [{'id': 'factory', 'eyebrow': 'Case study', 'title': 'Harness over headcount',
+                      'company': 'Fixture', 'description': 'A study of review throughput.',
+                      'detail': 'The team counted completed reviews.', 'outcome': 'Twenty reviews', 'question': ''}],
+    }))
+    case = '/writing/harness-over-headcount'
+    # The ASGI request has an HTTP base URL after TLS is terminated upstream.
+    with TestClient(module.app, headers={'Fly-Forwarded-Proto': 'https'}) as c:
+        urls = ElementTree.fromstring(c.get('/sitemap.xml').text)
+        assert {item.text for item in urls.iter('{http://www.sitemaps.org/schemas/sitemap/0.9}loc')} == {
+            origin + path for path in ('/', '/about', '/agents', case)
+        }
+        assert f'Sitemap: {origin}/sitemap.xml' in c.get('/robots.txt').text
+        home, bio, article = (c.get(path) for path in ('/', '/about', case))
+        for path, response in zip(('/', '/about', case), (home, bio, article)):
+            assert response.status_code == 200
+            assert f'rel="canonical" href="{origin}{path}"' in response.text
+            assert 'PRIVATE PROFILE CANARY' not in response.text
+        assert 'href="/about">About Avery &lt;Lee&gt;' in home.text
+        assert '<h1>Avery &lt;Lee&gt;</h1>' in bio.text
+        assert 'This bio is available as HTML.' in bio.text
+        assert 'Avery <Lee>' not in bio.text
+        assert '"sameAs": ["https://example.test/avery"]' in bio.text
+        assert f'href="{case}">Harness over headcount' in bio.text
+        assert '<h1>Harness over headcount</h1>' in article.text
+        assert 'The team counted completed reviews.' in article.text
+        assert 'Human approval' in article.text and 'href="/about">Avery &lt;Lee&gt;' in article.text
+        assert c.head(case).status_code == 200
+        assert c.get('/portfolio-reading.css').headers['content-type'].startswith('text/css')
+        assert case not in c.get('/hi/unknown').text
 
 
 def test_anonymous_question_tokens_scoping_and_rate_limit(tmp_path,monkeypatch):
