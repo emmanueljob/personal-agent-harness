@@ -63,6 +63,8 @@ TEMPORAL_TEST_ADDRESS=localhost:7233 .venv/bin/python -m pytest -q
 
 The Temporal integration test kills a worker mid-activity, starts a replacement, verifies recovery and one artifact row, then creates/triggers/disables a real schedule. The Deep Agents recovery test kills a worker after an artifact tool completes, recovers the interrupted model Activity and verifies the tool Activity ran once. Test workers and task queues are isolated from the app. It uses a fake agent so it makes no paid or local model calls.
 
+The [Personal Agent Harness restart benchmark](docs/personal-harness-restart-benchmark.md) measures how a scheduled turn recovers before approval, after approval, and after a mock external write. It runs offline with a separate Temporal server and records the results and event traces as JSON.
+
 ## Interface development
 
 The frontend is React + TypeScript + Vite, with Motion transitions and locally bundled DM Sans and DM Serif Display fonts. The portfolio has conversation, resume, bookshelf, podcast, brain-map and architecture navigation. The architecture page provides a labeled logical diagram, component/source links, execution flow, design principles and deployment limits. Alpine glass is the default appearance; dark charcoal/amber and warm light themes remain available, and the theme preference persists locally. Personal presentation fields come from `/api/portfolio`, not the frontend bundle.
