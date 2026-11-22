@@ -5,6 +5,11 @@
     <p class="reading-lede">What happens when a scheduled AI agent loses its worker while waiting for approval or writing to another service? Across 18 trials, every scheduled turn completed with the recorded decision. A crash after the service committed exposed a duplicate-write risk. The same retry produced one write with deduplication enabled and two writes with it disabled.</p>
   </header>
 
+  <section aria-labelledby="safe-retry">
+    <h2 id="safe-retry">Can an AI agent safely retry after a tool commits but the response is lost?</h2>
+    <p>Yes, if the retry sends the same idempotency key and the receiving service uses it to deduplicate the write. In three trials where the worker crashed after the service committed a write but before Temporal received the receipt, the original request and retry produced one effective write per trial. With deduplication disabled, the same crash scenario produced two effective writes per trial across three more trials.</p>
+  </section>
+
   <section aria-labelledby="results">
     <h2 id="results">Results</h2>
     <p>Each scenario ran three times. A write attempt is a request to the mock service. An effective write is a new record in that service.</p>
