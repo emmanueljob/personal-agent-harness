@@ -118,6 +118,8 @@ def test_public_reading_pages_and_canonical_sitemap_behind_fly(tmp_path, monkeyp
             assert f'href="{benchmark}">Personal Agent Harness restart benchmark' in response.text
         assert '<h1>Personal Agent Harness restart benchmark</h1>' in report.text
         assert 'Across 18 trials' in report.text and 'Reproduce the benchmark' in report.text
+        assert '<h2 id="safe-retry">Can an AI agent safely retry after a tool commits but the response is lost?</h2>' in report.text
+        assert 'the original request and retry produced one effective write per trial' in report.text
         assert 'uv sync --locked' in report.text and 'git checkout dd0a21ef' in report.text
         assert '<th scope="row">Restart after commit, with deduplication</th><td>2</td><td>1</td>' in report.text
         assert '<th scope="row">Restart after commit, without deduplication</th><td>2</td><td>2</td>' in report.text
