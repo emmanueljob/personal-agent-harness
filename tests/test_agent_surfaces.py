@@ -84,6 +84,7 @@ def test_public_reading_pages_and_canonical_sitemap_behind_fly(tmp_path, monkeyp
     origin = 'https://portfolio.example.test'
     monkeypatch.setenv('PUBLIC_ORIGIN', origin)
     monkeypatch.setenv('FLY_APP_NAME', 'fixture-portfolio')
+    monkeypatch.setenv('GOOGLE_SITE_VERIFICATION', 'fixture"verification')
     (store.brain.scope('public') / 'portfolio.json').write_text(json.dumps({
         'name': 'Avery <Lee>', 'role': 'Engineering Lead', 'location': 'Bay Area',
         'summary': 'This bio is available as HTML.', 'linkedin': 'https://example.test/avery',
@@ -101,6 +102,8 @@ def test_public_reading_pages_and_canonical_sitemap_behind_fly(tmp_path, monkeyp
         }
         assert f'Sitemap: {origin}/sitemap.xml' in c.get('/robots.txt').text
         home, bio, article, report = (c.get(path) for path in ('/', '/about', case, benchmark))
+        assert '<meta name="google-site-verification" content="fixture&quot;verification">' in home.text.split('</head>', 1)[0]
+        assert all('google-site-verification' not in response.text for response in (bio, article, report))
         for path, response in zip(('/', '/about', case, benchmark), (home, bio, article, report)):
             assert response.status_code == 200
             assert f'rel="canonical" href="{origin}{path}"' in response.text

@@ -46,6 +46,9 @@ def metadata(origin, path, summary):
 
 
 def homepage_html(html, profile, origin):
+    if verification := os.getenv('GOOGLE_SITE_VERIFICATION', '').strip():
+        tag = f'<meta name="google-site-verification" content="{escape(verification)}">'
+        html = html.replace('</head>', tag + '</head>', 1)
     if not has_bio(profile):
         return html
     title = escape(f'{profile.name} — {profile.role or "Portfolio"}')
