@@ -16,6 +16,8 @@ CASE_STUDY = '/writing/harness-over-headcount'
 RESTART_BENCHMARK = '/writing/personal-agent-harness-restart-benchmark'
 RESTART_TITLE = 'Personal Agent Harness restart benchmark'
 RESTART_REVISION = 'dd0a21ef4952334c5b67204aa6228240e18dbf26'
+LOCAL_MODEL = '/writing/local-model-on-my-mac'
+LOCAL_MODEL_TITLE = 'How I ran my portfolio’s AI on my Mac'
 STYLESHEET = '/portfolio-reading.css'
 
 
@@ -59,7 +61,7 @@ def homepage_html(html, profile, origin):
     reading = f'<nav class="portfolio-reading" aria-label="Read the portfolio">{link(ABOUT, "About " + profile.name)}'
     if project:
         reading += link(CASE_STUDY, project.title)
-    reading += link(RESTART_BENCHMARK, RESTART_TITLE) + '</nav>'
+    reading += link(RESTART_BENCHMARK, RESTART_TITLE) + link(LOCAL_MODEL, LOCAL_MODEL_TITLE) + '</nav>'
     return html.replace('</body>', reading + '</body>', 1)
 
 
@@ -94,7 +96,8 @@ def bio_page(profile, project, origin):
     work = '<section><h2>Engineering writing</h2>'
     if project:
         work += f'<h3>{link(CASE_STUDY, project.title)}</h3><p>{escape(project.description)}</p>'
-    work += f'<h3>{link(RESTART_BENCHMARK, RESTART_TITLE)}</h3></section>'
+    work += f'<h3>{link(RESTART_BENCHMARK, RESTART_TITLE)}</h3>'
+    work += f'<h3>{link(LOCAL_MODEL, LOCAL_MODEL_TITLE)}</h3></section>'
     person = {'@type': 'Person', '@id': origin + ABOUT + '#person', 'name': profile.name, 'url': origin + ABOUT}
     if profile.role:
         person['jobTitle'] = profile.role
@@ -148,6 +151,20 @@ def restart_benchmark_page(profile, origin):
     })
 
 
+def local_model_page(profile, origin):
+    template = Path(__file__).with_name('agent_docs') / 'local-model-on-my-mac.html'
+    body = Template(template.read_text(encoding='utf-8')).substitute(
+        title=escape(LOCAL_MODEL_TITLE), author=link(ABOUT, profile.name),
+        benchmark=link(RESTART_BENCHMARK, RESTART_TITLE),
+    )
+    summary = 'How I used Ollama, Qwen, and an outbound Mac worker to serve AI chat on my Fly.io portfolio.'
+    return page(origin, LOCAL_MODEL, LOCAL_MODEL_TITLE, summary, body, {
+        '@context': 'https://schema.org', '@type': 'TechArticle', 'headline': LOCAL_MODEL_TITLE,
+        'author': {'@type': 'Person', 'name': profile.name, 'url': origin + ABOUT},
+        'mainEntityOfPage': origin + LOCAL_MODEL,
+    })
+
+
 def mount_public_pages(app, get_portfolio):
     @app.api_route(ABOUT, methods=['GET', 'HEAD'], include_in_schema=False)
     def about(request: Request):
@@ -171,6 +188,13 @@ def mount_public_pages(app, get_portfolio):
             raise HTTPException(404, 'No benchmark is published.')
         return restart_benchmark_page(profile, public_origin(request))
 
+    @app.api_route(LOCAL_MODEL, methods=['GET', 'HEAD'], include_in_schema=False)
+    def local_model(request: Request):
+        profile = get_portfolio()
+        if not has_bio(profile):
+            raise HTTPException(404, 'No article is published.')
+        return local_model_page(profile, public_origin(request))
+
     @app.get(STYLESHEET, include_in_schema=False)
     def styles():
         return FileResponse(Path(__file__).with_name('portfolio-reading.css'), media_type='text/css')
@@ -181,7 +205,7 @@ def mount_public_pages(app, get_portfolio):
         profile = get_portfolio()
         paths = ['/', '/agents']
         if has_bio(profile):
-            paths.extend((ABOUT, RESTART_BENCHMARK))
+            paths.extend((ABOUT, RESTART_BENCHMARK, LOCAL_MODEL))
             if case_study(profile):
                 paths.append(CASE_STUDY)
         urls = ''.join(f'<url><loc>{xml_escape(origin + path)}</loc></url>' for path in paths)

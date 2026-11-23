@@ -1,0 +1,42 @@
+<article>
+  <header>
+    <h1>$title</h1>
+    <p class="reading-byline">By $author</p>
+    <p class="reading-lede">In an early version of my portfolio, a visitor could ask my AI guide a question and have Qwen generate the reply on my Mac. The site ran on Fly.io. A small worker on the Mac reached out to the site for inference jobs, so Ollama could stay on localhost.</p>
+  </header>
+
+  <section aria-labelledby="local-setup">
+    <h2 id="local-setup">Getting the model running on my Mac</h2>
+    <p>I started with the whole stack on the Mac. The project’s development launcher started Ollama, the FastAPI app, and a local Temporal server and worker. Ollama served <code>qwen3.8:27b</code> over loopback. These were the model settings in the project’s example environment.</p>
+    <pre><code>MODEL_PROVIDER=ollama
+OLLAMA_MODEL=qwen3.8:27b
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_CONTEXT=16384</code></pre>
+    <p>With the tools installed, I started the stack with <code>.venv/bin/python scripts/dev.py</code> and opened the portfolio at <code>localhost:8000</code>. The launcher pointed Ollama at <code>.runtime/models/</code> and disabled its cloud features. With the server running, I could download the model from the command line.</p>
+    <pre><code>.runtime/tools/ollama/ollama pull qwen3.8:27b</code></pre>
+    <p>I used a 16,384-token context window to leave memory headroom and kept retrieved notes short enough to leave room for the conversation and the answer.</p>
+    <p><a href="https://github.com/emmanueljob/personal-agent-harness/blob/25faec70e1fefff654718be3c0e60c42fdbe0924/scripts/dev.py">Local launcher</a> · <a href="https://github.com/emmanueljob/personal-agent-harness/blob/25faec70e1fefff654718be3c0e60c42fdbe0924/harness/models.py">Model configuration</a></p>
+  </section>
+
+  <section aria-labelledby="request-path">
+    <h2 id="request-path">How a visitor’s question reached Qwen</h2>
+    <p>On Fly.io, the app saved each question in SQLite before a Temporal workflow ran the agent. The app gave Deep Agents the conversation, my published profile and voice guidance, and relevant excerpts from published notes. The hosted app had an export of the material I’d approved for the site. My private notes and local conversations stayed with the local app.</p>
+    <ol class="reading-workflow">
+      <li><strong>Queue</strong><span>When the agent needed a model response, the hosted app queued an Ollama chat request.</span></li>
+      <li><strong>Generate</strong><span>The Mac worker claimed the job over authenticated HTTPS and sent it to Ollama on localhost.</span></li>
+      <li><strong>Return</strong><span>The worker posted the result back to Fly.io, where the agent picked up the turn.</span></li>
+    </ol>
+    <p>Qwen could request a tool, such as a search of my published notes. The hosted agent ran the tool and sent its result back to the model in another call. Once the agent had a final answer, the app saved it and the browser displayed it. Temporal tracked completed model and tool calls so a restarted worker could resume from recorded results. An interrupted call could still run again.</p>
+    <p><a href="https://github.com/emmanueljob/personal-agent-harness/pull/3">Mac bridge implementation</a> · <a href="https://github.com/emmanueljob/personal-agent-harness/blob/25faec70e1fefff654718be3c0e60c42fdbe0924/docs/deepagents-runtime.md">Agent workflow</a></p>
+  </section>
+
+  <section aria-labelledby="availability">
+    <h2 id="availability">What changed once people could use it</h2>
+    <p>The worker ran as a macOS LaunchAgent. It checked that Qwen was installed and sent a heartbeat about every eight seconds. At first, the site chose the Mac for new turns when it had seen a heartbeat in the previous 25 seconds. Otherwise, new turns went to OpenAI. Each turn kept its selected model on retry.</p>
+    <p>Replies from the Mac could take longer, especially if the agent needed several model calls to finish a turn. I added a macOS idle-sleep assertion during active inference. Closing the lid or putting the Mac to sleep still took it offline. I eventually made OpenAI the default and put Qwen behind an experimental choice. If the Mac is offline, visitors can start a new turn with OpenAI. The model choice is visible before they send.</p>
+    <p>Keeping both options gave me room to experiment with how Qwen used my notes and voice guidance. The same code saved the question, gathered evidence, and resumed the turn whichever model I chose.</p>
+    <p><a href="https://github.com/emmanueljob/personal-agent-harness/pull/4">Idle sleep during inference</a> · <a href="https://github.com/emmanueljob/personal-agent-harness/pull/17">The switch to opt-in Qwen</a></p>
+  </section>
+
+  <footer><p>Related writing · $benchmark</p></footer>
+</article>
