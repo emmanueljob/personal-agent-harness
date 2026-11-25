@@ -21,7 +21,9 @@ RESTART_REVISION = 'dd0a21ef4952334c5b67204aa6228240e18dbf26'
 LOCAL_MODEL = '/writing/local-model-on-my-mac'
 LOCAL_MODEL_TITLE = 'How I ran my portfolio’s AI on my Mac'
 LOCAL_MODEL_SUMMARY = 'How I used Ollama, Qwen, and an outbound Mac worker to serve AI chat on my Fly.io portfolio.'
-TRAINING_LAB = 'https://learning-my-voice-lab.stellarjaguar16.chatgpt.site/'
+TRAINING_LAB = '/writing/local-model-training'
+TRAINING_TITLE = 'Learning My Voice — A Real Model Training Lab'
+TRAINING_SUMMARY = 'A hands-on tutorial on fine-tuning Qwen on a Mac with MLX and QLoRA. It covers 4-bit quantization, LoRA adapters, overfitting, and how to evaluate a model trained to write in your voice.'
 STYLESHEET = '/portfolio-reading.css'
 
 
@@ -119,6 +121,7 @@ def blog_page(profile, origin):
 
     summary = 'Engineering writing on training a local model, building coding agents, and recovering AI agent workflows.'
     articles = [
+        (TRAINING_LAB, TRAINING_TITLE, TRAINING_SUMMARY),
         (LOCAL_MODEL, LOCAL_MODEL_TITLE, LOCAL_MODEL_SUMMARY),
         (RESTART_BENCHMARK, RESTART_TITLE, RESTART_SUMMARY),
     ]
@@ -131,11 +134,6 @@ def blog_page(profile, origin):
     body = f'''
 <h1>Blog</h1>
 <p class="reading-byline">Engineering writing by {link(ABOUT, profile.name)}</p>
-<section>
-  <h2>{link(TRAINING_LAB, 'Learning My Voice — A Real Model Training Lab')}</h2>
-  <p>A hands-on tutorial on fine-tuning Qwen on a Mac with MLX and QLoRA. It covers 4-bit quantization, LoRA adapters, overfitting, and how to evaluate a model trained to write in your voice.</p>
-  <p class="reading-muted">ChatGPT sign-in required.</p>
-</section>
 {posts}'''
     return page(origin, BLOG, f'Blog — {profile.name}', summary, body, {
         '@context': 'https://schema.org', '@type': 'Blog', 'name': f'{profile.name} — Blog',
@@ -204,6 +202,28 @@ def mount_public_pages(app, get_portfolio):
     def blog(request: Request):
         return blog_page(get_portfolio(), public_origin(request))
 
+    @app.api_route(TRAINING_LAB, methods=['GET', 'HEAD'], include_in_schema=False)
+    def training_lab(request: Request):
+        profile = get_portfolio()
+        if not has_bio(profile):
+            raise HTTPException(404, 'No tutorial is published.')
+        origin = public_origin(request)
+        template = Path(__file__).with_name('agent_docs') / 'local-model-training.html'
+        body = Template(template.read_text(encoding='utf-8')).substitute(
+            title=escape(TRAINING_TITLE), author=link(ABOUT, profile.name),
+        )
+        body += '<script defer src="/writing/local-model-training.js"></script>'
+        return page(origin, TRAINING_LAB, TRAINING_TITLE, TRAINING_SUMMARY, body, {
+            '@context': 'https://schema.org', '@type': 'TechArticle', 'headline': TRAINING_TITLE,
+            'description': TRAINING_SUMMARY, 'mainEntityOfPage': origin + TRAINING_LAB,
+            'author': {'@type': 'Person', 'name': profile.name, 'url': origin + ABOUT},
+        })
+
+    @app.get('/writing/local-model-training.js', include_in_schema=False)
+    def training_lab_script():
+        return FileResponse(Path(__file__).with_name('agent_docs') / 'local-model-training.js',
+                            media_type='text/javascript')
+
     @app.api_route(ABOUT, methods=['GET', 'HEAD'], include_in_schema=False)
     def about(request: Request):
         profile = get_portfolio()
@@ -243,7 +263,7 @@ def mount_public_pages(app, get_portfolio):
         profile = get_portfolio()
         paths = ['/', '/agents']
         if has_bio(profile):
-            paths.extend((ABOUT, BLOG, RESTART_BENCHMARK, LOCAL_MODEL))
+            paths.extend((ABOUT, BLOG, TRAINING_LAB, RESTART_BENCHMARK, LOCAL_MODEL))
             if case_study(profile):
                 paths.append(CASE_STUDY)
         urls = ''.join(f'<url><loc>{xml_escape(origin + path)}</loc></url>' for path in paths)

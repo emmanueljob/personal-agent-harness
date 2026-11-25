@@ -96,16 +96,17 @@ def test_public_reading_pages_and_canonical_sitemap_behind_fly(tmp_path, monkeyp
     case = '/writing/harness-over-headcount'
     benchmark = '/writing/personal-agent-harness-restart-benchmark'
     local_model = '/writing/local-model-on-my-mac'
+    training = '/writing/local-model-training'
     # The ASGI request has an HTTP base URL after TLS is terminated upstream.
     with TestClient(module.app, headers={'Fly-Forwarded-Proto': 'https'}) as c:
         urls = ElementTree.fromstring(c.get('/sitemap.xml').text)
         assert {item.text for item in urls.iter('{http://www.sitemaps.org/schemas/sitemap/0.9}loc')} == {
-            origin + path for path in ('/', '/about', '/agents', '/blog', case, benchmark, local_model)
+            origin + path for path in ('/', '/about', '/agents', '/blog', case, benchmark, local_model, training)
         }
         assert f'Sitemap: {origin}/sitemap.xml' in c.get('/robots.txt').text
-        reading_paths = ('/', '/about', case, benchmark, local_model, '/blog')
+        reading_paths = ('/', '/about', case, benchmark, local_model, '/blog', training)
         responses = [c.get(path) for path in reading_paths]
-        home, bio, article, report, writeup, blog = responses
+        home, bio, article, report, writeup, blog, tutorial = responses
         assert '<meta name="google-site-verification" content="fixture&quot;verification">' in home.text.split('</head>', 1)[0]
         assert all('google-site-verification' not in response.text for response in responses[1:])
         for path, response in zip(reading_paths, responses):
@@ -115,12 +116,16 @@ def test_public_reading_pages_and_canonical_sitemap_behind_fly(tmp_path, monkeyp
         assert c.head('/blog').status_code == 200
         assert '<h1>Blog</h1>' in blog.text and '"@type": "Blog"' in blog.text
         assert 'Learning My Voice — A Real Model Training Lab' in blog.text
-        assert 'href="https://learning-my-voice-lab.stellarjaguar16.chatgpt.site/"' in blog.text
-        assert 'QLoRA' in blog.text and 'ChatGPT sign-in required.' in blog.text
-        for path in (case, benchmark, local_model):
+        assert 'QLoRA' in blog.text
+        for path in (case, benchmark, local_model, training):
             assert f'href="{path}"' in blog.text
-        for response in (home, bio, article, report, writeup):
+        for response in (home, bio, article, report, writeup, tutorial):
             assert 'href="/blog">Blog</a>' in response.text
+        assert c.head(training).status_code == 200
+        assert tutorial.text.count('<section class="chapter"') == 10
+        assert 'A synthetic training example' in tutorial.text and 'lab-data.json' not in tutorial.text
+        assert '"@type": "TechArticle"' in tutorial.text
+        assert c.get(training + '.js').headers['content-type'].startswith('text/javascript')
         assert '[Blog](/blog)' in c.get('/llms.txt').text
         assert '[Blog](/blog)' in c.get('/', headers={'Accept': 'text/markdown'}).text
         assert 'href="/about">About Avery &lt;Lee&gt;' in home.text

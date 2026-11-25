@@ -1,0 +1,1353 @@
+<article class="training-lab">
+  <header>
+    <h1>$title</h1>
+    <p class="reading-byline">By $author</p>
+    <p class="reading-lede">
+      A hands-on guide to fine-tuning Qwen locally on a Mac. Follow two small
+      training runs, explore how quantization and LoRA work, and see what the
+      evaluation taught us.
+    </p>
+  </header>
+  <nav aria-label="Tutorial chapters">
+    <h2>Chapters</h2>
+    <ol>
+      <li><a href="#start">The experiment</a></li>
+      <li><a href="#choices">Why Qwen and MLX</a></li>
+      <li><a href="#data">What we teach</a></li>
+      <li><a href="#compression">Compression and precision</a></li>
+      <li><a href="#adapters">LoRA and QLoRA</a></li>
+      <li><a href="#training">Inside the training loop</a></li>
+      <li><a href="#results">Read the results</a></li>
+      <li><a href="#memory">Voice and knowledge</a></li>
+      <li><a href="#production">Beyond the toy</a></li>
+      <li><a href="#next">Shape the next pass</a></li>
+    </ol>
+  </nav>
+  <section class="chapter" id="start" aria-labelledby="start-title">
+    <h2 id="start-title">The experiment</h2>
+
+    <div class="stat-strip">
+      <div>
+        <span>Base model</span><strong>Qwen3 · 1.7B</strong
+        ><small>4-bit MLX weights</small>
+      </div>
+      <div>
+        <span>Training machine</span><strong>M5 Pro · 48 GB</strong
+        ><small>Apple Silicon, local inference</small>
+      </div>
+      <div>
+        <span>Weights we trained</span><strong>0.145%</strong
+        ><small>A small adapter; the base stayed frozen</small>
+      </div>
+    </div>
+    <div class="section-heading">
+      <h3>Our first lesson came from a failure.</h3>
+    </div>
+    <div class="story-grid">
+      <article>
+        <span class="tag">FIRST PASS</span>
+        <h3>Predicting the next reply</h3>
+        <p>
+          We used 43 original messages and their conversation context. The model
+          learned some casual phrasing, but also repeated itself and overused
+          frustrated questions.
+        </p>
+      </article>
+      <article>
+        <span class="tag teal">THE OWNER’S DIRECTION</span>
+        <h3>Drafting from a supplied intent</h3>
+        <p>
+          We selected 21 examples around exploration and product decisions. We
+          also supplied clear intent briefs, so the model could learn expression
+          without guessing the idea.
+        </p>
+      </article>
+    </div>
+    <div class="callout">
+      <strong>What this project is</strong>
+      <p>
+        An educational supervised fine-tuning experiment. We are learning from
+        the owner’s writing. Each example gives an input and a desired reply;
+        training nudges the adapter toward that reply. This is not reinforcement
+        learning, and no OpenAI teacher responses were used as training targets
+        in these runs.
+      </p>
+    </div>
+  </section>
+
+  <section class="chapter" id="choices" aria-labelledby="choices-title">
+    <h2 id="choices-title">Why Qwen and MLX</h2>
+
+    <p class="lede compact">
+      We optimized the first experiment for learning: run it on the Mac we
+      already had, inspect every stage, and make another attempt cheaply. We did
+      not run a benchmark that proved this was the best possible stack.
+    </p>
+    <div class="reading-note">
+      <strong>Four different choices often get mixed together</strong>
+      <p>
+        Qwen is the pretrained model. MLX is the software that executes the
+        numerical operations. QLoRA is the adaptation strategy. Supervised
+        fine-tuning is the learning objective. Changing one does not necessarily
+        require changing the others.
+      </p>
+    </div>
+    <div class="table-scroll">
+      <table class="deep-table">
+        <thead>
+          <tr>
+            <th>Layer of the experiment</th>
+            <th>Our actual choice</th>
+            <th>What that choice does</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Starting capabilities</td>
+            <td>Qwen3-1.7B, official MLX 4-bit release</td>
+            <td>
+              A small pretrained language model supplies language abilities
+              before it sees our examples.
+            </td>
+          </tr>
+          <tr>
+            <td>Execution</td>
+            <td>MLX 0.32.4; MLX-LM 0.32.2</td>
+            <td>
+              MLX executes array operations and differentiation. MLX-LM supplies
+              the model implementation, tokenizer integration, adapter training,
+              and generation.
+            </td>
+          </tr>
+          <tr>
+            <td>Hardware</td>
+            <td>M5 Pro Mac, 48 GB unified memory</td>
+            <td>
+              Training and inference use the local machine. We did not rent a
+              GPU or call a remote model to train these adapters.
+            </td>
+          </tr>
+          <tr>
+            <td>What changes</td>
+            <td>Rank-8 adapters in the last 8 of 28 transformer blocks</td>
+            <td>
+              Only the adapter parameters update. The downloaded base stays
+              frozen.
+            </td>
+          </tr>
+          <tr>
+            <td>What teaches it</td>
+            <td>Supervised examples of the owner’s writing</td>
+            <td>
+              The target is a real owner message. Earlier collaborator messages
+              or annotated intentions are input context.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <article class="prose">
+      <h3>Why MLX on this Mac?</h3>
+      <p>
+        A neural network is largely a program that performs enormous numbers of
+        operations on arrays. MLX provides those operations, automatic
+        differentiation for training, and execution on Apple Silicon. MLX-LM
+        gives us a relatively direct path from a supported model checkpoint to a
+        working local fine-tuning loop.
+      </p>
+      <p>
+        On Apple Silicon, the CPU and GPU share a physical memory pool. MLX uses
+        that arrangement without requiring explicit transfers between separate
+        CPU and GPU memory allocations. That is convenient for this machine, but
+        it does not turn 48 GB into unlimited model capacity: macOS, other
+        applications, activations, temporary buffers, and the model all compete
+        for resources. Memory bandwidth and computation still matter.
+        <a
+          href="https://ml-explore.github.io/mlx/build/html/usage/unified_memory.html"
+          target="_blank"
+          rel="noopener"
+          >MLX’s unified-memory explanation</a
+        >.
+      </p>
+      <p>
+        Our choice was practical, not exclusive. PyTorch’s MPS backend can also
+        run GPU workloads on a Mac. A PyTorch/CUDA stack on NVIDIA hardware is
+        another route. The differences include supported operations, model
+        implementations, training tools, deployment formats, and performance for
+        the particular workload. We have not measured those alternatives here,
+        so this tutorial makes no claim that MLX would beat them.
+        <a
+          href="https://docs.pytorch.org/docs/stable/notes/mps.html"
+          target="_blank"
+          rel="noopener"
+          >PyTorch MPS documentation</a
+        >.
+      </p>
+    </article>
+    <article class="prose">
+      <h3>Why a 1.7-billion-parameter model?</h3>
+      <p>
+        “1.7B” describes the approximate number of learned parameters, not the
+        number of facts it knows. This model was small enough to download, load,
+        train, and evaluate quickly. A ready-made MLX checkpoint removed a
+        conversion step. That shortened the feedback loop for a first exercise.
+      </p>
+      <p>
+        The tradeoff is limited starting capability. A small model can be more
+        brittle about instructions, writing quality, and unusual inputs. An
+        adapter changes the behavior of that starting model; it does not
+        automatically grant the reasoning or world knowledge of a much larger
+        one. We have not established that 1.7B is the right size for a useful
+        personal assistant.
+      </p>
+      <p>
+        Nor was 4-bit the only plausible choice on a 48 GB Mac. A
+        higher-precision base with LoRA is a reasonable comparison to run. We
+        selected the compact path for inexpensive iteration, and now we have a
+        concrete result to diagnose.
+        <a
+          href="https://huggingface.co/Qwen/Qwen3-1.7B-MLX-4bit/tree/21457c6f51ed54a7c16e988c0844db973815c137"
+          target="_blank"
+          rel="noopener"
+          >The exact base revision we downloaded</a
+        >.
+      </p>
+    </article>
+    <div class="section-heading">
+      <div><h3>What could we have chosen instead?</h3></div>
+    </div>
+    <label for="method-choice">Compare an approach</label
+    ><select id="method-choice">
+      <option value="prompt">Prompting and examples, with no training</option>
+      <option value="rag">Retrieval of source-backed records</option>
+      <option value="lora">LoRA over a higher-precision base</option>
+      <option value="qlora" selected>Quantized LoRA · our choice</option>
+      <option value="full">Full fine-tuning</option>
+      <option value="distill">Teacher-generated training data</option>
+      <option value="preference">Preference optimization</option>
+    </select>
+    <article class="method-detail" aria-live="polite">
+      <h3 id="method-title"></h3>
+      <p id="method-purpose"></p>
+      <dl>
+        <dt>What you gain</dt>
+        <dd id="method-gain"></dd>
+        <dt>What you pay or risk</dt>
+        <dd id="method-cost"></dd>
+        <dt>What it means for this project</dt>
+        <dd id="method-verdict"></dd>
+      </dl>
+    </article>
+    <div class="callout">
+      <strong>These are not mutually exclusive boxes.</strong>
+      <p>
+        We could use retrieval to supply current facts, a few examples to
+        specify the writing style, and a QLoRA adapter to make that style more
+        consistent. Teacher-generated examples change the data source; LoRA
+        changes which parameters we train. They describe different parts of the
+        system.
+      </p>
+    </div>
+  </section>
+
+  <section class="chapter" id="data" aria-labelledby="data-title">
+    <h2 id="data-title">What we teach</h2>
+    <p class="lede compact">
+      A model can’t know which thought you wanted to express just from the
+      previous message. The second pass gives it that intention, then teaches it
+      from your original wording.
+    </p>
+
+    <div class="callout">
+      <h3>A synthetic training example</h3>
+      <dl>
+        <dt>Input</dt>
+        <dd>Ask a teammate to compare two approaches before writing code.</dd>
+        <dt>Target reply</dt>
+        <dd>
+          Can we sketch both options first? I’d like to understand how each one
+          handles retries before we pick one.
+        </dd>
+      </dl>
+      <p>
+        With prompt masking, the model reads the input and the target. The loss
+        is computed on the reply and its end-of-message token.
+      </p>
+    </div>
+    <div class="section-heading">
+      <h3>Three sets. Three different jobs.</h3>
+    </div>
+
+    <div class="callout">
+      <strong>We split whole conversations.</strong>
+      <p>
+        Training and testing on different messages from the same conversation
+        can leak context. In the curated pass, the four test examples come from
+        four conversations that were new to that pass. This is still a very
+        small sample.
+      </p>
+    </div>
+    <article class="prose">
+      <h3>Why the target matters more than the transcript volume</h3>
+      <p>
+        A transcript contains several voices, tool output, instructions, and
+        repeated context. If we train indiscriminately on everything, the model
+        can learn to imitate the collaborator or reproduce operational clutter.
+        We used the owner’s messages as targets, with other material serving
+        only as context when useful.
+      </p>
+      <p>
+        For the drafting task, the dataset’s final <code>assistant</code> slot
+        contains the message we want the model to produce: the owner’s words.
+        That is a training-interface role, not a claim that the original author
+        was the assistant. The original writing remains attributed to the owner.
+      </p>
+      <p>
+        The first pass asked the model to predict the next owner message from
+        context. That mixes two challenges: deciding what the person would want
+        next and choosing how they would say it. There can be many reasonable
+        next thoughts. The curated pass supplies a tutor-written intent brief
+        and teaches the original phrasing. It is a narrower rewriting task, and
+        the brief is annotated from the target; it does not test independent
+        discovery of personal intent.
+      </p>
+      <h3>What does one example teach?</h3>
+      <p>
+        The tokenizer converts the input and target text into token IDs. During
+        training, the model sees each correct preceding target token and
+        predicts the next one. This is often called teacher forcing. “Teacher”
+        here refers to supplying the correct sequence, not to using another AI
+        model to generate the training data.
+      </p>
+      <p>
+        Prompt masking means the instructions and intent are visible but their
+        tokens do not contribute to the scored target loss. We also include the
+        end-of-message token as a target. Learning when to stop matters for a
+        drafting model. Our generation still sometimes hit its 160-token cap,
+        which is an observed failure rather than a successful stopping decision.
+      </p>
+    </article>
+    <details>
+      <summary>What we removed from the first collection</summary>
+      <ul>
+        <li>
+          11 automated or structured inputs, including reminders and UI answer
+          wrappers.
+        </li>
+        <li>9 short acknowledgments, such as “done” and “perfect.”</li>
+        <li>2 messages whose meaning depended on an omitted attachment.</li>
+      </ul>
+      <p>
+        We retained original phrasing and redacted identifiers such as email
+        addresses and links. Some earlier assistant context was shortened. These
+        are selected excerpts, not an exhaustive review of all chats.
+      </p>
+    </details>
+  </section>
+
+  <section class="chapter" id="compression" aria-labelledby="compression-title">
+    <h2 id="compression-title">Compression and precision</h2>
+
+    <p class="lede compact">
+      Our model is compressed by quantization: we preserve the architecture and
+      approximate many of its learned numbers using a smaller representation. We
+      did not remove three quarters of the layers, summarize the model into
+      text, or train it from scratch.
+    </p>
+    <article class="prose">
+      <h3>First, what is a weight?</h3>
+      <p>
+        A model converts tokens into numerical vectors and repeatedly transforms
+        those vectors. Many transformations multiply them by large tables of
+        learned numbers: weight matrices. Attention uses these transformations
+        to combine information from the context; other layers transform the
+        resulting features. Eventually the model produces scores for possible
+        next tokens.
+      </p>
+      <p>
+        Weights influence those calculations. A particular weight is not a
+        sentence such as “Emmanuel likes concise answers.” Useful behavior is
+        distributed across many interacting parameters. Learning changes those
+        numbers so that particular outputs become more likely in particular
+        contexts.
+      </p>
+      <h3>What gets smaller?</h3>
+      <p>
+        A 16-bit representation uses two bytes per number. A 4-bit code uses
+        half a byte. If every weight could be stored with exactly four bits, the
+        payload would take one quarter of the storage of a 16-bit version.
+        Actual files also contain scales, offsets, some higher-precision
+        tensors, and metadata.
+      </p>
+      <p>
+        This is <strong>lossy numerical compression</strong>. Nearby original
+        values may map to the same stored code. Once that happens, the exact
+        original values cannot generally be recovered from the compressed copy.
+        That differs from a ZIP file, which can reconstruct its original bytes
+        exactly.
+      </p>
+    </article>
+    <div class="evidence-strip">
+      <span class="tag teal">INSPECTED IN OUR CHECKPOINT</span>
+      <p>
+        4 bits per quantized weight · groups of 128 weights · BF16 scales and
+        offsets · packed unsigned 32-bit storage · base file:
+        <strong>914,316,100 bytes</strong> (914.3 MB).
+      </p>
+    </div>
+    <article class="prose">
+      <h3>How can four bits describe a decimal number?</h3>
+      <p>
+        Four bits can identify 16 codes, numbered 0 through 15. A group of
+        weights shares a scale and an offset. To interpret one stored code, the
+        computation reconstructs an approximate weight:
+      </p>
+      <div class="equation">approximate weight = scale × code + offset</div>
+      <p>
+        Different groups have different scales and offsets. There are therefore
+        many more than 16 possible reconstructed values across the whole model.
+        In our downloaded checkpoint, the quantized layers use groups of 128
+        weights. Eight 4-bit codes fit into one 32-bit storage word; a tensor
+        labeled <code>U32</code> in the file is packing several codes together,
+        not giving every original weight 32 bits.
+      </p>
+      <p>
+        Those details come from the saved configuration, tensor headers, and
+        installed MLX implementation. The public
+        <a
+          href="https://ml-explore.github.io/mlx/build/html/python/_autosummary/mlx.core.quantize.html"
+          target="_blank"
+          rel="noopener"
+          >MLX quantization reference</a
+        >
+        describes the grouped affine representation.
+      </p>
+    </article>
+    <div class="simulation">
+      <span class="tag">TEACHING SIMULATION · NOT MODEL MEASUREMENTS</span>
+      <h3>Watch a number land on a grid.</h3>
+      <p>
+        Try changing the precision or moving the original number. Then add an
+        outlier: the group must cover a wider range with the same number of
+        available codes.
+      </p>
+      <div class="control-grid">
+        <div>
+          <label for="quant-bits">Uniform code precision</label
+          ><select id="quant-bits">
+            <option value="4">4 bits · 16 codes</option>
+            <option value="8">8 bits · 256 codes</option>
+            <option value="16">16 bits · 65,536 codes</option>
+          </select>
+        </div>
+        <div>
+          <label for="quant-weight"
+            >Original toy weight
+            <output id="quant-original">0.137428</output></label
+          ><input
+            id="quant-weight"
+            type="range"
+            min="-1"
+            max="1"
+            step="0.000001"
+            value="0.137428"
+          />
+        </div>
+        <label class="check-control"
+          ><input id="quant-outlier" type="checkbox" /> Include an outlier at
+          +6</label
+        >
+      </div>
+      <svg
+        id="quant-grid"
+        viewbox="0 0 780 140"
+        role="img"
+        aria-label="Original and reconstructed weight positions"
+      ></svg>
+      <div class="metric-grid">
+        <div><span>Stored code</span><strong id="quant-code"></strong></div>
+        <div>
+          <span>Reconstructed weight</span><strong id="quant-value"></strong>
+        </div>
+        <div><span>Absolute error</span><strong id="quant-error"></strong></div>
+        <div><span>Group scale</span><strong id="quant-scale"></strong></div>
+      </div>
+      <p
+        id="quant-explanation"
+        class="simulation-caption"
+        aria-live="polite"
+      ></p>
+      <p class="micro">
+        This illustration uses endpoint-based uniform quantization over −1 to
+        +1, or −1 to +6 with the outlier. MLX’s actual conversion includes
+        implementation details not reproduced here. The “16-bit” option is a
+        uniform integer grid, not IEEE FP16 or BF16. No model or saved result
+        changes when you move a control.
+      </p>
+    </div>
+    <article class="prose">
+      <h3>Why groups, and why not the smallest possible groups?</h3>
+      <p>
+        If one scale covered a huge matrix, a few unusually large weights could
+        force a very wide range and leave poor resolution for the many small
+        weights. Smaller groups let the scale fit local values more closely, but
+        each group needs its own metadata. There is a storage-and-precision
+        tradeoff; the best grouping is not established by the toy illustration.
+      </p>
+      <p>
+        Our file uses two BF16 metadata values per group. Each has 16 bits, so
+        the arithmetic is <code>4 + (16 + 16) / 128 = 4.25</code> bits per
+        quantized weight, before other tensors and file overhead. This is why
+        “4-bit” does not mean a file that is exactly one quarter the size of
+        every 16-bit version.
+      </p>
+    </article>
+    <div class="simulation">
+      <span class="tag">ESTIMATE · WEIGHT STORAGE ONLY</span>
+      <h3>How much space does precision buy?</h3>
+      <div class="control-grid">
+        <div>
+          <label for="memory-model">Hypothetical parameter count</label
+          ><select id="memory-model">
+            <option value="1.720575" selected>Our size · about 1.72B</option>
+            <option value="7">7B</option>
+            <option value="32">32B</option>
+          </select>
+        </div>
+        <div>
+          <label for="memory-bits">Stored precision</label
+          ><select id="memory-bits">
+            <option value="4" selected>4-bit grouped affine</option>
+            <option value="8">8-bit grouped affine</option>
+            <option value="16">16-bit unquantized</option>
+          </select>
+        </div>
+        <div>
+          <label for="memory-group">Quantization group size</label
+          ><select id="memory-group">
+            <option value="32">32 weights</option>
+            <option value="64">64 weights</option>
+            <option value="128" selected>128 weights · our file</option>
+          </select>
+        </div>
+      </div>
+      <div class="metric-grid">
+        <div>
+          <span>Weight codes / values</span
+          ><strong id="memory-payload"></strong>
+        </div>
+        <div>
+          <span>Group metadata</span><strong id="memory-overhead"></strong>
+        </div>
+        <div>
+          <span>Estimated weight storage</span
+          ><strong id="memory-total"></strong>
+        </div>
+      </div>
+      <p class="simulation-caption">
+        Assumes every parameter uses the selected representation and, when
+        quantized, two 16-bit metadata values per group. Decimal GB. This is an
+        arithmetic estimate, not a model fit test, latency benchmark, or total
+        training-memory estimate. Our actual base file is 0.914 GB.
+      </p>
+    </div>
+    <article class="prose">
+      <h3>Does everything now calculate in four bits?</h3>
+      <p>
+        No. Four bits describes the stored codes for quantized weights. MLX’s
+        quantized matrix multiplication takes packed weights and their
+        scales/offsets, then computes their contribution to floating-point
+        activations. The implementation can interpret packed weights within
+        optimized operations; it need not expand the entire model into a
+        persistent full-size 16-bit copy first. Other tensors and arithmetic
+        have their own precision.
+        <a
+          href="https://ml-explore.github.io/mlx/build/html/python/_autosummary/mlx.core.quantized_matmul.html"
+          target="_blank"
+          rel="noopener"
+          >Quantized matrix multiplication</a
+        >.
+      </p>
+      <h3>What is the impact on quality and speed?</h3>
+      <p>
+        The smaller representation reduces weight storage and can reduce the
+        amount of weight data that must move through memory. That can help
+        performance on a suitable workload. Unpacking, reconstruction, kernel
+        efficiency, prompt length, batch size, and hardware also matter, so a
+        smaller file is not a guarantee of faster responses.
+      </p>
+      <p>
+        Rounding changes intermediate calculations and can change next-token
+        scores. Sometimes the output barely changes; sometimes a close token
+        choice flips and later text diverges. The impact varies by model,
+        quantizer, precision, and task. We have not measured a “percentage of
+        intelligence lost,” and such a single number would not describe our use
+        case well.
+      </p>
+      <p>
+        Most importantly,
+        <strong
+          >we cannot blame our repetitive outputs on 4-bit quantization</strong
+        >. Both our before and after models use the same quantized base. We
+        changed the adapter and observed a difference. To isolate quantization,
+        we would need matched higher-precision runs with the same data, prompts,
+        generation settings, and evaluation.
+      </p>
+    </article>
+    <div class="table-scroll">
+      <table class="deep-table">
+        <thead>
+          <tr>
+            <th>Kind of compression</th>
+            <th>What changes</th>
+            <th>Did we do this?</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Quantization</td>
+            <td>
+              Use a lower-precision representation of weights, often keeping the
+              architecture.
+            </td>
+            <td>Yes, through a downloaded 4-bit checkpoint.</td>
+          </tr>
+          <tr>
+            <td>Distillation</td>
+            <td>
+              Train a student to reproduce a teacher’s behavior; the student may
+              be smaller or use a different architecture.
+            </td>
+            <td>No teacher-generated target replies in these runs.</td>
+          </tr>
+          <tr>
+            <td>Pruning</td>
+            <td>
+              Remove or zero selected weights or structures; speed benefits
+              depend on the resulting structure and hardware.
+            </td>
+            <td>No.</td>
+          </tr>
+          <tr>
+            <td>Lossless file compression</td>
+            <td>
+              Store the same bytes in a smaller archive, then reconstruct them
+              exactly.
+            </td>
+            <td>Not the reason this model is called 4-bit.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="source-note">
+      Distillation background:
+      <a href="https://arxiv.org/abs/1503.02531" target="_blank" rel="noopener"
+        >Hinton, Vinyals &amp; Dean</a
+      >. The storage arithmetic and simulations above are teaching calculations,
+      separate from our measured experiment.
+    </p>
+  </section>
+
+  <section class="chapter" id="adapters" aria-labelledby="adapters-title">
+    <h2 id="adapters-title">LoRA and QLoRA</h2>
+    <p class="lede compact">
+      Fine-tuning does not have to rewrite every weight. We can hold the
+      original model still and learn a compact extra transformation alongside
+      selected layers.
+    </p>
+    <article class="prose">
+      <h3>Start with full fine-tuning</h3>
+      <p>
+        In full fine-tuning, the training process can update all the base
+        model’s trainable weights. That gives it many degrees of freedom. It
+        also means storing gradients and optimizer state for a large number of
+        parameters, in addition to weights and intermediate activations. This
+        can require far more memory than loading the same model just to generate
+        text.
+      </p>
+      <p>
+        More freedom is not automatically useful. With a tiny or
+        unrepresentative dataset, training can push a capable model toward
+        narrow habits or degrade behavior we wanted to preserve. We need
+        evidence that broader updates help the task, not just enough memory to
+        run them.
+      </p>
+      <h3>LoRA: a big adjustment built from two small matrices</h3>
+      <p>
+        A dense layer transforms an input vector <code>x</code> using a weight
+        matrix <code>W</code>. LoRA freezes <code>W</code> and learns two
+        smaller matrices, <code>A</code> and <code>B</code>. Their product
+        provides an update. The shared small dimension is called the
+        <em>rank</em>.
+      </p>
+      <div class="equation">output = W × x + scale × B × (A × x)</div>
+      <p>
+        Think of a general-purpose transformation with a compact learned
+        correction attached to it. The correction is not a separate chatbot and
+        is not a list of rules. Rank limits the mathematical form of that
+        correction; rank 8 does not mean eight memories, eight personality
+        traits, or eight examples. This is the central construction of
+        <a
+          href="https://arxiv.org/abs/2106.09685"
+          target="_blank"
+          rel="noopener"
+          >LoRA</a
+        >.
+      </p>
+    </article>
+    <div class="simulation">
+      <span class="tag">TEACHING CALCULATION · ONE SQUARE LAYER</span>
+      <h3>How can the adjustment be so small?</h3>
+      <p>
+        For a hypothetical 2,048 × 2,048 layer, a full weight update has
+        4,194,304 numbers. LoRA learns matrices of size 2,048 × rank and rank ×
+        2,048.
+      </p>
+      <label for="rank-slider"
+        >Adapter rank <output id="rank-label">8</output></label
+      ><input
+        id="rank-slider"
+        type="range"
+        min="0"
+        max="6"
+        step="1"
+        value="2"
+        aria-valuetext="Rank 8"
+      />
+      <div class="matrix-flow">
+        <div>
+          <span>Frozen W</span><strong>2,048 × 2,048</strong
+          ><small>4,194,304 parameters</small>
+        </div>
+        <span>+</span>
+        <div class="adapter-matrices">
+          <span>Learned B × A</span><strong id="rank-shapes"></strong
+          ><small id="rank-count"></small>
+        </div>
+      </div>
+      <p
+        id="rank-explanation"
+        class="simulation-caption"
+        aria-live="polite"
+      ></p>
+      <p class="micro">
+        This calculator explains one matrix, not the exact total across our
+        model. Higher rank changes adapter capacity and storage; it does not
+        predict writing quality.
+      </p>
+    </div>
+    <div class="evidence-strip">
+      <span class="tag teal">OUR ACTUAL ADAPTER</span>
+      <p>
+        <strong>2,490,368 parameters</strong> across selected linear projections
+        in the last eight transformer blocks. Rank 8, MLX scale 16, dropout 0.
+        The saved tensors are FP32. The adapter file is
+        <strong>9,973,395 bytes</strong>, about 9.97 MB.
+      </p>
+    </div>
+    <article class="prose">
+      <h3>Why QLoRA instead of ordinary LoRA?</h3>
+      <p>
+        Ordinary LoRA can use a higher-precision frozen base. Quantized LoRA
+        keeps the same adapter idea but stores the frozen base more compactly.
+        We used the already-quantized Qwen checkpoint, so MLX-LM follows its
+        quantized LoRA path. That keeps the base small while retaining trainable
+        floating-point adapters.
+      </p>
+      <p>
+        Our practical benefits were cheap local iteration, a small artifact we
+        can inspect, and straightforward rollback: remove the adapter to return
+        to this base model’s behavior. The tradeoffs include the base’s
+        quantization error, the restricted form of the update, and dependence on
+        compatible runtime support. Our measurements do not prove QLoRA gives
+        better writing than ordinary LoRA.
+      </p>
+      <p>
+        There is a naming nuance. The original
+        <a
+          href="https://arxiv.org/abs/2305.14314"
+          target="_blank"
+          rel="noopener"
+          >QLoRA paper</a
+        >
+        combines a frozen 4-bit base with low-rank adapters and also introduces
+        NF4, double quantization, and paged optimizers. Our run uses MLX’s
+        grouped affine weights and Adam. It follows the central
+        quantized-adapter idea,
+        <strong>not every implementation detail of that paper</strong>.
+        <a
+          href="https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/LORA.md"
+          target="_blank"
+          rel="noopener"
+          >MLX-LM’s terminology and training guide</a
+        >.
+      </p>
+      <h3>What happens during a training step?</h3>
+      <p>
+        The frozen base and adapter both contribute to the prediction. The loss
+        measures how well that prediction matches the target tokens. Automatic
+        differentiation follows the relevant computation to determine how the
+        adapter parameters affected the loss. The optimizer changes those
+        parameters; it does not rewrite the packed base weights.
+      </p>
+      <p>
+        “Only 0.145% of parameters are trainable” therefore does not mean only
+        0.145% of the original computation or memory is required. The whole
+        model still performs the forward pass. Training still needs intermediate
+        activations and the computation needed for adapter gradients. We save
+        most directly on the number of trainable weights, their gradients, and
+        their optimizer states.
+      </p>
+      <h3>What do rank, layers, scale, and learning rate change?</h3>
+      <p>
+        <strong>Rank</strong> controls the size of each low-rank update.
+        <strong>Adapted layers</strong> control where updates can enter the
+        model. Increasing either generally increases the trainable parameter
+        count. <strong>Scale</strong> controls the adapter contribution; in our
+        MLX configuration, 16 is the direct scale setting, not automatically the
+        same convention as another library’s “alpha.”
+        <strong>Learning rate</strong> controls the optimizer’s update size.
+      </p>
+      <p>
+        We started with rank 8, eight blocks, scale 16, and learning rate 0.0001
+        as a small, workable configuration. We did not tune them in a controlled
+        search. Raising rank or the learning rate would not repair contradictory
+        examples or a poorly defined task. Our first diagnostic changes should
+        address the task, data, and evaluation before adding capacity.
+      </p>
+      <h3>What exactly do we save?</h3>
+      <p>
+        The adapter contains the learned matrices and a configuration telling
+        the runtime where to attach them. It requires a compatible base model;
+        it is not a self-contained 10 MB replacement for Qwen and not a portable
+        personality that can be attached to any model. Preserve the base
+        revision, tokenizer/chat template, quantization settings, and adapter
+        configuration together.
+      </p>
+      <p>
+        Some workflows merge adapter updates into base weights for deployment.
+        Quantized workflows can require dequantization and requantization during
+        that process, which can add rounding differences. We kept a separate
+        adapter, and any future exported or merged model needs its own output
+        checks.
+      </p>
+    </article>
+  </section>
+
+  <section class="chapter" id="training" aria-labelledby="training-title">
+    <h2 id="training-title">Inside the training loop</h2>
+    <p class="lede compact">
+      Most of the model stays exactly as it was. QLoRA trains a small adapter
+      while keeping the quantized base weights frozen.
+    </p>
+
+    <div class="section-heading">
+      <div><h3>More steps weren’t better.</h3></div>
+    </div>
+
+    <div class="two-col">
+      <article>
+        <h3>What “loss” measures</h3>
+        <p>
+          How surprising the real reply’s next tokens were to the model. Lower
+          loss means it predicted those words better. It does not directly
+          measure personality, usefulness, truth, or whether you would send the
+          draft.
+        </p>
+      </article>
+      <article>
+        <h3>Why keep step 19?</h3>
+        <p>
+          We selected the lowest validation loss among evaluated checkpoints,
+          without using test results to choose. Both runs selected step 19.
+          Continuing to step 80 fitted the training data more but did not
+          improve the validation result.
+        </p>
+      </article>
+    </div>
+    <div class="section-heading">
+      <div><h3>What does “training” actually do?</h3></div>
+    </div>
+    <div class="loop-widget">
+      <div class="loop-buttons" id="loop-buttons">
+        <button data-loop="0">Read tokens</button
+        ><button data-loop="1">Predict</button
+        ><button data-loop="2">Measure error</button
+        ><button data-loop="3">Backpropagate</button
+        ><button data-loop="4">Update adapter</button
+        ><button data-loop="5">Check validation</button>
+      </div>
+      <article aria-live="polite">
+        <span class="small-label" id="loop-label"></span>
+        <h3 id="loop-title"></h3>
+        <p id="loop-body"></p>
+      </article>
+      <p class="micro">
+        A conceptual walkthrough of the actual pipeline. It does not execute a
+        training step in your browser.
+      </p>
+    </div>
+    <article class="prose">
+      <h3>Why can lower loss still produce bad text?</h3>
+      <p>
+        For a target token, the loss is the negative logarithm of the
+        probability the model assigned to that token. Giving the correct token
+        more probability lowers the loss. We average this kind of error across
+        scored target tokens. Perplexity is the exponential of that average
+        loss; it is not a percentage of correct answers.
+      </p>
+      <p>
+        Training and loss evaluation supply the correct prefix. Free generation
+        feeds the model its own previous choices. A model can improve at
+        predicting reference words while still falling into loops after its own
+        imperfect output. That mismatch is one reason we must read generated
+        text as well as track the curve.
+      </p>
+      <h3>Steps, epochs, and why these runs were short</h3>
+      <p>
+        One optimizer step updates the adapter after processing a batch. Our
+        batch size was one example, with no gradient accumulation, and we ran 80
+        steps. An epoch means one traversal of the training examples. At this
+        scale, 80 examples’ worth of updates is roughly 1.9 passes over 43 rows
+        or 3.8 over 21 rows; these are rough exposure counts, not evidence of
+        broad learning.
+      </p>
+      <p>
+        The first training-and-selection call took about 17.6 seconds, and the
+        curated one about 7.9 seconds. Those timings exclude collection,
+        curation, environment setup, downloading the base, and separate output
+        evaluation. They are not estimates for a bigger dataset, longer
+        contexts, or another machine. The runs were small because the learning
+        exercise was small.
+      </p>
+      <h3>Why validation, and why step 19?</h3>
+      <p>
+        Training loss asks how well we fit examples used for updates. Validation
+        asks how the current weights predict separate examples and can guide
+        checkpoint selection. Test examples are then used for a final report.
+        Repeatedly selecting configurations based on test results would blur
+        that separation.
+      </p>
+      <p>
+        Our callback saved the exact weights associated with each validation
+        measurement. The training library evaluates before the next displayed
+        update, so the first trained evaluation corresponds to 19 completed
+        updates, not 20. Both runs selected that checkpoint. The best point
+        among these few measurements is not proof that step 19 is globally
+        optimal; we did not evaluate every possible schedule or seed.
+      </p>
+    </article>
+  </section>
+
+  <section class="chapter" id="results" aria-labelledby="results-title">
+    <h2 id="results-title">Read the results</h2>
+    <p class="lede compact">
+      The first pass picked up some habits and repeated them too often. The
+      curated pass improved prediction on its small held-out set, while several
+      base-model drafts still expressed the intention more clearly.
+    </p>
+
+    <details>
+      <summary>Why are there two generation settings?</summary>
+      <p>
+        Greedy decoding always chooses the highest-scoring next token. It
+        exposed repeated phrases. We then tested the model author’s suggested
+        non-thinking sampling settings on both models: temperature 0.7, top-p
+        0.8, top-k 20, with a presence penalty of 1.5 and a fixed seed of 42.
+        The MLX presence-penalty window is 20 tokens. This changed generation,
+        not training.
+      </p>
+      <p>
+        Both modes are capped at 160 generated tokens. Some repetitive outputs
+        reach that cap. The cap is not a natural end-of-message judgment.
+      </p>
+      <a
+        href="https://huggingface.co/Qwen/Qwen3-1.7B"
+        target="_blank"
+        rel="noopener"
+        >Read Qwen’s generation guidance</a
+      >
+    </details>
+    <article class="prose">
+      <h3>What we can conclude—and what remains a hypothesis</h3>
+      <p>
+        The adapter changed the model’s output, and reference-token prediction
+        improved on these small held-out sets. The generated writing still
+        contains repetition, awkward phrasing, and, in the first pass,
+        unsupported details. Several supplied-intent examples are expressed more
+        cleanly by the base model. This is evidence that our current adapter is
+        not ready to replace a dependable writing assistant.
+      </p>
+      <p>
+        Possible contributors include too little representative data, an
+        ambiguous first task, a small base model, aggressive updates for the
+        dataset, and generation settings. Those are hypotheses, not a diagnosed
+        root cause. Quantization affects both before and after. We would need
+        controlled comparisons to separate its contribution from the others.
+      </p>
+      <p>
+        The curation pass is also not a clean experiment on “curation alone”: it
+        changed the task framing and the evaluation conversations. Compare each
+        base/adapter pair within a pass. Avoid reading lower absolute loss in
+        the second pass as a direct percentage improvement over the first model.
+      </p>
+    </article>
+    <div class="callout">
+      <h3>A synthetic evaluation example</h3>
+      <p>
+        <strong>Intent:</strong> Ask a teammate to describe the tradeoffs before
+        choosing an approach.
+      </p>
+      <p>
+        <strong>Clear:</strong> “Can you compare the two approaches on cost and
+        reliability before we decide?”
+      </p>
+      <p>
+        <strong>Repetitive:</strong> “Can we compare them before deciding? I
+        want us to compare them so we can decide after we compare.”
+      </p>
+      <p>
+        Both drafts convey the basic intent. Reviewers can score intent
+        preservation and repetition separately.
+      </p>
+    </div>
+    <div class="callout">
+      <strong>How to compare the two runs</strong>
+      <p>
+        The tasks and test conversations differ between passes, so their
+        absolute scores are not a controlled head-to-head comparison. Each
+        before/after pair uses the same examples. Four or eight test examples
+        cannot establish broad reliability.
+      </p>
+    </div>
+  </section>
+
+  <section class="chapter" id="memory" aria-labelledby="memory-title">
+    <h2 id="memory-title">Voice and knowledge</h2>
+    <p class="lede compact">
+      We extracted source-backed notes from the same conversations. These are
+      records we can inspect and correct. They are not proof that the trained
+      model can reliably recall the facts.
+    </p>
+
+    <div class="two-col">
+      <article>
+        <h3>What weights can learn</h3>
+        <p>
+          Patterns in phrasing, preferred formats, and habits of response. Facts
+          can be learned too, but these experiments did not establish dependable
+          personal-fact recall.
+        </p>
+      </article>
+      <article>
+        <h3>What stays in the source store</h3>
+        <p>
+          Dated statements, supporting excerpts, and correctable preferences.
+          Supplying relevant records at answer time lets us check the evidence
+          instead of trusting a familiar-sounding sentence.
+        </p>
+      </article>
+    </div>
+    <article class="prose">
+      <h3>Why a familiar tone can create false confidence</h3>
+      <p>
+        A model that says “how would we…” or uses your punctuation may feel more
+        personal. That surface resemblance does not show that it knows the facts
+        behind the conversation. It can also express an invented fact in a
+        familiar voice. We should judge style, intent preservation, and factual
+        grounding separately.
+      </p>
+      <p>
+        For this project, my design recommendation is to keep factual records
+        and their sources in a correctable store, then supply relevant evidence
+        when needed. That is a system-design inference from our requirements and
+        failures, not a result that this small training run proved. Retrieval
+        makes evidence available; it still needs good selection, relevance, and
+        freshness checks.
+        <a
+          href="https://arxiv.org/abs/2005.11401"
+          target="_blank"
+          rel="noopener"
+          >The RAG paper</a
+        >
+        explains the broader combination of learned models and retrieved
+        information.
+      </p>
+    </article>
+
+    <p>
+      A first-pass recall probe failed to recover a stated preference reliably.
+      The curated pass evaluated expression from supplied intent. Dependable
+      personal recall and retrieval would need their own tests.
+    </p>
+  </section>
+
+  <section class="chapter" id="production" aria-labelledby="production-title">
+    <h2 id="production-title">Beyond the toy</h2>
+    <p class="lede compact">
+      “Toy” describes the scope of the experiment and the strength of its
+      evaluation. We really changed model weights. We have not demonstrated a
+      dependable voice model, personal memory, or retrieval controller.
+    </p>
+    <article class="prose">
+      <h3>First decide which product we are trying to build</h3>
+      <p>
+        A voice drafter receives a supplied intention and expresses it in your
+        style. A knowledge assistant answers questions using current evidence. A
+        retrieval controller decides whether to search, what to fetch, and how
+        much context to supply. Those are different jobs, with different
+        training examples and success criteria.
+      </p>
+      <p>
+        The curated pass focuses on the first job. It cannot establish success
+        on the other two. For a serious version, I would define each behavior
+        separately and keep a simple baseline for each. A trained voice adapter
+        would earn its place only if it improves the writing compared with
+        prompting alone.
+      </p>
+    </article>
+    <label for="production-lens">Inspect a part of the system</label
+    ><select id="production-lens">
+      <option value="data">Dataset and coverage</option>
+      <option value="eval">Evaluation and experimental design</option>
+      <option value="runtime">Serving and operation</option>
+      <option value="memory">Memory and retrieval</option>
+    </select>
+    <div class="stage-comparison" aria-live="polite">
+      <article>
+        <span class="tag">OUR LEARNING VERSION</span>
+        <h3 id="toy-title"></h3>
+        <p id="toy-body"></p>
+      </article>
+      <article>
+        <span class="tag teal">A DEPENDABLE VERSION</span>
+        <h3 id="real-title"></h3>
+        <p id="real-body"></p>
+      </article>
+    </div>
+    <article class="prose">
+      <h3>More data, but first better coverage</h3>
+      <p>
+        We trained on 43 examples in the first pass and 21 in the curated pass.
+        That is enough to exercise the pipeline and observe a change; it is not
+        enough to represent a person across topics, audiences, moods, and stages
+        of work. A pile of debugging requests can teach the model to sound
+        irritated because that is what the sample rewards.
+      </p>
+      <p>
+        A stronger collection would include exploration, decisions,
+        disagreement, thanks, corrections, requests for depth, and requests for
+        brevity. It would keep the intention and context together with the final
+        owner-authored message. We would track where an example came from and
+        distinguish actual writing, tutor-written briefs, and any synthetic
+        targets.
+      </p>
+      <p>
+        There is no defensible magic minimum like “exactly 1,000 emails makes a
+        voice model.” The needed volume depends on task breadth, consistency,
+        the starting model, and observed errors. We would add coverage where
+        evaluation exposes gaps, rather than treating raw row count as progress.
+      </p>
+      <h3>A production test set must survive our curiosity</h3>
+      <p>
+        Once we read a test result and make design choices because of it, that
+        result is part of our development feedback. It remains useful history,
+        but it cannot keep serving as an untouched final exam forever. Before
+        making a reliability claim, we would reserve fresh conversations and
+        scenarios, control near-duplicates, and decide success criteria in
+        advance.
+      </p>
+      <p>
+        Human evaluation would ask separate questions: Did the draft preserve
+        the intended meaning? Does it sound like you? Is it concise enough for
+        the situation? Did it invent a fact or commitment? Does it repeat? We
+        would also measure latency and memory in the actual serving
+        configuration. Loss and perplexity are useful diagnostic measurements,
+        not substitutes for those judgments.
+      </p>
+      <h3>A fair comparison changes one major factor at a time</h3>
+      <p>
+        Our second pass changed both the selected writing and the task framing.
+        That was a sensible learning move, but it means the difference cannot be
+        attributed to curation alone. A controlled follow-up would keep a shared
+        evaluation set and generation configuration, then vary one major factor.
+      </p>
+    </article>
+    <div class="table-scroll">
+      <table class="deep-table">
+        <thead>
+          <tr>
+            <th>Comparison we have not run</th>
+            <th>Question it could answer</th>
+            <th>What must stay comparable</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Prompt-only / few-shot versus adapter</td>
+            <td>
+              Does training add value beyond showing the model a few good
+              examples?
+            </td>
+            <td>
+              Intent scenarios, human rubric, output length budget, base model.
+            </td>
+          </tr>
+          <tr>
+            <td>4-bit versus higher-precision LoRA</td>
+            <td>
+              How much does quantization affect this particular writing task?
+            </td>
+            <td>
+              Data, model family/size, adaptation settings, decoding; report
+              seed variation.
+            </td>
+          </tr>
+          <tr>
+            <td>Small versus larger base</td>
+            <td>Are we constrained by starting model capability?</td>
+            <td>Task and evaluation; measure the different resource costs.</td>
+          </tr>
+          <tr>
+            <td>Rank, learning rate, or training duration</td>
+            <td>
+              Are updates too constrained, too aggressive, or overtrained?
+            </td>
+            <td>Data split and a validation-only selection rule.</td>
+          </tr>
+          <tr>
+            <td>Current source retrieval versus closed-book answers</td>
+            <td>Does evidence improve correct, up-to-date answers?</td>
+            <td>Questions, authoritative source records, factual scoring.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <article class="prose">
+      <h3>What would change operationally?</h3>
+      <p>
+        We would version the dataset, training configuration, base revision, and
+        adapter together; retain an evaluation report; and test the exact
+        artifact used for serving. If deployment uses a different quantizer or
+        an adapter merge, the converted model must pass the checks too.
+      </p>
+      <p>
+        We would measure real prompts and response lengths, cold starts,
+        concurrent requests, and memory use. A local personal tool may still use
+        MLX. A multi-user service may justify a different inference stack or
+        hardware. Those choices should follow measured workload requirements,
+        not the assumption that production automatically means a cloud GPU or
+        full fine-tuning.
+      </p>
+      <p>
+        Initial use would be draft-only or shadow evaluation: compare what the
+        model would have done while a person keeps control of actual actions. We
+        would retain the previous model and a baseline fallback, monitor
+        regressions, and separate changing factual records from updates to a
+        writing adapter. Personal training material also needs a deliberate
+        retention and access policy; a learned adapter can carry traces of its
+        training data.
+      </p>
+      <h3>
+        What about your original “when should it reach into the brain?” problem?
+      </h3>
+      <p>
+        A useful next experiment could train a small routing model on decisions
+        such as “no lookup,” “retrieve these preferences,” or “search the
+        project history,” with an explicit context budget. The labels would need
+        to describe what information the task actually required. A message
+        written in your style is not a label for the right retrieval action.
+      </p>
+      <p>
+        We would measure missed necessary retrieval, irrelevant retrieval,
+        whether the useful source was actually found, downstream answer quality,
+        and the time/token cost. Start by comparing against simple rules and the
+        existing agent’s tool selection. A tiny controller earns its complexity
+        if it improves that tradeoff. Moving every personal fact into tiny-model
+        weights would make provenance, correction, and freshness harder to
+        inspect; it would not automatically solve routing.
+      </p>
+    </article>
+    <div class="callout">
+      <strong>A serious version can still use the same method.</strong>
+      <p>
+        The biggest upgrade may be a better-defined task, representative
+        examples, careful evaluation, and disciplined operation. MLX and QLoRA
+        are not inherently “toy” tools. Our tiny dataset and limited evidence
+        are what keep this particular result an experiment.
+      </p>
+    </div>
+  </section>
+
+  <section class="chapter" id="next" aria-labelledby="next-title">
+    <h2 id="next-title">Shape the next pass</h2>
+    <p class="lede compact">
+      A short correction from you can be more useful than another hundred
+      training steps. Write the reply you would actually send and record the
+      intent it should express.
+    </p>
+
+    <details>
+      <summary>
+        Check your understanding. Loss went down, but the model repeats itself.
+        What can you conclude?
+      </summary>
+      <p>
+        Token prediction improved on the evaluated examples. Judge repetition,
+        tone, factual grounding, and intent preservation separately on held-out
+        drafts.
+      </p>
+    </details>
+    <div class="callout">
+      <strong>Where reinforcement learning would fit</strong>
+      <p>
+        These runs used supervised fine-tuning on example replies. Distillation
+        can use a teacher model’s outputs as training targets. Reinforcement
+        learning optimizes a reward signal.
+      </p>
+    </div>
+    <div class="prose">
+      <h3>What would your feedback train?</h3>
+      <p>
+        A correction paired with its intent can become another supervised
+        example. A preference between two outputs can remain an evaluation
+        judgment or become preference-training data after we have enough
+        reliable comparisons. DPO is one approach that learns from preferred and
+        rejected replies without the separate reward-model and online RL loop
+        often associated with RLHF. It is another possible experiment, not
+        something this website runs.
+        <a
+          href="https://arxiv.org/abs/2305.18290"
+          target="_blank"
+          rel="noopener"
+          >DPO paper</a
+        >.
+      </p>
+      <p>
+        For our next pass, preserving the intended meaning and your actual
+        correction is the clearest teaching signal. More sophisticated
+        optimization cannot rescue labels that reward repetition or drift away
+        from what you wanted to say.
+      </p>
+    </div>
+    <div class="references">
+      <h3>Primary references</h3>
+      <a
+        href="https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/LORA.md"
+        target="_blank"
+        rel="noopener"
+        >MLX LM · LoRA / QLoRA training</a
+      ><a
+        href="https://huggingface.co/Qwen/Qwen3-1.7B-MLX-4bit"
+        target="_blank"
+        rel="noopener"
+        >Qwen · Exact base-model family</a
+      ><a
+        href="https://huggingface.co/Qwen/Qwen3-1.7B"
+        target="_blank"
+        rel="noopener"
+        >Qwen · Sampling guidance</a
+      >
+    </div>
+  </section>
+</article>
