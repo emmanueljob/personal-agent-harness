@@ -12,12 +12,16 @@ from fastapi import HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 
 ABOUT = '/about'
+BLOG = '/blog'
 CASE_STUDY = '/writing/harness-over-headcount'
 RESTART_BENCHMARK = '/writing/personal-agent-harness-restart-benchmark'
 RESTART_TITLE = 'Personal Agent Harness restart benchmark'
+RESTART_SUMMARY = 'An 18-trial Temporal benchmark for AI agent restarts during approval, tool retries and duplicate writes. Includes reproduction steps.'
 RESTART_REVISION = 'dd0a21ef4952334c5b67204aa6228240e18dbf26'
 LOCAL_MODEL = '/writing/local-model-on-my-mac'
 LOCAL_MODEL_TITLE = 'How I ran my portfolio’s AI on my Mac'
+LOCAL_MODEL_SUMMARY = 'How I used Ollama, Qwen, and an outbound Mac worker to serve AI chat on my Fly.io portfolio.'
+TRAINING_LAB = 'https://learning-my-voice-lab.stellarjaguar16.chatgpt.site/'
 STYLESHEET = '/portfolio-reading.css'
 
 
@@ -58,7 +62,7 @@ def homepage_html(html, profile, origin):
     html = sub(r'<meta name="description"[^>]*>', '', html, count=1)
     html = html.replace('</head>', metadata(origin, '/', description(profile)) + '</head>', 1)
     project = case_study(profile)
-    reading = f'<nav class="portfolio-reading" aria-label="Read the portfolio">{link(ABOUT, "About " + profile.name)}'
+    reading = f'<nav class="portfolio-reading" aria-label="Read the portfolio">{link(BLOG, "Blog")}{link(ABOUT, "About " + profile.name)}'
     if project:
         reading += link(CASE_STUDY, project.title)
     reading += link(RESTART_BENCHMARK, RESTART_TITLE) + link(LOCAL_MODEL, LOCAL_MODEL_TITLE) + '</nav>'
@@ -75,7 +79,7 @@ def page(origin, path, title, summary, body, structured=None):
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{escape(title)}</title>{metadata(origin, path, summary)}{data}</head>
 <body class="reading-page">
-<header class="reading-header"><nav aria-label="Portfolio">{link('/', 'Portfolio')}{link(ABOUT, 'About') if path != ABOUT else ''}</nav></header>
+<header class="reading-header"><nav aria-label="Portfolio">{link('/', 'Portfolio')}{link(BLOG, 'Blog') if path != BLOG else ''}{link(ABOUT, 'About') if path != ABOUT else ''}</nav></header>
 <main class="reading-content">{body}</main>
 </body></html>''')
 
@@ -107,6 +111,38 @@ def bio_page(profile, project, origin):
 <h1>{escape(profile.name)}</h1><p class="reading-byline">{escape(byline)}</p>
 {bio}{focus}{linkedin}{work}{career}''',
                 {'@context': 'https://schema.org', '@type': 'ProfilePage', 'mainEntity': person})
+
+
+def blog_page(profile, origin):
+    if not has_bio(profile):
+        return page(origin, BLOG, 'Blog', 'Portfolio blog.', '<h1>Blog</h1><p>No posts are published yet.</p>')
+
+    summary = 'Engineering writing on training a local model, building coding agents, and recovering AI agent workflows.'
+    articles = [
+        (LOCAL_MODEL, LOCAL_MODEL_TITLE, LOCAL_MODEL_SUMMARY),
+        (RESTART_BENCHMARK, RESTART_TITLE, RESTART_SUMMARY),
+    ]
+    if project := case_study(profile):
+        articles.append((CASE_STUDY, project.title, project.description))
+    posts = ''.join(
+        f'<section><h2>{link(path, title)}</h2><p>{escape(excerpt)}</p></section>'
+        for path, title, excerpt in articles
+    )
+    body = f'''
+<h1>Blog</h1>
+<p class="reading-byline">Engineering writing by {link(ABOUT, profile.name)}</p>
+<section>
+  <h2>{link(TRAINING_LAB, 'Learning My Voice — A Real Model Training Lab')}</h2>
+  <p>A hands-on tutorial on fine-tuning Qwen on a Mac with MLX and QLoRA. It covers 4-bit quantization, LoRA adapters, overfitting, and how to evaluate a model trained to write in your voice.</p>
+  <p class="reading-muted">ChatGPT sign-in required.</p>
+</section>
+{posts}'''
+    return page(origin, BLOG, f'Blog — {profile.name}', summary, body, {
+        '@context': 'https://schema.org', '@type': 'Blog', 'name': f'{profile.name} — Blog',
+        'url': origin + BLOG, 'description': summary,
+        'blogPost': [{'@type': 'BlogPosting', 'headline': title, 'url': origin + path}
+                     for path, title, _ in articles],
+    })
 
 
 def project_page(profile, project, origin):
@@ -143,8 +179,7 @@ def restart_benchmark_page(profile, origin):
     body = Template(template.read_text(encoding='utf-8')).substitute(
         author=link(ABOUT, profile.name), runner_revision=RESTART_REVISION,
     )
-    summary = 'An 18-trial Temporal benchmark for AI agent restarts during approval, tool retries and duplicate writes. Includes reproduction steps.'
-    return page(origin, RESTART_BENCHMARK, RESTART_TITLE, summary, body, {
+    return page(origin, RESTART_BENCHMARK, RESTART_TITLE, RESTART_SUMMARY, body, {
         '@context': 'https://schema.org', '@type': 'TechArticle', 'headline': RESTART_TITLE,
         'author': {'@type': 'Person', 'name': profile.name, 'url': origin + ABOUT},
         'mainEntityOfPage': origin + RESTART_BENCHMARK,
@@ -157,8 +192,7 @@ def local_model_page(profile, origin):
         title=escape(LOCAL_MODEL_TITLE), author=link(ABOUT, profile.name),
         benchmark=link(RESTART_BENCHMARK, RESTART_TITLE),
     )
-    summary = 'How I used Ollama, Qwen, and an outbound Mac worker to serve AI chat on my Fly.io portfolio.'
-    return page(origin, LOCAL_MODEL, LOCAL_MODEL_TITLE, summary, body, {
+    return page(origin, LOCAL_MODEL, LOCAL_MODEL_TITLE, LOCAL_MODEL_SUMMARY, body, {
         '@context': 'https://schema.org', '@type': 'TechArticle', 'headline': LOCAL_MODEL_TITLE,
         'author': {'@type': 'Person', 'name': profile.name, 'url': origin + ABOUT},
         'mainEntityOfPage': origin + LOCAL_MODEL,
@@ -166,6 +200,10 @@ def local_model_page(profile, origin):
 
 
 def mount_public_pages(app, get_portfolio):
+    @app.api_route(BLOG, methods=['GET', 'HEAD'], include_in_schema=False)
+    def blog(request: Request):
+        return blog_page(get_portfolio(), public_origin(request))
+
     @app.api_route(ABOUT, methods=['GET', 'HEAD'], include_in_schema=False)
     def about(request: Request):
         profile = get_portfolio()
@@ -205,7 +243,7 @@ def mount_public_pages(app, get_portfolio):
         profile = get_portfolio()
         paths = ['/', '/agents']
         if has_bio(profile):
-            paths.extend((ABOUT, RESTART_BENCHMARK, LOCAL_MODEL))
+            paths.extend((ABOUT, BLOG, RESTART_BENCHMARK, LOCAL_MODEL))
             if case_study(profile):
                 paths.append(CASE_STUDY)
         urls = ''.join(f'<url><loc>{xml_escape(origin + path)}</loc></url>' for path in paths)
