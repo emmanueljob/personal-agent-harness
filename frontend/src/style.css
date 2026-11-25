@@ -74,6 +74,6 @@
 [data-theme=alpine] .footer{display:flex;justify-content:center}
 [data-theme=alpine] .footer>div{width:auto;padding:12px 20px;border-radius:999px;background:rgba(248,250,248,.8);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
 
-.section-tabs>.resume-nav{padding:12px 0;font-size:12px;white-space:nowrap;color:var(--muted);border-bottom:2px solid transparent}.section-tabs>.resume-nav:hover{color:var(--accent)}
-@media(max-width:1100px){.section-tabs>.resume-nav{font-size:11px}}
-@media(max-width:600px){.section-tabs>.resume-nav{padding-block:10px}}
+.topbar nav .portfolio-nav-link{padding:12px 0;font-size:12px;white-space:nowrap;color:var(--muted);border-bottom:2px solid transparent}.topbar nav .portfolio-nav-link:hover{color:var(--accent)}
+@media(max-width:1100px){.topbar nav .portfolio-nav-link{font-size:11px}}
+@media(max-width:600px){.topbar nav .portfolio-nav-link{padding-block:10px}}
