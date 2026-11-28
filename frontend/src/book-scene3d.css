@@ -99,3 +99,6 @@
 @media(prefers-reduced-motion:reduce) {
   .continuous-theatre.is-inspecting::backdrop {animation:none}
 }
+/* Only the actual footer buttons take clicks over the full-viewport canvas. */
+.continuous-theatre .theatre-controls { pointer-events:none; }
+.continuous-theatre .theatre-controls>button { pointer-events:auto; }
