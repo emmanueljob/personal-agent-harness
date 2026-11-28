@@ -90,14 +90,40 @@ function colophon(book: Book) {
   }
  });
 }
-function jacketTexture(book:Book,back=false){return texture(c=>{
- c.fillStyle=bindingColor(book.id);c.fillRect(0,0,1024,1480);const g=c.createLinearGradient(0,0,1024,1480);g.addColorStop(0,'#c8a56836');g.addColorStop(.5,'#00000000');g.addColorStop(1,'#001f1e80');c.fillStyle=g;c.fillRect(0,0,1024,1480);
- c.strokeStyle='#c8ab6c99';c.lineWidth=3;c.strokeRect(50,50,924,1380);c.fillStyle='#dfc897';c.font='23px "DM Mono", monospace';c.fillText('AFTERHOURS / READING ROOM',95,150);
- c.fillStyle='#f5e9ce';c.font='86px "DM Serif Display", Georgia';let y=lines(c,book.title.split(':')[0],95,back?450:430,810,100,7);
- c.fillStyle='#c9b98f';c.font='32px "DM Sans Variable", sans-serif';lines(c,book.author,95,y+110,800,48,3);
- if(back){c.fillStyle='#d6c7a1';c.font='26px "DM Serif Display", Georgia';lines(c,'A book from the Afterhours reading room.',95,1130,760,43);c.font='18px "DM Mono", monospace';c.fillText('OWNER-CURATED METADATA',95,1340)}
-})}
-function edgeTexture(){return texture(c=>{c.fillStyle='#e6dcc0';c.fillRect(0,0,256,512);for(let y=0;y<512;y+=3){c.fillStyle=y%9===0?'#9f8e684d':'#fff7e566';c.fillRect(0,y,256,1)}},256,512)}
+function jacketTexture(book: Book, back=false) {
+ return texture(c=>{
+  c.fillStyle=bindingColor(book.id);c.fillRect(0,0,1024,1480);
+  for(let y=0;y<1480;y+=3){c.fillStyle=y%2?'#ffedc019':'#06050718';c.fillRect(0,y,1024,1)}
+  const fold=c.createLinearGradient(0,0,150,0);
+  fold.addColorStop(0,'#1b0e0a63');fold.addColorStop(.19,'#fff4ce28');
+  fold.addColorStop(.27,'#20140e65');fold.addColorStop(1,'transparent');
+  c.fillStyle=fold;c.fillRect(0,0,150,1480);
+  c.strokeStyle='#dec38b';c.lineWidth=3;c.strokeRect(90,75,870,1330);
+  c.lineWidth=1.5;c.strokeRect(98,83,854,1314);
+  c.textAlign='center';c.fillStyle='#ffefd0';c.font='95px Georgia';
+  if(!back)lines(c,spineLabel(book.title),524,225,760,105,5);
+  // Match the radial brass stamp on the cloth covers in the shelf view.
+  const x=524,y=back?740:910,r=157;
+  c.beginPath();c.arc(x,y,r+14,0,Math.PI*2);c.stroke();
+  c.save();c.beginPath();c.arc(x,y,r,0,Math.PI*2);c.stroke();c.clip();
+  c.lineWidth=2;c.strokeStyle='#e7c68dba';
+  for(let angle=-85;angle<=85;angle+=10){
+   const theta=THREE.MathUtils.degToRad(angle);
+   c.beginPath();c.moveTo(x,y+r);c.lineTo(x+Math.sin(theta)*r*2,y+r-Math.cos(theta)*r*2);c.stroke();
+  }
+  c.restore();
+  if(!back){c.fillStyle='#f6e5c6';c.font='35px monospace';lines(c,book.author,524,1260,760,46,3)}
+ });
+}
+function edgeTexture(vertical:boolean) {
+ return texture(c=>{
+  c.fillStyle='#e6dcc0';c.fillRect(0,0,512,512);
+  for(let offset=0;offset<512;offset+=3){
+   c.fillStyle=offset%9===0?'#7967416b':'#fff7e5a0';
+   if(vertical)c.fillRect(offset,0,1,512);else c.fillRect(0,offset,512,1);
+  }
+ },512,512);
+}
 function spineTexture(book:Book){return texture(c=>{
  c.fillStyle=bindingColor(book.id);c.fillRect(0,0,256,1480);c.save();c.translate(144,120);c.rotate(Math.PI/2);c.fillStyle='#e9dbb6';c.font='56px "DM Serif Display", Georgia';let text=spineLabel(book.title);while(c.measureText(text).width>1180)text=text.slice(0,-1);c.fillText(text,0,0);c.restore();c.fillStyle='#bd9f67';c.fillRect(50,1350,156,3);
 },256,1480)}
@@ -129,8 +155,9 @@ export default function BookScene3D({book,opened,returning,inspecting,origin,get
   const ring=new THREE.Mesh(new THREE.RingGeometry(2.3,2.31,100),new THREE.MeshBasicMaterial({color:'#b28e55',transparent:true,opacity:.12,side:THREE.DoubleSide}));ring.rotation.x=-Math.PI/2;ring.position.y=-2.18;scene.add(ring);
   const root=new THREE.Group();scene.add(root);
   const cloth=new THREE.MeshPhysicalMaterial({color:bindingColor(book.id),roughness:.72,sheen:.45,sheenColor:new THREE.Color('#a78d56'),clearcoat:.08});
-  const edges=register(edgeTexture());const pageEdge=new THREE.MeshStandardMaterial({map:edges,roughness:.92,color:'#f7efd9'});const pageSurface=new THREE.MeshStandardMaterial({color:paper,roughness:.9});
-  const block=new THREE.Mesh(new THREE.BoxGeometry(W-.055,H-.07,D),[pageEdge,cloth,pageEdge,pageEdge,pageSurface,pageEdge]);block.castShadow=true;block.receiveShadow=true;root.add(block);
+  const edges=register(edgeTexture(false));const pageEdge=new THREE.MeshStandardMaterial({map:edges,roughness:.92,color:'#f7efd9'});const pageSurface=new THREE.MeshStandardMaterial({color:paper,roughness:.9});
+  const foreEdge=new THREE.MeshStandardMaterial({map:register(edgeTexture(true)),roughness:.94});
+  const block=new THREE.Mesh(new THREE.BoxGeometry(W-.055,H-.07,D),[foreEdge,cloth,pageEdge,pageEdge,pageSurface,pageEdge]);block.castShadow=true;block.receiveShadow=true;root.add(block);
   const backMaterial=new THREE.MeshPhysicalMaterial({map:register(jacketTexture(book,true)),roughness:.54,clearcoat:.2});const back=new THREE.Mesh(new THREE.BoxGeometry(W+.035,H+.035,.045),[cloth,cloth,cloth,cloth,cloth,backMaterial]);back.position.z=-D/2-.022;back.castShadow=true;root.add(back);
   const coverMaterial=new THREE.MeshPhysicalMaterial({map:register(jacketTexture(book)),roughness:.65,clearcoat:.12,clearcoatRoughness:.6});
   const liner=register(endpaper(book));
