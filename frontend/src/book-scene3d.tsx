@@ -241,7 +241,15 @@ export default function BookScene3D({book,opened,returning,inspecting,origin,get
   const up=(e:PointerEvent)=>{if(!dragging)return;dragging=false;canvas.style.cursor='grab';if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);if(peeling){peeling=false;const commit=!moved || (from<to?turnProgress>.18:turnProgress<.82);turnGoal=commit?(from<to?1:0):(from<to?0:1);return}if(!moved&&!state.current.returning){const r=canvas.getBoundingClientRect();pointer.set((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1);ray.setFromCamera(pointer,camera);if(!state.current.opened&&ray.intersectObject(root,true).length)state.current.onOpen();}};
   const cancel=()=>{if(peeling){peeling=false;turnGoal=from<to?0:1}dragging=false;canvas.style.cursor='grab'};
   const keys=(e:KeyboardEvent)=>{if(state.current.opened&&['PageDown','PageUp'].includes(e.key)){e.preventDefault();startTurn(e.key==='PageDown'?1:-1);return}if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','Enter','+','-'].includes(e.key))e.preventDefault();if(e.key==='ArrowLeft')dragX-=.18;if(e.key==='ArrowRight')dragX+=.18;if(e.key==='ArrowUp')dragY=clamp(dragY-.12,-.5,.5);if(e.key==='ArrowDown')dragY=clamp(dragY+.12,-.5,.5);if(e.key==='Home')reset();if(e.key==='Enter'&&!state.current.opened)state.current.onOpen();if(e.key==='+')zoom=clamp(zoom+.25,-1.3,2);if(e.key==='-')zoom=clamp(zoom-.25,-1.3,2)};
-  canvas.addEventListener('pointerdown',down);canvas.addEventListener('pointermove',move);canvas.addEventListener('pointerup',up);canvas.addEventListener('pointercancel',cancel);canvas.addEventListener('keydown',keys);const lost=(e:Event)=>{e.preventDefault();renderer.setAnimationLoop(null);setFailed(true)};canvas.addEventListener('webglcontextlost',lost);
+  canvas.addEventListener('pointerdown',down);canvas.addEventListener('pointermove',move);canvas.addEventListener('pointerup',up);canvas.addEventListener('pointercancel',cancel);canvas.addEventListener('keydown',keys);
+  const lost=(event:Event)=>{
+   event.preventDefault();
+   renderer.setAnimationLoop(null);
+   // Resume the text reader on the last page that finished turning.
+   presentSpread(settled);
+   setFailed(true);
+  };
+  canvas.addEventListener('webglcontextlost',lost);
   const createdAt=performance.now();let angle=0,angleVelocity=0,previous=0,returnAt:number|null=null,returned=false,frame=0,wasOpened=false,ready=false;
   const pose={x:0,y:0,z:0,scale:1,yaw:origin.face==='spine'?Math.PI/2:-.12,pitch:0};
   const velocity={x:0,y:0,z:0,scale:0,yaw:0,pitch:0};let initialized=false,inspectionMix=0,inspectedAt:number|null=null;
