@@ -22,14 +22,18 @@ export function createLeaf(width: number, height: number) {
   for (let i = 0; i < reverseUV.count; i++) reverseUV.setX(i, 1 - reverseUV.getX(i));
   geometry.setAttribute('uv1', reverseUV);
 
-  function bend(progress: number, corner: number) {
+  function bend(progress: number, corner: number, stackFraction?: number) {
     const arc = Math.sin(progress * Math.PI);
     for (let row = 0; row <= rows; row++) {
       const v = row / rows;
       let x = 0, z = .012;
       for (let col = 0; col <= columns; col++) {
         const u = col / columns;
-        position.setXYZ(row * (columns + 1) + col, x, height * (.5 - v), z);
+        // Ease the lifted sheet into the exact camber of either resting stack.
+        const edgeDepth = stackFraction === undefined ? 0 : .054 + .048 * stackFraction;
+        const restingLift = stackFraction === undefined ? 0 :
+          paperArch(u) + u * ((2*progress-1)*edgeDepth + progress*.088);
+        position.setXYZ(row * (columns + 1) + col, x, height * (.5 - v), z + restingLift);
         const roll = .82 * Math.sin(Math.PI * (u - .48)) + .35 * corner * (v - .5) * u;
         const angle = Math.PI * progress + arc * roll;
         x += Math.cos(angle) * width / columns;

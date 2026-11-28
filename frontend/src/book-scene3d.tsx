@@ -187,7 +187,7 @@ export default function BookScene3D({book,opened,returning,inspecting,origin,get
   detail.receiveShadow=true;leftPage.receiveShadow=true;leftPage.castShadow=true;
   root.add(detail);hinge.add(leftPage);
   const leaf=createLeaf(W-.065,H-.085);leaf.group.visible=false;
-  leaf.group.position.set(-W/2+.0325,0,D/2+.05);root.add(leaf.group);
+  leaf.group.position.set(-W/2+.0325,0,D/2);root.add(leaf.group);
   // Several unbound tips follow the cover with progressively later lift.
   // These thin flyleaves fan out during opening and fall back onto the stack.
   const flyleaves=Array.from({length:3},(_,i)=>{
@@ -273,7 +273,9 @@ export default function BookScene3D({book,opened,returning,inspecting,origin,get
      const distance=turnGoal-turnProgress;
      if(reduce&&!peeling)turnProgress=turnGoal;
      else if(!peeling)turnProgress+=Math.sign(distance)*Math.min(Math.abs(distance),dt*1.32);
-     leaf.bend(smooth(turnProgress),dragCorner);
+     const curled=smooth(turnProgress);
+     leaf.group.position.x=-W/2+.0325-.065*curled;
+     leaf.bend(curled,dragCorner,fraction);
      if(!peeling && turnProgress===turnGoal)presentSpread(turnGoal===1?Math.max(from,to):Math.min(from,to));
     }
    }
