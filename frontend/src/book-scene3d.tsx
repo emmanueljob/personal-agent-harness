@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
 import type {Book,BookOrigin} from './bookshelf';
 import './book-scene3d.css';
-import {createLeaf} from './book-leaf';
+import {createLeaf, createPageStack} from './book-leaf';
 import {bindingColor} from './book-binding';
 import {spineLabel} from './book-labels';
 
@@ -30,7 +30,10 @@ function texture(draw:(ctx:CanvasRenderingContext2D)=>void, width=1024,height=14
 function paperBase(c:CanvasRenderingContext2D,label:string,page:string){
  c.fillStyle=paper;c.fillRect(0,0,1024,1480);
  for(let i=0;i<3200;i++){const x=(i*137.503)%1024,y=(i*71.871)%1480;c.fillStyle=i%2?'#ab957c0b':'#ffffff28';c.fillRect(x,y,1.5,1.5)}
- const shade=c.createLinearGradient(0,0,1024,0);shade.addColorStop(0,'#79634435');shade.addColorStop(.1,'#00000000');shade.addColorStop(.93,'#00000000');shade.addColorStop(1,'#a78c6218');c.fillStyle=shade;c.fillRect(0,0,1024,1480);
+ const left=page==='02'||page==='04';
+ const shade=c.createLinearGradient(left?1024:0,0,left?0:1024,0);
+ shade.addColorStop(0,'#5938129a');shade.addColorStop(.018,'#69441470');shade.addColorStop(.067,'#a77c4124');
+ shade.addColorStop(.145,'#fffce62b');shade.addColorStop(.43,'#fff6df00');shade.addColorStop(1,'#b08e5420');c.fillStyle=shade;c.fillRect(0,0,1024,1480);
  c.fillStyle=muted;c.font='24px "DM Mono", monospace';c.fillText(label,95,96);c.fillStyle='#b3a18455';c.fillRect(95,135,834,1);
  c.textAlign='center';c.fillStyle=muted;c.fillText(page,512,1410);c.textAlign='left';
 }
@@ -151,13 +154,18 @@ export default function BookScene3D({book,opened,returning,inspecting,origin,get
   const envGenerator=new THREE.PMREMGenerator(renderer);const room=new RoomEnvironment();const environment=envGenerator.fromScene(room,.04);scene.environment=environment.texture;scene.environmentIntensity=.28;room.dispose();envGenerator.dispose();
   scene.add(new THREE.HemisphereLight('#fff2d8','#28372e',.85));const key=new THREE.DirectionalLight('#ffe3b1',2.3);key.position.set(-3,6,6);key.castShadow=true;key.shadow.mapSize.set(1536,1536);key.shadow.camera.left=-8;key.shadow.camera.right=8;key.shadow.camera.top=8;key.shadow.camera.bottom=-8;key.shadow.normalBias=.03;key.shadow.bias=-.0004;key.shadow.radius=5;key.shadow.blurSamples=8;scene.add(key);
   const rim=new THREE.DirectionalLight('#d4ad88',1.3);rim.position.set(5,2,-3);scene.add(rim);const fill=new THREE.DirectionalLight('#fff8ee',.45);fill.position.set(1,-1,7);scene.add(fill);
-  const ground=new THREE.Mesh(new THREE.PlaneGeometry(200,200),new THREE.ShadowMaterial({opacity:.35}));ground.rotation.x=-Math.PI/2;ground.position.y=-2.2;ground.receiveShadow=true;scene.add(ground);
-  const ring=new THREE.Mesh(new THREE.RingGeometry(2.3,2.31,100),new THREE.MeshBasicMaterial({color:'#b28e55',transparent:true,opacity:.12,side:THREE.DoubleSide}));ring.rotation.x=-Math.PI/2;ring.position.y=-2.18;scene.add(ring);
+  const shadowMap=register(texture(c=>{
+   const light=c.createRadialGradient(128,128,0,128,128,127);
+   light.addColorStop(0,'#100900a3');light.addColorStop(.35,'#10090088');light.addColorStop(.7,'#10090042');
+   light.addColorStop(1,'#10090000');c.fillStyle=light;c.fillRect(0,0,256,256);
+  },256,256));
+  const contact=new THREE.Mesh(new THREE.PlaneGeometry(1,1),new THREE.MeshBasicMaterial({
+   map:shadowMap,transparent:true,depthWrite:false,toneMapped:false,
+  }));scene.add(contact);
   const root=new THREE.Group();scene.add(root);
   const cloth=new THREE.MeshPhysicalMaterial({color:bindingColor(book.id),roughness:.72,sheen:.45,sheenColor:new THREE.Color('#a78d56'),clearcoat:.08});
-  const edges=register(edgeTexture(false));const pageEdge=new THREE.MeshStandardMaterial({map:edges,roughness:.92,color:'#f7efd9'});const pageSurface=new THREE.MeshStandardMaterial({color:paper,roughness:.9});
+  const edges=register(edgeTexture(false));const pageEdge=new THREE.MeshStandardMaterial({map:edges,roughness:.92,color:'#f7efd9'});
   const foreEdge=new THREE.MeshStandardMaterial({map:register(edgeTexture(true)),roughness:.94});
-  const block=new THREE.Mesh(new THREE.BoxGeometry(W-.055,H-.07,D),[foreEdge,cloth,pageEdge,pageEdge,pageSurface,pageEdge]);block.castShadow=true;block.receiveShadow=true;root.add(block);
   const backMaterial=new THREE.MeshPhysicalMaterial({map:register(jacketTexture(book,true)),roughness:.54,clearcoat:.2});const back=new THREE.Mesh(new THREE.BoxGeometry(W+.035,H+.035,.045),[cloth,cloth,cloth,cloth,cloth,backMaterial]);back.position.z=-D/2-.022;back.castShadow=true;root.add(back);
   const coverMaterial=new THREE.MeshPhysicalMaterial({map:register(jacketTexture(book)),roughness:.65,clearcoat:.12,clearcoatRoughness:.6});
   const liner=register(endpaper(book));
@@ -169,10 +177,15 @@ export default function BookScene3D({book,opened,returning,inspecting,origin,get
   const verso=new THREE.MeshStandardMaterial({map:pageArt[0][0],roughness:.93});
   const recto=new THREE.MeshStandardMaterial({map:pageArt[0][1],roughness:.92});
   const hinge=new THREE.Group();hinge.position.set(-W/2,0,D/2+.02);root.add(hinge);
-  const cover=new THREE.Mesh(new THREE.BoxGeometry(W+.025,H+.025,.046),[cloth,cloth,cloth,cloth,coverMaterial,verso]);
+  const cover=new THREE.Mesh(new THREE.BoxGeometry(W+.025,H+.025,.046),[cloth,cloth,cloth,cloth,coverMaterial,cloth]);
   cover.position.x=W/2;cover.castShadow=true;cover.receiveShadow=true;hinge.add(cover);
-  const detail=new THREE.Mesh(new THREE.PlaneGeometry(W-.065,H-.085),recto);
-  detail.position.z=D/2+.009; detail.receiveShadow=true;root.add(detail);
+  const rightStack=createPageStack(W-.065,H-.085,false);
+  const leftStack=createPageStack(W-.065,H-.085,true);
+  const detail=new THREE.Mesh(rightStack.geometry,[foreEdge,foreEdge,pageEdge,pageEdge,recto,pageEdge]);
+  const leftPage=new THREE.Mesh(leftStack.geometry,[foreEdge,foreEdge,pageEdge,pageEdge,pageEdge,verso]);
+  detail.position.x=-W/2+.0325;leftPage.position.x=.0325;
+  detail.receiveShadow=true;leftPage.receiveShadow=true;leftPage.castShadow=true;
+  root.add(detail);hinge.add(leftPage);
   const leaf=createLeaf(W-.065,H-.085);leaf.group.visible=false;
   leaf.group.position.set(-W/2+.0325,0,D/2+.05);root.add(leaf.group);
   // Several unbound tips follow the cover with progressively later lift.
@@ -218,7 +231,7 @@ export default function BookScene3D({book,opened,returning,inspecting,origin,get
    const bounds=canvas.getBoundingClientRect();
    pointer.set((e.clientX-bounds.left)/width*2-1,-(e.clientY-bounds.top)/height*2+1);
    ray.setFromCamera(pointer,camera);
-   const hit=ray.intersectObjects([detail,cover])[0];
+   const hit=ray.intersectObjects([detail,leftPage])[0];
    if(!hit?.uv || !state.current.opened || angle<.95)return 0;
    const right=hit.object===detail;
    return right&&hit.uv.x>.58?1:!right&&hit.uv.x<.42?-1:0;
@@ -241,7 +254,11 @@ export default function BookScene3D({book,opened,returning,inspecting,origin,get
    if(state.current.inspecting && inspectedAt===null)inspectedAt=elapsed;
    const target=(state.current.opened&&!retreat)?1:0;
    if(reduce){angle=target;angleVelocity=0}else{angleVelocity+=(target-angle)*82*dt;angleVelocity*=Math.exp(-15*dt);angle+=angleVelocity*dt}
-   const open=clamp(angle,0,1.025);hinge.rotation.y=-Math.PI*.988*open;
+   const open=clamp(angle,0,1);hinge.rotation.y=-Math.PI*.989*open;
+   hinge.position.z=D/2+.022-.06*open;
+   leftPage.visible=open>.06;
+   const fraction=(from===to?settled:Math.min(from,to)+turnProgress)/(spreads.length-1);
+   leftStack.update(open,fraction);rightStack.update(open,fraction);
    const fanning=open>.035 && open<.94 && !reduce;
    flyleaves.forEach((sheet,i)=>{
     sheet.group.visible=fanning;
@@ -280,13 +297,15 @@ export default function BookScene3D({book,opened,returning,inspecting,origin,get
     THREE.MathUtils.damp(inspectionMix,Number(state.current.inspecting&&!retreat),6,dt);
    const inspectionScale=Math.min(height*.61,555)*units/H;
    const openScale=Math.min(inspectionScale,(width-32)*units/(W*2.2));
-   const inspection={x:open*W/2*openScale,y:height*.05*units+lift*.27,z:lift*.72,scale:THREE.MathUtils.lerp(inspectionScale,openScale,smooth(open)),yaw:.20*(1-open)-.035*open+dragX+.32*lift,pitch:-.045+dragY-.17*lift};
+   const inspection={x:open*W/2*openScale,y:height*.05*units+lift*.27,z:lift*.72,scale:THREE.MathUtils.lerp(inspectionScale,openScale,smooth(open)),yaw:.20*(1-open)-.105*open+dragX+.32*lift,pitch:-.06-.12*open+dragY-.17*lift};
    const atShelf=retreat&&(!state.current.inspecting||returnTime>.28);
    const destination=atShelf?{x:sourceX,y:anchorY,z:sourceZ,scale:sourceScale,yaw:initialYaw,pitch:0}:state.current.inspecting?inspection:{x:hoverX,y:anchorY+8*units*hoverProgress,z:hoverZ,scale:hoverScale,yaw:hoverYaw,pitch:-.025*hoverProgress};
    if(!initialized){Object.assign(pose,{x:sourceX,y:anchorY,z:sourceZ,scale:sourceScale,yaw:initialYaw,pitch:0});initialized=true}
    for(const key of Object.keys(pose) as (keyof typeof pose)[])spring(key,destination[key],dt,state.current.inspecting?9.5:16);
    root.position.set(pose.x,pose.y,pose.z);root.scale.setScalar(pose.scale*(1+zoom*.12));root.rotation.set(pose.pitch,pose.yaw,.042*lift*inspectionMix);key.intensity=2+.65*inspectionMix;
-   ground.visible=state.current.inspecting;ring.visible=state.current.inspecting;ground.position.y=-H/2*pose.scale-.15;ring.position.y=ground.position.y+.02;ring.scale.setScalar(pose.scale);
+   contact.visible=state.current.inspecting;
+   contact.position.set(pose.x-open*W/2*pose.scale,pose.y-H*.51*pose.scale,-.68);
+   contact.scale.set(W*(1.4+open)*pose.scale,.26*pose.scale,1);
    if(++frame%4===0){canvas.dataset.page=String(settled);canvas.dataset.turn=from===to?'idle':turnProgress.toFixed(2);canvas.dataset.phase=retreat?'returning':state.current.inspecting?(target?(Math.abs(open-1)<.015?'open':'opening'):'cover'):'hover';canvas.dataset.rotation=root.rotation.y.toFixed(3);canvas.dataset.open=open.toFixed(3)}
    renderer.render(scene,camera);
    if(!state.current.inspecting&&hoverHit.current){const box=new THREE.Box3().setFromObject(root);let left=Infinity,top=Infinity,right=-Infinity,bottom=-Infinity;for(const x of [box.min.x,box.max.x])for(const y of [box.min.y,box.max.y])for(const z of [box.min.z,box.max.z]){const p=new THREE.Vector3(x,y,z).project(camera),sx=(p.x+1)*width/2,sy=(1-p.y)*height/2;left=Math.min(left,sx);right=Math.max(right,sx);top=Math.min(top,sy);bottom=Math.max(bottom,sy)}Object.assign(hoverHit.current.style,{left:(left-10)+'px',top:(top-10)+'px',width:(right-left+20)+'px',height:(bottom-top+20)+'px'})}

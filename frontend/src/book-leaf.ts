@@ -41,3 +41,37 @@ export function createLeaf(width: number, height: number) {
   }
   return {group, front, back, bend};
 }
+
+// Build a stack from the surface of its board up to a cambered sheet. The
+// side walls share the same profile as the printed face, so the paper edges
+// meet the board and printed face even when the camera views them obliquely.
+export function paperArch(u: number) {
+  return .175 * Math.sin(Math.PI * u) * Math.exp(-1.1 * u);
+}
+
+export function createPageStack(width: number, height: number, left: boolean) {
+  const geometry = new THREE.BoxGeometry(width, height, 1, 36, 2, 1);
+  geometry.translate(width / 2, 0, 0);
+  const positions = geometry.attributes.position;
+  const mix = Array.from({length: positions.count}, (_, i) => positions.getZ(i) + .5);
+  const arch = Array.from({length: positions.count}, (_, i) => paperArch(positions.getX(i) / width));
+  let lastOpen = -1, lastFraction = -1;
+
+  function update(open: number, fraction: number) {
+    if (Math.abs(lastOpen-open)<.0001 && Math.abs(lastFraction-fraction)<.0001) return;
+    lastOpen=open;lastFraction=fraction;
+    const leftEdges=.054 + .048*fraction;
+    for(let i=0;i<positions.count;i++){
+      const u=positions.getX(i)/width;
+      const depth=left ?
+        .015+(leftEdges*u+arch[i])*open :
+        .22+(arch[i]-leftEdges*u)*open;
+      positions.setZ(i,left ? -.025-depth*(1-mix[i]) : -.11+depth*mix[i]);
+    }
+    positions.needsUpdate=true;
+    geometry.computeVertexNormals();
+    geometry.computeBoundingSphere();
+    geometry.computeBoundingBox();
+  }
+  return {geometry, update};
+}
