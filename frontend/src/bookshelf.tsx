@@ -2,15 +2,17 @@ import {lazy,Suspense,useEffect,useLayoutEffect,useRef,useState, type CSSPropert
 import './bookshelf.css';
 import {spineLabel} from './book-labels';
 import './book-scene3d.css';
+import {bindingColor} from './book-binding';
+import {walnutVeneer} from './shelf-wood';
+import './reading-room.css';
 const loadBookScene=()=>import('./book-scene3d');
 const BookScene3D=lazy(loadBookScene);
 export type BookOrigin={x:number;y:number;width:number;height:number;face:'spine'|'cover'};
 export type Book={id:string;title:string;author:string;source:string;cover:string;spine?:{url:string;source:string;width:number;height:number;points:[number,number][]}|null;sample:boolean;status:string;category:string;comment:string;comment_source:string;recommendation:string;note_tags?:string[]};
 type Inventory={books:Book[];selected:string[];revision:string;complete?:boolean};
 type Api=(path:string,method?:string,body?:unknown)=>Promise<any>;
-const colors=['#81533b','#465e58','#6f6244','#4b536d','#735052','#47616a','#6b654f'];
 function shelfWidth(book:Book,index:number){
- const height=218+(index*17)%46;if(!book.spine)return 54;
+ const height=202+(index*17)%48;if(!book.spine)return 32+(index*7)%16;
  const p=book.spine.points;const distance=(a:number,b:number)=>Math.hypot(p[a][0]-p[b][0],p[a][1]-p[b][1]);
  return Math.max(22,Math.min(42,height*(distance(0,1)+distance(2,3))/(distance(0,3)+distance(1,2))));
 }
@@ -29,19 +31,22 @@ export function Bookshelf({books,ask,preview=false,selection,clearSelection,enab
  const [query,setQuery]=useState(''); const [filter,setFilter]=useState('all');const [active,setActive]=useState<Book|null>(null);const [opened,setOpened]=useState(false);const [returning,setReturning]=useState(false);const deferredAsk=useRef<null|(()=>void)>(null);const [origin,setOrigin]=useState<BookOrigin>({x:0,y:100,width:30,height:240,face:'spine'});const [inspecting,setInspecting]=useState(false);const [renderedId,setRenderedId]=useState<string|null>(null);const hoverTimer=useRef<ReturnType<typeof setTimeout>|null>(null);const modal=useRef(false);const restoringFocus=useRef(false);const activeRef=useRef(active);activeRef.current=active;const inspectRef=useRef(inspecting);inspectRef.current=inspecting;const dialog=useRef<HTMLDialogElement>(null);const opener=useRef<HTMLButtonElement|null>(null);
  useEffect(()=>{if(selection){setQuery('');setFilter('all')}},[selection]);
  const visible=books.filter(b=>(!selection||selection.includes(b.id))&&(filter==='all'||b.category===filter)&&(b.title+' '+b.author+' '+b.comment+' '+(b.note_tags||[]).join(' ')).toLowerCase().includes(query.toLowerCase()));
+ const room=useRef<HTMLElement>(null);
+ const [wood,setWood]=useState('none');
+ useEffect(()=>{if(enabled&&visible.length)setWood(walnutVeneer())},[enabled,visible.length]);
  const shelfCase=useRef<HTMLDivElement>(null);const [shelfWidthPx,setShelfWidthPx]=useState(1020);
  useLayoutEffect(()=>{const el=shelfCase.current;if(!el)return;const measure=()=>{const style=getComputedStyle(el);setShelfWidthPx(el.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight))};measure();const observer=new ResizeObserver(measure);observer.observe(el);return()=>observer.disconnect()},[view,visible.length]);
- const shelfCapacity=Math.max(4,Math.min(30,Math.floor(shelfWidthPx/34)));
+ const shelfCapacity=Math.max(3,1+Math.floor((shelfWidthPx-(shelfWidthPx<520?116:180)-28)/43));
  const shelfCount=Math.max(1,Math.ceil(visible.length/shelfCapacity));
  const shelfRows=Array.from({length:shelfCount},(_,row)=>{const base=Math.floor(visible.length/shelfCount),extra=visible.length%shelfCount,start=row*base+Math.min(row,extra);return {start,books:visible.slice(start,start+base+(row<extra?1:0))}});
  useLayoutEffect(()=>{if(active&&view==='spines'){const current=shelfCase.current?.querySelector<HTMLButtonElement>('[data-book-id="'+active.id+'"]');if(current)opener.current=current}},[shelfCount,active?.id,view]);
  useLayoutEffect(()=>{const el=dialog.current;if(!el)return;if(!active){if(el.open)el.close();modal.current=false;return}if(el.open&&modal.current!==inspecting)el.close();if(!el.open){if(inspecting)el.showModal();else el.setAttribute('open','')}modal.current=inspecting},[active,inspecting]);
  useEffect(()=>()=>{if(hoverTimer.current)clearTimeout(hoverTimer.current)},[]);
  // Warm the renderer and only the jackets near the viewport, before a pointer reaches them.
- useEffect(()=>{const timer=setTimeout(()=>{void loadBookScene()},500);const seen=new Set<string>();const queue:string[]=[];let pending=0,stopped=false;const drain=()=>{while(pending<2&&queue.length&&!stopped){const url=queue.shift()!;pending++;fetch(url).catch(()=>{}).finally(()=>{pending--;drain()})}};const observer=new IntersectionObserver(entries=>{for(const e of entries)if(e.isIntersecting){const id=(e.target as HTMLElement).dataset.bookId;if(id&&!seen.has(id)){seen.add(id);queue.push('/api/bookshelf/cover/'+id);drain()}observer.unobserve(e.target)}},{rootMargin:'200px'});if(!preview)document.querySelectorAll<HTMLElement>('.book-spine[data-has-cover="true"]').forEach(el=>observer.observe(el));return()=>{clearTimeout(timer);observer.disconnect();stopped=true}},[books,view,preview]);
+ useEffect(()=>{if(!enabled)return;const timer=setTimeout(()=>{void loadBookScene()},500);const seen=new Set<string>();const queue:string[]=[];let pending=0,stopped=false;const drain=()=>{while(pending<2&&queue.length&&!stopped){const url=queue.shift()!;pending++;fetch(url).catch(()=>{}).finally(()=>{pending--;drain()})}};const observer=new IntersectionObserver(entries=>{for(const e of entries)if(e.isIntersecting){const id=(e.target as HTMLElement).dataset.bookId;if(id&&!seen.has(id)){seen.add(id);queue.push('/api/bookshelf/cover/'+id);drain()}observer.unobserve(e.target)}},{rootMargin:'200px'});if(!preview)room.current?.querySelectorAll<HTMLElement>('.book-spine[data-has-cover="true"]').forEach(el=>observer.observe(el));return()=>{clearTimeout(timer);observer.disconnect();stopped=true}},[books,view,preview,enabled]);
  const clearHover=()=>{if(hoverTimer.current){clearTimeout(hoverTimer.current);hoverTimer.current=null}};
- const begin=(book:Book,el:HTMLButtonElement,inspect=false)=>{clearHover();if(inspectRef.current&&!inspect)return;const same=activeRef.current?.id===book.id;opener.current=el;if(!same){const rect=el.getBoundingClientRect();setOrigin({x:rect.left+rect.width/2,y:rect.top+rect.height/2,width:rect.width,height:rect.height,face:view==='covers'?'cover':'spine'});setRenderedId(null);setOpened(false)}setReturning(false);setActive(book);if(inspect)setInspecting(true);void loadBookScene()};
- useEffect(()=>{if(preview)return;const handler=(event:Event)=>{const id=(event as CustomEvent).detail?.book_id;const book=books.find(b=>b.id===id);const element=Array.from(document.querySelectorAll<HTMLButtonElement>('[data-book-id]')).find(el=>el.dataset.bookId===id);if(!enabled||!book||!element){window.dispatchEvent(new CustomEvent('portfolio:book-opened',{detail:{book_id:id,error:'Published book is not visible on the shelf.'}}));return}begin(book,element,true);setOpened(true)};window.addEventListener('portfolio:open-book',handler);return()=>window.removeEventListener('portfolio:open-book',handler)},[books,enabled,view,selection]);
+ const begin=(book:Book,el:HTMLButtonElement,inspect=false)=>{clearHover();if(inspectRef.current&&!inspect)return;const same=activeRef.current?.id===book.id;opener.current=el;if(!same){const rect=(el.querySelector('.gallery-jacket')??el).getBoundingClientRect();setOrigin({x:rect.left+rect.width/2,y:rect.top+rect.height/2,width:rect.width,height:rect.height,face:el.dataset.face==='cover'?'cover':'spine'});setRenderedId(null);setOpened(false)}setReturning(false);setActive(book);if(inspect)setInspecting(true);void loadBookScene()};
+ useEffect(()=>{if(preview)return;const handler=(event:Event)=>{const id=(event as CustomEvent).detail?.book_id;const book=books.find(b=>b.id===id);const element=Array.from(room.current?.querySelectorAll<HTMLButtonElement>('[data-book-id]')??[]).find(el=>el.dataset.bookId===id);if(!enabled||!book||!element){window.dispatchEvent(new CustomEvent('portfolio:book-opened',{detail:{book_id:id,error:'Published book is not visible on the shelf.'}}));return}begin(book,element,true);setOpened(true)};window.addEventListener('portfolio:open-book',handler);return()=>window.removeEventListener('portfolio:open-book',handler)},[books,enabled,view,selection]);
  useEffect(()=>{if(active&&inspecting&&dialog.current?.open)window.dispatchEvent(new CustomEvent('portfolio:book-opened',{detail:{book_id:active.id}}))},[active,inspecting]);
  const keepHover=()=>{clearHover();if(!inspectRef.current)setReturning(false)};
  const leave=()=>{clearHover();if(opener.current===document.activeElement&&opener.current?.matches(':focus-visible'))return;if(!inspectRef.current)hoverTimer.current=setTimeout(()=>{if(!inspectRef.current)setReturning(true)},110)};
@@ -49,16 +54,61 @@ export function Bookshelf({books,ask,preview=false,selection,clearSelection,enab
  const close=()=>{clearHover();if(active)setReturning(true);else finishClose()};
  const askActive=()=>{if(!active)return;const title=active.title;deferredAsk.current=()=>ask('What has the owner said about “'+title+'”? Use the recorded reading notes and attribute any comments. If no personal comment is recorded, say so.');close()};
  useEffect(()=>{if(!enabled)finishClose()},[enabled]);
- return <section id={preview?undefined:'reading-room'} className="reading-room" aria-label={preview?'Private bookshelf preview':'Bookshelf'}><div className="shelf-heading"><div><span className="eyebrow accent">{preview?'OWNER PREVIEW · NOT PUBLIC':'THE MARGINALIA'}</span><h2>A shelf of <em>other worlds.</em></h2><p>Ideas to work with. Stories to get lost in.</p></div><span className="shelf-count">{books.length.toString().padStart(2,'0')}<small>ON THE SHELF</small></span></div>
- {selection&&<div className="shelf-agent-selection" role="status"><div>The agent pulled out {selection?.length||0} {selection?.length===1?'book':'books'}.<small>A temporary selection from your published shelf.</small></div><button onClick={clearSelection}>Back to all books ↺</button></div>}
- <div className="shelf-view-switch" role="group" aria-label="Bookshelf view">{(['spines','covers'] as const).map(v=><button key={v} aria-pressed={view===v} onClick={()=>{setView(v);localStorage.setItem('afterhours-shelf-view',v)}}><span aria-hidden="true">{v==='spines'?'▥':'▦'}</span> {v==='spines'?'Spines':'Covers'}</button>)}</div>
- <div className="shelf-tools"><div className="shelf-filters" aria-label="Book categories">{['all','work','personal'].map(f=><button key={f} aria-pressed={filter===f} onClick={()=>setFilter(f)}>{f==='all'?'All books':f==='work'?'Work & ideas':'Other worlds'}</button>)}</div><label className="shelf-search"><span className="sr-only">Search books</span><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Find a title, author, or note…"/></label></div>
- {visible.length&&view==='covers'?<><p className="shelf-hint">Every cover, a way in. Select a book, then open it to read the margins.</p><div className="cover-gallery">{visible.map((b,i)=><button className={'gallery-book '+(renderedId===b.id?'book-away':'')} key={b.id} aria-label={'Inspect '+b.title+' by '+b.author} onPointerEnter={e=>{if(e.pointerType==='mouse'&&!document.activeElement?.matches('.book-spine:focus-visible,.gallery-book:focus-visible'))begin(b,e.currentTarget)}} onPointerLeave={leave} onFocus={e=>{if(!restoringFocus.current&&e.currentTarget.matches(':focus-visible'))begin(b,e.currentTarget)}} onBlur={leave} onClick={e=>begin(b,e.currentTarget,true)} style={{'--book-color':colors[i%colors.length]} as CSSProperties}><span className="gallery-jacket"><span className="gallery-fallback"><strong>{b.title}</strong><small>{b.author}</small></span>{b.cover&&<img src={preview?b.cover:'/api/bookshelf/cover/'+b.id} alt={'Cover of '+b.title} loading="lazy" referrerPolicy="no-referrer" onError={e=>{e.currentTarget.style.display='none'}}/>}<span className="gallery-gloss"/>{b.sample&&<span className="gallery-sample">Sample</span>}</span><strong>{b.title.split(':')[0]}</strong><small>{b.author}</small></button>)}</div></>:visible.length?<><p className="shelf-hint">Pull out a book. Open it to read the margins. <span>Select a spine → reveal the cover → open the book</span></p><div className="shelf-case" ref={shelfCase} data-shelf-capacity={shelfCapacity}>{shelfRows.map(({books:rowBooks,start},row)=><div className="shelf-row" key={row}><div className="shelf-books" style={{'--row-gap-total':(rowBooks.length-1)*3+'px'} as CSSProperties}>{rowBooks.map((b,i)=><button key={b.id} data-book-id={b.id} data-has-cover={!!b.cover} className={'book-spine '+(renderedId===b.id?'book-away ':'')+(b.spine?'has-real-spine':'')} style={{'--spine-label-length':spineLabel(b.title).length,'--book-share':shelfWidth(b,i)/rowBooks.reduce((sum,item,index)=>sum+shelfWidth(item,index),0),'--packed-natural-width':shelfWidth(b,i)+'px','--book-color':colors[(start+i)%colors.length],'--book-height':(218+(i*17)%46)+'px','--spine-ratio':b.spine?((Math.hypot(b.spine.points[1][0]-b.spine.points[0][0],b.spine.points[1][1]-b.spine.points[0][1])+Math.hypot(b.spine.points[2][0]-b.spine.points[3][0],b.spine.points[2][1]-b.spine.points[3][1]))/(Math.hypot(b.spine.points[3][0]-b.spine.points[0][0],b.spine.points[3][1]-b.spine.points[0][1])+Math.hypot(b.spine.points[2][0]-b.spine.points[1][0],b.spine.points[2][1]-b.spine.points[1][1]))):.2,'--cover-art':b.cover?'url("'+b.cover+'")':'none'} as CSSProperties} onPointerEnter={e=>{if(e.pointerType==='mouse'&&!document.activeElement?.matches('.book-spine:focus-visible,.gallery-book:focus-visible'))begin(b,e.currentTarget)}} onPointerLeave={leave} onFocus={e=>{if(!restoringFocus.current&&e.currentTarget.matches(':focus-visible'))begin(b,e.currentTarget)}} onBlur={leave} onClick={e=>begin(b,e.currentTarget,true)} aria-label={'Inspect '+b.title+' by '+b.author}>{b.spine&&<SpinePhoto spine={b.spine}/>}<span className="shelf-cover-plane" aria-hidden="true">{b.cover&&<img src={preview?b.cover:'/api/bookshelf/cover/'+b.id} alt="" loading="lazy" referrerPolicy="no-referrer"/>}<span>{b.title}</span></span><span className="spine-number">{String(start+i+1).padStart(2,'0')}</span><strong>{spineLabel(b.title)}</strong><small>{b.author.split(';')[0]}</small><span className="spine-mark">{b.sample?'S':'↗'}</span></button>)}</div><div className="shelf-plank"/></div>)}</div></>:<div className="shelf-empty"><span>↗</span><h3>{books.length?'No matching books.':'The next chapter is being chosen.'}</h3><p>{books.length?'Try another title, author, or category.':'A personal reading room, curated one book at a time.'}</p></div>}
- <p className="shelf-footnote">A place on this shelf is not a claim of having read, finished, or recommended a book. Samples are labeled.</p>
+ const controls=(book:Book)=>({
+   'data-book-id':book.id,
+   'aria-label':'Inspect '+book.title+' by '+book.author,
+   onPointerEnter:(event:React.PointerEvent<HTMLButtonElement>)=>{
+     if(event.pointerType!=='mouse'||inspecting)return;
+     const el=event.currentTarget;
+     clearHover();
+     hoverTimer.current=setTimeout(()=>{if(el.isConnected&&el.matches(':hover'))begin(book,el)},210);
+   },
+   onPointerLeave:leave,
+   onFocus:(event:React.FocusEvent<HTMLButtonElement>)=>{if(!restoringFocus.current&&event.currentTarget.matches(':focus-visible'))begin(book,event.currentTarget)},
+   onBlur:leave,
+   onClick:(event:React.MouseEvent<HTMLButtonElement>)=>begin(book,event.currentTarget,true),
+ });
+ const jacket=(book:Book)=><>
+   <span className="cloth-jacket" aria-hidden="true"><strong>{spineLabel(book.title)}</strong><i/><small>{book.author}</small></span>
+   {book.cover&&<img src={preview?book.cover:'/api/bookshelf/cover/'+book.id} loading="lazy" alt="" referrerPolicy="no-referrer" onError={e=>{e.currentTarget.hidden=true}}/>}
+ </>;
+ return <section ref={room} id={preview?undefined:'reading-room'} className="reading-room library-room" style={{'--walnut':wood} as CSSProperties} aria-label={preview?'Private bookshelf preview':'Bookshelf'}>
+ <header className="library-title"><div>{preview&&<span className="eyebrow">Private shelf preview</span>}<h2>The reading <em>room.</em></h2><p>Choose a book to explore its cover and reading notes.</p></div>
+ <span className="library-count">{books.length} {books.length===1?'volume':'volumes'}</span></header>
+ {selection&&<div className="shelf-agent-selection" role="status"><span>{selection.length} {selection.length===1?'book':'books'} selected by the agent</span><button onClick={clearSelection}>Show all books</button></div>}
+ <div className="library-toolbar">
+   <div className="shelf-filters" role="group" aria-label="Book categories">{['all','work','personal'].map(f=><button key={f} aria-pressed={filter===f} onClick={()=>setFilter(f)}>{f==='all'?'All books':f==='work'?'Work & ideas':'Other worlds'}</button>)}</div>
+   <label className="library-search"><span aria-hidden="true"/><input type="search" aria-label="Search books" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search the shelf"/></label>
+   <div className="library-views" role="group" aria-label="Bookshelf view">{(['spines','covers'] as const).map(v=><button key={v} title={v==='spines'?'Shelf view':'Cover gallery'} aria-label={v==='spines'?'Spines':'Covers'} aria-pressed={view===v} onClick={()=>{setView(v);localStorage.setItem('afterhours-shelf-view',v)}}><i className={'view-icon '+v} aria-hidden="true"/></button>)}</div>
+ </div>
+ {visible.length===0?<div className="shelf-empty"><h3>{books.length?'No matching books':'The shelf is empty'}</h3>{books.length>0&&<p>Try another title, author, or category.</p>}</div>
+ :view==='covers'?<div className="cover-gallery">{visible.map(b=><button {...controls(b)} data-face="cover" className={'gallery-book '+(renderedId===b.id?'book-away':'')} key={b.id} style={{'--book-color':bindingColor(b.id)} as CSSProperties}>
+   <span className="gallery-jacket">{jacket(b)}<span className="gallery-gloss"/>{b.sample&&<span className="gallery-sample">Sample</span>}</span><strong>{b.title.split(':')[0]}</strong><small>{b.author}</small></button>)}</div>
+ :<div className="shelf-case walnut-case" ref={shelfCase} data-shelf-capacity={shelfCapacity}>
+   {shelfRows.map(({books:rowBooks,start},row)=>{
+     // Show one jacket alongside the spines. Keep the catalog and keyboard order identical.
+     const reverse=row%2===1;
+     const firstJacket=(reverse?[...rowBooks].reverse():rowBooks).findIndex(b=>Boolean(b.cover));
+     const front=reverse?rowBooks.length-1-Math.max(0,firstJacket):Math.max(0,firstJacket);
+     return <div className="shelf-row walnut-bay" key={row}>
+       <span className="case-light" aria-hidden="true"/><div className="shelf-books">{rowBooks.map((b,i)=>{
+         const face=i===front;
+         const style={'--book-color':bindingColor(b.id),'--book-height':(202+((start+i)*17)%48)+'px','--packed-natural-width':shelfWidth(b,i)+'px','--spine-label-length':Math.max(1,spineLabel(b.title).length)} as CSSProperties;
+         return <button {...controls(b)} data-has-cover={!!b.cover} data-face={face?'cover':'spine'} key={b.id} style={style}
+             className={(face?'display-book':'book-spine binding-'+i%3+(b.spine?' has-real-spine':''))+(renderedId===b.id?' book-away':'')}>
+           {face?<>{jacket(b)}{b.sample&&<span className="gallery-sample">Sample</span>}</>:<>{b.spine&&<SpinePhoto spine={b.spine}/>}
+           <span className="binding-bands" aria-hidden="true"/><strong>{spineLabel(b.title)}</strong><span className="binding-sign" aria-hidden="true">◇</span>{b.sample&&<span className="binding-sample">Sample</span>}</>}
+         </button>
+       })}</div>
+       <div className="shelf-plank"><span> {String(start+1).padStart(2,'0')} – {String(start+rowBooks.length).padStart(2,'0')} </span></div>
+     </div>
+   })}
+ </div>}
+ <p className="shelf-footnote">Reading status and recommendations are recorded inside each book. Samples are labeled.</p>
  <dialog ref={dialog} className={'book-dialog book-theatre continuous-theatre '+(inspecting?'is-inspecting ':'is-hovering ')+(opened?'is-open':'is-closed')} style={{'--pull-x':origin.x+'px','--pull-y':origin.y+'px'} as CSSProperties} aria-label={active?active.title+" — book details":"Book details"} onCancel={e=>{e.preventDefault();e.stopPropagation();close()}}>{active&&<>
- <div className="theatre-topline"><span className="eyebrow">{opened?'02 / IN THE MARGINS':'01 / OFF THE SHELF'}</span><button className="close-button" aria-label="Return book to shelf" onClick={close}>×</button></div>
- <Suspense fallback={<div className="book-scene-loading" role="status">Preparing the reading room…</div>}><BookScene3D book={active} opened={opened} returning={returning} inspecting={inspecting} origin={origin} getSourceRect={()=>opener.current?.getBoundingClientRect()??null} onPreviewEnter={keepHover} onPreviewLeave={leave} onInspect={()=>{if(opener.current)begin(active,opener.current,true)}} onReady={()=>setRenderedId(active.id)} onOpen={()=>setOpened(true)} onReturned={finishClose} onAsk={askActive}/></Suspense>
- <div className="theatre-controls"><p role="status">{returning?'Until the next chapter.':opened?'A few notes, between the covers.':'The cover first. The story behind it, inside.'}</p><button className="book-action" disabled={returning} onClick={()=>setOpened(!opened)}>{opened?'Close the book':'Open the book'} <span>{opened?'↶':'↗'}</span></button><button className="return-to-shelf" disabled={returning} onClick={close}>Return to shelf</button></div>
+ <div className="theatre-topline"><span className="eyebrow">{active.title}</span><button className="close-button" aria-label="Return book to shelf" onClick={close}>×</button></div>
+ <Suspense fallback={<div className="book-scene-loading" role="status">Preparing the reading room…</div>}><BookScene3D key={active.id} book={active} opened={opened} returning={returning} inspecting={inspecting} origin={origin} getSourceRect={()=>(opener.current?.querySelector('.gallery-jacket')??opener.current)?.getBoundingClientRect()??null} onPreviewEnter={keepHover} onPreviewLeave={leave} onInspect={()=>{if(opener.current)begin(active,opener.current,true)}} onReady={()=>setRenderedId(active.id)} onOpen={()=>setOpened(true)} onReturned={finishClose} onAsk={askActive}/></Suspense>
+ <div className="theatre-controls"><button className="book-action" disabled={returning} onClick={()=>setOpened(!opened)}>{opened?'Close the book':'Open the book'} <span>{opened?'↶':'↗'}</span></button><button className="return-to-shelf" disabled={returning} onClick={close}>Return to shelf</button></div>
  </>}</dialog>
  </section>
 }

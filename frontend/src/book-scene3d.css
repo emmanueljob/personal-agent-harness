@@ -30,3 +30,75 @@
 .continuous-theatre.is-inspecting .theatre-topline,.continuous-theatre.is-inspecting .inspection-hud,.continuous-theatre.is-inspecting .theatre-controls{animation:inspection-controls-arrive .45s .15s both}
 @keyframes inspection-controls-arrive{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
 @media(prefers-reduced-motion:reduce){.continuous-theatre.is-inspecting .theatre-topline,.continuous-theatre.is-inspecting .inspection-hud,.continuous-theatre.is-inspecting .theatre-controls{animation:none}}
+
+/* The reader shares the walnut and brass tones of the case behind it. */
+.continuous-theatre.is-inspecting::backdrop {
+  background: radial-gradient(ellipse at 40% 30%, #583b248c, #140e09e8 74%);
+  backdrop-filter: blur(10px);
+  animation-name: reading-lamp-arrives;
+}
+@keyframes reading-lamp-arrives {
+  from {opacity: 0; backdrop-filter: blur(0)}
+  to {opacity: 1; backdrop-filter: blur(10px)}
+}
+.continuous-theatre.is-inspecting .three-book-stage::before {
+  display: block;
+  inset: 0;
+  background: radial-gradient(ellipse at 40% 33%, #c18a4826, transparent 58%);
+}
+.continuous-theatre .folio-nav {
+  position: absolute;
+  z-index: 5;
+  bottom: max(14svh, 112px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 3px;
+  background: #201910ef;
+  color: #f4e9d5;
+  border: 1px solid #a98b606b;
+  border-radius: 30px;
+  box-shadow: 0 5px 16px #0004;
+  pointer-events: auto;
+}
+.folio-nav button {
+  width: 40px; height: 38px; border-radius: 50%; background: transparent;
+  color: inherit; border: 0; font: 21px Georgia, serif; padding: 0;
+}
+.folio-nav button:enabled:hover {background: #c9a16730}
+.folio-nav button:disabled {opacity: .28}
+.folio-nav span {display:flex; gap:10px; align-items:baseline; white-space:nowrap; font: 17px/1.2 Georgia, serif}
+.folio-nav small {font: 10px var(--mono); color: #d6c4a4}
+.continuous-theatre .inspection-hud {
+  bottom: max(6svh, 34px); left: auto; right: clamp(16px,3vw,48px);
+  flex-flow: column; align-items: flex-end; gap: 5px; border: 0; padding: 0;
+}
+.continuous-theatre .inspection-hud>span {color: #f0e6d2; font-size:10px}
+.continuous-theatre .inspection-tools button {background:#241b12eb; color:#f2e4c9; border-color:#aa916450; border-radius:4px}
+.continuous-theatre .fallback-jacket {position:absolute; left:50%; top:43%; transform:translate(-50%,-50%); margin:0; pointer-events:auto}
+.continuous-theatre .game-fallback .readable-book-notes {
+  top: 40%; left: 50%; right: auto; bottom: auto; transform: translate(-50%,-50%);
+  max-height: 52svh; width: min(610px,88vw);
+}
+.continuous-theatre .readable-book-notes[hidden] {display:none}
+@media(max-width:850px), (max-height:640px) {
+  .continuous-theatre .inspection-hud {bottom: auto; top: 68px; left: auto; right: 18px}
+  .continuous-theatre .inspection-hud>span {display:none}
+  .continuous-theatre .inspection-tools {gap:1px}
+  .continuous-theatre .folio-nav {bottom:max(13svh,78px)}
+  .continuous-theatre .readable-book-notes {inset:115px 16px auto; width:calc(100% - 32px); max-height:calc(100svh - 265px)}
+}
+@media(max-height:500px) {
+  .continuous-theatre .folio-nav {bottom:8px;left:16px;transform:none}
+  .continuous-theatre .theatre-controls {bottom:8px;left:auto;right:16px}
+  .continuous-theatre .theatre-controls>p {display:none}
+  .continuous-theatre .readable-book-notes {top:54px;max-height:calc(100svh - 130px)}
+}
+@media(prefers-reduced-motion:reduce) {
+  .continuous-theatre.is-inspecting::backdrop {animation:none}
+}
+/* Only the actual footer buttons take clicks over the full-viewport canvas. */
+.continuous-theatre .theatre-controls { pointer-events:none; }
+.continuous-theatre .theatre-controls>button { pointer-events:auto; }
